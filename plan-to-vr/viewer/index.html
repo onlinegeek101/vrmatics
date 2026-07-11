@@ -99,6 +99,9 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const IN2M = 0.0254;                 // inches -> meters (1 unit = 1 meter)
 const EYE = 1.6;                     // standing eye height (m)
@@ -106,16 +109,35 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 // ---------------------------------------------------------------- renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // cap for mobile GPUs
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // filmic response like a camera
+renderer.toneMappingExposure = 0.9;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1f2b);
+
+// image-based lighting from a procedural studio room (three.js RoomEnvironment)
+// - gives PBR materials real reflections without any HDR asset
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const ENV_INTENSITY = 0.35;   // r160: env strength is per-material
+
+// procedural daytime sky (Preetham model via the three.js Sky addon),
+// with the sun placed where the shadow-casting light is
+const SUN_DIR = new THREE.Vector3(6, 12, 4).normalize();
+const sky = new Sky();
+sky.scale.setScalar(4000);
+sky.material.uniforms.turbidity.value = 4;
+sky.material.uniforms.rayleigh.value = 1.2;
+sky.material.uniforms.mieCoefficient.value = 0.004;
+sky.material.uniforms.mieDirectionalG.value = 0.85;
+sky.material.uniforms.sunPosition.value.copy(SUN_DIR);
+scene.add(sky);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
 
@@ -185,18 +207,56 @@ function makeWoodTexture() {
   return tex;
 }
 
+function std(params) {
+  return new THREE.MeshStandardMaterial({ envMapIntensity: ENV_INTENSITY, ...params });
+}
+
+function makeGrassTexture() {
+  // mottled lawn: layered green speckle noise
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7a9455';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 9000; i++) {
+    g.fillStyle = `hsla(${85 + Math.random() * 32}, ${32 + Math.random() * 24}%, ${38 + Math.random() * 22}%, 0.5)`;
+    g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(60, 60);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 const floorTex = makeWoodTexture();
-const wallMat = new THREE.MeshStandardMaterial({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
-const trimMat = new THREE.MeshStandardMaterial({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
-const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
-const ceilMat = new THREE.MeshStandardMaterial({ color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const wallMat = std({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
+const trimMat = std({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
+const floorMat = std({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
+const ceilMat = std({ color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const glassMat = new THREE.MeshStandardMaterial({
+  color: 0xcfe4ec, roughness: 0.05, metalness: 0.0,
+  transparent: true, opacity: 0.22, envMapIntensity: 1.2, side: THREE.DoubleSide,
+});
+const doorMat = std({ color: 0xf7f5ef, roughness: 0.4 });
 
 // fixture stand-ins keyed by what the block name says they are
-const applianceMat = new THREE.MeshStandardMaterial({ color: 0xb9bdc1, roughness: 0.35, metalness: 0.65 });
-const porcelainMat = new THREE.MeshStandardMaterial({ color: 0xf4f6f6, roughness: 0.22, metalness: 0.0 });
-const fabricMat = new THREE.MeshStandardMaterial({ color: 0x8d7f6d, roughness: 0.95, metalness: 0.0 });
-const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
-const neutralMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
+const applianceMat = std({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.75 });
+const applianceDarkMat = std({ color: 0x2b2f33, roughness: 0.35, metalness: 0.4 });
+const porcelainMat = std({ color: 0xf4f6f6, roughness: 0.18, metalness: 0.0 });
+const counterMat = std({ color: 0xe8e4da, roughness: 0.35, metalness: 0.0 });
+const fabricMat = std({ color: 0x8d7f6d, roughness: 0.95, metalness: 0.0 });
+const woodMat = std({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
+const neutralMat = std({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
+
+// lawn the house sits on
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(90, 48).rotateX(-Math.PI / 2),
+  std({ map: makeGrassTexture(), color: 0xa8bd85, roughness: 1.0 })
+);
+ground.position.y = -0.025;
+ground.receiveShadow = true;
+scene.add(ground);
 
 const FIXTURE_MATS = [
   [/REF|WASHER|DRYER|RANGE|STOVE|CKTOP|OVEN|DW/, applianceMat],
@@ -210,9 +270,83 @@ function fixtureMaterial(name) {
   return neutralMat;
 }
 
+// Build a compound stand-in for a fixture from primitives - recognizable
+// silhouettes (tank + bowl, drum door, burners, counter + basin) rather
+// than featureless boxes. All local: floor at y=0, front toward +z.
+function buildFixture(f) {
+  const w = f.size[0] * IN2M, d = f.size[1] * IN2M, h = (f.height || 30) * IN2M;
+  const name = (f.name || '').split('$').pop().toUpperCase();
+  const g = new THREE.Group();
+  const add = (geo, mat, x, y, z) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  const rbox = (bw, bh, bd, mat, x, y, z, r = 0.02) =>
+    add(new RoundedBoxGeometry(bw, bh, bd, 3, Math.min(r, bw / 3, bh / 3, bd / 3)), mat, x, y, z);
+
+  if (/TOILET|WC/.test(name)) {
+    const tankD = d * 0.3;
+    rbox(w * 0.62, h * 1.9, tankD, porcelainMat, 0, h * 0.95, -(d - tankD) / 2);   // tank
+    const bowl = add(new THREE.CylinderGeometry(w * 0.31, w * 0.26, h * 0.55, 20),
+      porcelainMat, 0, h * 0.7, d * 0.12);
+    bowl.scale.z = (d * 0.7) / (w * 0.62);                                          // oval bowl
+    rbox(w * 0.6, h * 0.12, d * 0.62, porcelainMat, 0, h * 0.99, d * 0.08, 0.015);  // seat
+  } else if (/TUB|BATH/.test(name)) {
+    rbox(w, h, d, porcelainMat, 0, h / 2, 0, 0.04);
+    add(new THREE.BoxGeometry(w * 0.78, h * 0.25, d * 0.72),
+      std({ color: 0xd9e4e8, roughness: 0.15, envMapIntensity: ENV_INTENSITY }),
+      0, h * 0.92, 0);                                                              // basin inset
+  } else if (/WASHER|DRYER/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.015);
+    const door = add(new THREE.CylinderGeometry(Math.min(w, h) * 0.32,
+      Math.min(w, h) * 0.32, 0.02, 24), applianceDarkMat, 0, h * 0.55, d / 2);
+    door.rotation.x = Math.PI / 2;
+    rbox(w * 0.9, h * 0.08, 0.02, applianceDarkMat, 0, h * 0.92, d / 2);            // control panel
+  } else if (/RANGE|STOVE|CKTOP|OVEN/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.015);
+    for (const [bx, bz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]]) {
+      const b = add(new THREE.CylinderGeometry(w * 0.12, w * 0.12, 0.012, 18),
+        applianceDarkMat, bx * w, h + 0.006, bz * d);
+    }
+  } else if (/REF/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.02);
+    rbox(0.015, h * 0.94, 0.015, applianceDarkMat, 0, h / 2, d / 2);                // door seam
+    rbox(0.02, h * 0.25, 0.05, applianceDarkMat, -w * 0.28, h * 0.55, d / 2);       // handle
+  } else if (/SINK|LAV|KIT|VANITY|ISLAND|COUNTER|CAB|CASE/.test(name)) {
+    rbox(w, h * 0.92, d, woodMat, 0, h * 0.46, 0, 0.01);                            // cabinet
+    rbox(w + 0.03, h * 0.06, d + 0.03, counterMat, 0, h * 0.97, 0, 0.008);          // countertop
+    if (/SINK|LAV|KIT/.test(name)) {
+      const basins = /DBL/.test(name) ? [-0.22, 0.22] : [0];
+      for (const bx of basins)
+        add(new THREE.BoxGeometry(w * (basins.length > 1 ? 0.34 : 0.55), 0.02, d * 0.55),
+          applianceDarkMat, bx * w, h * 1.001, 0);
+    }
+  } else if (/SOFA|COUCH/.test(name)) {
+    rbox(w, h * 0.45, d, fabricMat, 0, h * 0.225, 0, 0.04);                         // base
+    rbox(w, h * 0.55, d * 0.25, fabricMat, 0, h * 0.7, -d * 0.375, 0.04);           // back
+    rbox(w * 0.12, h * 0.65, d, fabricMat, -w * 0.44, h * 0.32, 0, 0.03);           // arms
+    rbox(w * 0.12, h * 0.65, d, fabricMat, w * 0.44, h * 0.32, 0, 0.03);
+  } else if (/BED/.test(name)) {
+    rbox(w, h * 0.55, d, woodMat, 0, h * 0.27, 0, 0.02);                            // frame
+    rbox(w * 0.96, h * 0.35, d * 0.96, std({ color: 0xf1efe8, roughness: 0.9, envMapIntensity: ENV_INTENSITY }),
+      0, h * 0.72, 0, 0.05);                                                        // mattress
+  } else if (/TABLE|DESK/.test(name)) {
+    rbox(w, 0.035, d, woodMat, 0, h - 0.018, 0, 0.008);                             // top
+    for (const [lx, lz] of [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]])
+      add(new THREE.BoxGeometry(0.05, h - 0.035, 0.05), woodMat, lx * w, (h - 0.035) / 2, lz * d);
+  } else {
+    rbox(w, h, d, fixtureMaterial(f.name || ''), 0, h / 2, 0, 0.02);
+  }
+  return g;
+}
+
 let planGroup = null;   // holds all generated geometry
 let ceiling = null;
 let fixtureGroup = null;
+let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
 
 // ---------------------------------------------------------------- geometry
 function clearPlan() {
@@ -221,6 +355,84 @@ function clearPlan() {
     planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   planGroup = null; ceiling = null; fixtureGroup = null;
+}
+
+// Axis-aligned box placed in wall-local terms: centered at `along` on the
+// centerline, pushed `out` along the wall normal, vertical span via yc/h.
+function boxOnWall(group, worldStart, dir, angle, along, len, yc, h, out, thick, mat) {
+  if (len <= 1e-4 || h <= 1e-4) return;
+  const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, h, thick), mat);
+  mesh.position.set(
+    worldStart.x + dir.x * along + nrm.x * out,
+    yc,
+    worldStart.z + dir.z * along + nrm.z * out
+  );
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+}
+
+// Dress an opening the way a finished house would: flat casing boards around
+// it on both faces, a glass pane + frame for windows, and a door leaf parked
+// open flat against the wall for doors.
+function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallLen) {
+  const CW = 3.5 * IN2M;       // casing width
+  const CT = 0.6 * IN2M;       // casing proudness
+  const mid = (lo + hi) / 2, w = hi - lo;
+  const head = Math.min(op.head, H);
+  const sill = op.sill;
+  const sideBase = sill > 0 ? sill - CW : 0;
+
+  for (const side of [1, -1]) {
+    const out = side * (depth / 2 + CT / 2);
+    // side casings
+    boxOnWall(group, worldStart, dir, angle, lo - CW / 2, CW,
+      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi + CW / 2, CW,
+      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+    // head casing
+    boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW,
+      head + CW / 2, CW, out, CT, trimMat);
+    if (sill > 0) {
+      // window stool: a small shelf protruding past the casings
+      boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW + 1 * IN2M,
+        sill - 0.4 * IN2M, 0.8 * IN2M, side * (depth / 2 + 0.75 * IN2M), 1.5 * IN2M, trimMat);
+    }
+  }
+
+  if (op.type === 'window') {
+    // frame lining the reveal + a center pane of glass
+    const FT = 1.5 * IN2M;
+    boxOnWall(group, worldStart, dir, angle, mid, w, sill + FT / 2, FT, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - FT / 2, FT, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, (sill + head) / 2, head - sill, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, (sill + head) / 2, head - sill, 0, depth * 0.6, trimMat);
+    if (w > 30 * IN2M) {  // center mullion on wide windows
+      boxOnWall(group, worldStart, dir, angle, mid, 1 * IN2M, (sill + head) / 2, head - sill, 0, depth * 0.4, trimMat);
+    }
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(w - 2 * FT, head - sill - 2 * FT, 0.25 * IN2M), glassMat);
+    glass.position.set(
+      worldStart.x + dir.x * mid, (sill + head) / 2, worldStart.z + dir.z * mid);
+    glass.rotation.y = angle;
+    group.add(glass);
+  }
+
+  if (op.type === 'door') {
+    // leaf parked open, flat against whichever side of the jamb has wall
+    const LT = 1.75 * IN2M;
+    const leafW = Math.min(w, 36 * IN2M);
+    let c = null;
+    if (lo - leafW >= 0) c = lo - leafW / 2;
+    else if (hi + leafW <= wallLen) c = hi + leafW / 2;
+    if (c !== null) {
+      boxOnWall(group, worldStart, dir, angle, c, leafW,
+        head / 2 - 0.5 * IN2M, head - 1 * IN2M,
+        depth / 2 + CT + LT / 2, LT, doorMat);
+    }
+  }
 }
 
 // Trim cross-section profiles, in inches, as [out-from-wall-face, up] pairs.
@@ -288,6 +500,7 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
 
 function buildPlan(plan) {
   clearPlan();
+  collisionSegs = [];
   const group = new THREE.Group();
   const walls = plan.walls || [];
   const openings = plan.openings || [];
@@ -330,21 +543,32 @@ function buildPlan(plan) {
         hi: (c + o.width / 2) * IN2M,
         sill: (o.sill || 0) * IN2M,
         head: Math.min((o.head || 80), w.height || 96) * IN2M,
+        type: o.type || 'opening',
       };
     }).sort((a, b) => a.lo - b.lo);
 
     const L = Lin * IN2M;
+    const solid = (a, b) => {   // blocked span -> collision segment (world XZ)
+      if (b - a < 0.01) return;
+      collisionSegs.push({
+        ax: worldStart.x + dir.x * a, az: worldStart.z + dir.z * a,
+        bx: worldStart.x + dir.x * b, bz: worldStart.z + dir.z * b,
+        hw: depth / 2 + 0.03,
+      });
+    };
     let cursor = 0;
     for (const op of ops) {
       const lo = Math.max(0, op.lo), hi = Math.min(L, op.hi);
       if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth, H); // solid
+      if (lo > cursor) solid(cursor, lo);
       // lintel above the opening
       if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
       // sill below a window
-      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H);
+      if (op.sill > 0) { addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H); solid(lo, hi); }
+      dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
     }
-    if (cursor < L) addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H);
+    if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
   });
 
   // floor slab - one texture tile per 4 ft so plank scale stays true
@@ -358,24 +582,23 @@ function buildPlan(plan) {
   // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
   fixtureGroup = new THREE.Group();
   for (const f of plan.fixtures || []) {
-    const fw = f.size[0] * IN2M, fd = f.size[1] * IN2M, fh = (f.height || 30) * IN2M;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), fixtureMaterial(f.name || ''));
+    const g = buildFixture(f);
     const pos = toWorld(f.center[0], f.center[1]);
-    mesh.position.set(pos.x, fh / 2, pos.z);
-    mesh.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    fixtureGroup.add(mesh);
+    g.position.set(pos.x, 0, pos.z);
+    g.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
+    fixtureGroup.add(g);
   }
   group.add(fixtureGroup);
 
-  // ceiling (toggle with C)
+  // roof/ceiling slab (toggle with C). It deliberately does NOT cast
+  // shadows, so sunlight still fills the interior - cheap fake skylighting;
+  // from outside it reads as a flat roof with a fascia edge.
   const H = ((walls[0] && walls[0].height) || 96) * IN2M;
-  ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), ceilMat);
-  ceiling.rotation.x = Math.PI / 2;
-  ceiling.position.y = H;
-  ceiling.visible = false;
-  lamp.intensity = 0;
+  ceiling = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
+  ceiling.position.y = H + 0.07;
+  ceiling.receiveShadow = true;
+  ceiling.visible = true;
+  lamp.intensity = 0.45;
   group.add(ceiling);
 
   scene.add(group);
@@ -425,7 +648,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyC' && ceiling) {
     ceiling.visible = !ceiling.visible;
-    lamp.intensity = ceiling.visible ? 1.6 : 0;
+    lamp.intensity = ceiling.visible ? 0.45 : 0;
   }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
 });
@@ -643,12 +866,41 @@ renderer.xr.addEventListener('sessionend', () => {
   if (!controls.isLocked) overlay.style.display = 'flex';
 });
 
+// ---------------------------------------------------------------- collision
+// classic circle-vs-segment push-out against the solid wall spans, so the
+// player can pass through doorways but not through walls or windows
+const PLAYER_R = 0.22;
+const _cpos = new THREE.Vector3();
+function resolveCollision() {
+  if (!collisionSegs.length) return;
+  camera.getWorldPosition(_cpos);
+  for (let iter = 0; iter < 2; iter++) {
+    for (const s of collisionSegs) {
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const len2 = dx * dx + dz * dz;
+      if (!len2) continue;
+      let t = ((_cpos.x - s.ax) * dx + (_cpos.z - s.az) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const ox = _cpos.x - (s.ax + t * dx), oz = _cpos.z - (s.az + t * dz);
+      const d = Math.hypot(ox, oz);
+      const min = s.hw + PLAYER_R;
+      if (d < min && d > 1e-6) {
+        const push = (min - d) / d;
+        _cpos.x += ox * push; _cpos.z += oz * push;
+        dolly.position.x += ox * push;
+        dolly.position.z += oz * push;
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   if (renderer.xr.isPresenting) handleVRInput();
   else desktopMove(dt);
+  resolveCollision();
   renderer.render(scene, camera);
 });
 

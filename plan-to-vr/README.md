@@ -227,14 +227,22 @@ importmap from a CDN, no build step. It:
 - dresses every wall with **programmatic trim**: a profiled 5½" baseboard
   and a cove crown molding, extruded along each wall piece on both faces —
   trim runs under windows and across door lintels automatically
+- dresses every opening: flat casing boards on both faces, a window stool,
+  glass panes in a frame (with a mullion on wide windows), and a door leaf
+  parked open against the wall
 - themed materials, all generated at runtime (no image assets): eggshell
   walls, semi-gloss white trim, an oak plank floor drawn onto a canvas
   texture (staggered boards, grain, seams), stainless appliances,
   porcelain plumbing, wood/fabric furniture — picked from block names
-- adds the floor slab, a ceiling (toggle **C** — a warm lamp follows the
-  player when the ceiling is on, since it blocks the sun), and furniture
-  stand-ins (toggle **F**)
-- warm hemisphere + directional light with soft shadows
+- fixtures are compound shapes, not boxes: washer/dryer drum doors, range
+  burners, counter + basin sinks, tank + bowl toilets, sofas with arms
+- sits the house on a lawn under a **procedural daytime sky** (three.js
+  `Sky`, Preetham model), with ACES filmic tone mapping and image-based
+  lighting from the three.js `RoomEnvironment` — no HDR assets
+- flat roof slab on by default (toggle **C**); it doesn't cast shadows, so
+  sunlight still fills the rooms; furniture toggles with **F**
+- **wall collision**: circle-vs-segment push-out against solid wall spans,
+  so you walk through doorways but not through walls or windows
 - desktop: PointerLockControls, WASD + mouse look
 - mobile/touch: 1-finger look, **2-finger pan** to move, **pinch** to walk
   forward/back, **long-press** to return to the start position
