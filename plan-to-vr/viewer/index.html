@@ -1,0 +1,418 @@
+<meta charset="utf-8">
+<title>Plan-to-VR Walkthrough</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #10121a; }
+  canvas { display: block; }
+
+  #hud {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    color: #dfe6f2; background: rgba(16,18,26,.72);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+    padding: 10px 12px; max-width: 320px; backdrop-filter: blur(6px);
+  }
+  #hud h1 { font-size: 13px; margin-bottom: 6px; color: #8fb7ff; }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .warn { margin-top: 6px; color: #ffcf6b; }
+  #hud .warn div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hud .keys { margin-top: 8px; color: #9aa4b8; }
+
+  #overlay {
+    position: fixed; inset: 0; z-index: 20; display: flex;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(10,12,18,.55); cursor: pointer;
+    font: 14px/1.6 system-ui, sans-serif; color: #eef2fa;
+  }
+  #overlay .card {
+    background: rgba(24,28,40,.9); border: 1px solid rgba(255,255,255,.14);
+    padding: 22px 28px; border-radius: 12px; max-width: 420px;
+  }
+  #overlay h2 { font-size: 18px; margin-bottom: 8px; }
+  #overlay small { color: #9aa4b8; }
+  #drop-hint {
+    position: fixed; bottom: 12px; left: 12px; z-index: 10;
+    font: 11px ui-monospace, monospace; color: #6b7488;
+  }
+  #err {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; text-align: center;
+    font: 14px system-ui, sans-serif; color: #ffb4b4; padding: 30px;
+  }
+</style>
+
+<div id="hud" hidden>
+  <h1>Plan-to-VR</h1>
+  <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
+  <div class="row"><span>openings</span><span id="hud-openings">0</span></div>
+  <div class="warn" id="hud-warn"></div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · drag-drop a plan.json</div>
+</div>
+
+<div id="drop-hint">drop a plan.json anywhere to load it</div>
+
+<div id="overlay">
+  <div class="card">
+    <h2>Click to enter walkthrough</h2>
+    <div>Move with <b>WASD</b>, look with the mouse, press <b>C</b> for ceiling.</div>
+    <small>Or tap <b>Enter VR</b> (bottom of screen) on a headset.</small>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+const IN2M = 0.0254;                 // inches -> meters (1 unit = 1 meter)
+const EYE = 1.6;                     // standing eye height (m)
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+// ---------------------------------------------------------------- renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1f2b);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
+
+// player rig: dolly holds the camera so VR teleport/turn move the whole player
+const dolly = new THREE.Group();
+dolly.add(camera);
+scene.add(dolly);
+camera.position.set(0, EYE, 0);
+
+// ---------------------------------------------------------------- lights
+scene.add(new THREE.HemisphereLight(0xffffff, 0x424a5a, 0.7));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(6, 12, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const sc = sun.shadow.camera;
+sc.near = 0.5; sc.far = 60; sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom = -20;
+scene.add(sun);
+
+// ---------------------------------------------------------------- materials
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0.0 });
+const floorMat = new THREE.MeshStandardMaterial({ color: 0xcaa472, roughness: 0.85 });
+const ceilMat = new THREE.MeshStandardMaterial({ color: 0xece9e3, roughness: 0.95, side: THREE.DoubleSide });
+
+let planGroup = null;   // holds all generated geometry
+let ceiling = null;
+
+// ---------------------------------------------------------------- geometry
+function clearPlan() {
+  if (planGroup) {
+    scene.remove(planGroup);
+    planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  }
+  planGroup = null; ceiling = null;
+}
+
+// Build a box piece in wall-local terms and add to `group`.
+// worldStart: THREE.Vector3 at the wall's start; dir: unit XZ direction;
+// a0,a1: along-wall extent (m); zb,zt: vertical extent (m); depth: thickness (m).
+function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth) {
+  const len = a1 - a0;
+  if (len <= 1e-4 || zt - zb <= 1e-4) return;
+  const geo = new THREE.BoxGeometry(len, zt - zb, depth);
+  const mesh = new THREE.Mesh(geo, wallMat);
+  const along = (a0 + a1) / 2;
+  mesh.position.set(
+    worldStart.x + dir.x * along,
+    (zb + zt) / 2,
+    worldStart.z + dir.z * along
+  );
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+}
+
+function buildPlan(plan) {
+  clearPlan();
+  const group = new THREE.Group();
+  const walls = plan.walls || [];
+  const openings = plan.openings || [];
+
+  // bounds (inches) so we can recentre the plan on the origin
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const w of walls) {
+    for (const p of [w.start, w.end]) {
+      minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+      minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+    }
+  }
+  if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 1; }
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+  // plan (x,y) inches -> world (x, -y) metres, recentred
+  const toWorld = (px, py) => new THREE.Vector3((px - cx) * IN2M, 0, -(py - cy) * IN2M);
+
+  // group openings by wall
+  const byWall = new Map();
+  openings.forEach(o => {
+    if (!byWall.has(o.wall_index)) byWall.set(o.wall_index, []);
+    byWall.get(o.wall_index).push(o);
+  });
+
+  walls.forEach((w, wi) => {
+    const S = w.start, E = w.end;
+    const Lin = Math.hypot(E[0] - S[0], E[1] - S[1]);   // length, inches
+    const H = (w.height || 96) * IN2M;
+    const depth = (w.thickness || 6) * IN2M;
+    const angle = Math.atan2(E[1] - S[1], E[0] - S[0]);
+    const dir = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle)); // world XZ dir
+    const worldStart = toWorld(S[0], S[1]);
+
+    // opening spans in metres along the wall
+    const ops = (byWall.get(wi) || []).map(o => {
+      const c = o.position * Lin;            // centre, inches
+      return {
+        lo: (c - o.width / 2) * IN2M,
+        hi: (c + o.width / 2) * IN2M,
+        sill: (o.sill || 0) * IN2M,
+        head: Math.min((o.head || 80), w.height || 96) * IN2M,
+      };
+    }).sort((a, b) => a.lo - b.lo);
+
+    const L = Lin * IN2M;
+    let cursor = 0;
+    for (const op of ops) {
+      const lo = Math.max(0, op.lo), hi = Math.min(L, op.hi);
+      if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth); // solid
+      // lintel above the opening
+      if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth);
+      // sill below a window
+      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth);
+      cursor = Math.max(cursor, hi);
+    }
+    if (cursor < L) addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth);
+  });
+
+  // floor slab
+  const w = (maxX - minX) * IN2M, d = (maxY - minY) * IN2M;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  group.add(floor);
+
+  // ceiling (toggle with C)
+  const H = ((walls[0] && walls[0].height) || 96) * IN2M;
+  ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), ceilMat);
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.y = H;
+  ceiling.visible = false;
+  group.add(ceiling);
+
+  scene.add(group);
+  planGroup = group;
+
+  // start the player at the plan center (world origin after recentring)
+  dolly.position.set(0, 0, 0);
+  dolly.rotation.y = 0;
+  camera.position.set(0, EYE, 0);
+
+  // HUD
+  const hud = document.getElementById('hud');
+  hud.hidden = false;
+  document.getElementById('hud-walls').textContent = walls.length;
+  document.getElementById('hud-openings').textContent = openings.length;
+  const warnBox = document.getElementById('hud-warn');
+  const warns = plan.warnings || [];
+  warnBox.innerHTML = warns.length
+    ? '&#9888; ' + warns.length + ' parser warning(s):' +
+      warns.slice(0, 4).map(x => '<div>· ' + x + '</div>').join('')
+    : '';
+}
+
+// ---------------------------------------------------------------- desktop controls
+const controls = new PointerLockControls(camera, renderer.domElement);
+const overlay = document.getElementById('overlay');
+overlay.addEventListener('click', () => { if (!renderer.xr.isPresenting) controls.lock(); });
+controls.addEventListener('lock', () => overlay.style.display = 'none');
+controls.addEventListener('unlock', () => { if (!renderer.xr.isPresenting) overlay.style.display = 'flex'; });
+
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyC' && ceiling) ceiling.visible = !ceiling.visible;
+});
+addEventListener('keyup', e => keys[e.code] = false);
+
+function desktopMove(dt) {
+  if (!controls.isLocked) return;
+  const speed = 3.0 * dt;               // m/s
+  if (keys['KeyW']) controls.moveForward(speed);
+  if (keys['KeyS']) controls.moveForward(-speed);
+  if (keys['KeyA']) controls.moveRight(-speed);
+  if (keys['KeyD']) controls.moveRight(speed);
+}
+
+// ---------------------------------------------------------------- VR locomotion
+// left thumbstick: arc-teleport   ·   right thumbstick: 45deg snap turn
+const marker = new THREE.Mesh(
+  new THREE.RingGeometry(0.18, 0.25, 24).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x53d0ff })
+);
+marker.visible = false;
+scene.add(marker);
+
+const arcMat = new THREE.LineBasicMaterial({ color: 0x53d0ff });
+const arc = new THREE.Line(new THREE.BufferGeometry(), arcMat);
+arc.visible = false;
+scene.add(arc);
+
+const ctrlL = renderer.xr.getController(0);
+const ctrlR = renderer.xr.getController(1);
+scene.add(ctrlL, ctrlR);
+
+let teleAiming = false, teleTarget = null, snapReady = true;
+
+function computeArc(controller) {
+  // parabola from controller along its forward (-z), gravity down
+  const origin = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  controller.getWorldPosition(origin);
+  controller.getWorldQuaternion(quat);
+  const v = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).multiplyScalar(6.0);
+  const g = -9.8;
+  const pts = [];
+  let hit = null;
+  for (let i = 0; i <= 30; i++) {
+    const t = i * 0.06;
+    const y = origin.y + v.y * t + 0.5 * g * t * t;
+    const p = new THREE.Vector3(origin.x + v.x * t, y, origin.z + v.z * t);
+    pts.push(p);
+    if (y <= 0 && i > 0) { p.y = 0; hit = p.clone(); break; }
+  }
+  return { pts, hit };
+}
+
+function teleportTo(target) {
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  dolly.position.x += target.x - cam.x;
+  dolly.position.z += target.z - cam.z;
+}
+
+function rotatePlayer(angle) {
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  dolly.position.sub(cam);
+  dolly.position.applyAxisAngle(Y_AXIS, angle);
+  dolly.position.add(cam);
+  dolly.rotation.y += angle;
+}
+
+function handleVRInput() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const ax = gp.axes;
+    const stickX = ax.length >= 4 ? ax[2] : ax[0];
+    const stickY = ax.length >= 4 ? ax[3] : ax[1];
+
+    if (src.handedness === 'left') {
+      if (stickY < -0.6) {                 // push forward -> aim
+        teleAiming = true;
+        const { pts, hit } = computeArc(ctrlL);
+        arc.geometry.setFromPoints(pts);
+        arc.visible = true;
+        if (hit) { marker.position.copy(hit); marker.visible = true; teleTarget = hit; }
+        else { marker.visible = false; teleTarget = null; }
+      } else if (teleAiming) {             // released -> teleport
+        teleAiming = false; arc.visible = false; marker.visible = false;
+        if (teleTarget) teleportTo(teleTarget);
+        teleTarget = null;
+      }
+    } else if (src.handedness === 'right') {
+      if (Math.abs(stickX) > 0.7 && snapReady) {
+        rotatePlayer(stickX > 0 ? -Math.PI / 4 : Math.PI / 4);   // 45deg snap
+        snapReady = false;
+      } else if (Math.abs(stickX) < 0.3) {
+        snapReady = true;
+      }
+    }
+  }
+}
+
+renderer.xr.addEventListener('sessionstart', () => { overlay.style.display = 'none'; });
+renderer.xr.addEventListener('sessionend', () => {
+  arc.visible = false; marker.visible = false;
+  camera.position.set(0, EYE, 0);
+  if (!controls.isLocked) overlay.style.display = 'flex';
+});
+
+// ---------------------------------------------------------------- loop
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (renderer.xr.isPresenting) handleVRInput();
+  else desktopMove(dt);
+  renderer.render(scene, camera);
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------------------------------------------------------------- load plan
+function showError(msg) {
+  const el = document.getElementById('err');
+  el.style.display = 'flex';
+  el.textContent = msg;
+}
+
+function loadPlan(plan) {
+  document.getElementById('err').style.display = 'none';
+  buildPlan(plan);
+}
+
+fetch('plan.json')
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(loadPlan)
+  .catch(() => showError(
+    'Could not fetch plan.json from this folder. ' +
+    'Serve the viewer next to a plan.json (python -m http.server), ' +
+    'or drag-and-drop a plan.json onto the page.'
+  ));
+
+// drag-and-drop a plan.json
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { loadPlan(JSON.parse(reader.result)); }
+    catch (err) { showError('Invalid JSON: ' + err.message); }
+  };
+  reader.readAsText(file);
+});
+</script>
