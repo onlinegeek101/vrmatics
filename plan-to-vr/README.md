@@ -262,8 +262,10 @@ importmap from a CDN, no build step. It:
 - **wall collision**: circle-vs-segment push-out against solid wall spans,
   so you walk through doorways but not through walls or windows
 - desktop: PointerLockControls, WASD + mouse look
-- mobile/touch: 1-finger look, **2-finger pan** to move, **pinch** to walk
-  forward/back, **long-press** to return to the start position
+- mobile/touch: **magic-window motion look** — physically turn/tilt the
+  phone to look around (device orientation; iOS asks permission on entry);
+  **2-finger pan** to move, **pinch** to walk forward/back, 1-finger drag
+  re-aims the heading, **long-press** returns to the start position
 - a plan picker in the HUD switches between the bundled sample plans
 - VR: standard `VRButton`; left-stick arc teleport, right-stick 45° snap turn
 - desktop HUD with wall/opening counts and parser warnings
