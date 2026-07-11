@@ -126,8 +126,14 @@ scene.add(dolly);
 camera.position.set(0, EYE, 0);
 
 // ---------------------------------------------------------------- lights
-scene.add(new THREE.HemisphereLight(0xffffff, 0x424a5a, 0.7));
-const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
+// a warm lamp that follows the player; lit only when the ceiling is on,
+// since the ceiling blocks the sun
+const lamp = new THREE.PointLight(0xffe8c4, 0, 9);
+lamp.position.set(0, 2.2, 0);
+dolly.add(lamp);
+
+const sun = new THREE.DirectionalLight(0xfff1d9, 1.1);
 sun.position.set(6, 12, 4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -136,10 +142,73 @@ sc.near = 0.5; sc.far = 60; sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom
 scene.add(sun);
 
 // ---------------------------------------------------------------- materials
-const wallMat = new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0.0 });
-const floorMat = new THREE.MeshStandardMaterial({ color: 0xcaa472, roughness: 0.85 });
-const ceilMat = new THREE.MeshStandardMaterial({ color: 0xece9e3, roughness: 0.95, side: THREE.DoubleSide });
-const fixtureMat = new THREE.MeshStandardMaterial({ color: 0xa8b8c8, roughness: 0.6 });
+// Everything is generated at runtime - no image assets. The palette is a
+// warm "new-England farmhouse" interior: eggshell walls, semi-gloss white
+// trim, oak plank floor, stainless appliances, porcelain plumbing.
+
+function makeWoodTexture() {
+  // oak planks: rows of staggered boards with tone variation + grain lines
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const ROWS = 8, RH = c.height / ROWS;
+  for (let r = 0; r < ROWS; r++) {
+    let x = -Math.floor(Math.random() * 200);
+    while (x < c.width) {
+      const len = 180 + Math.random() * 220;
+      const light = 34 + Math.random() * 12;
+      g.fillStyle = `hsl(${24 + Math.random() * 8}, ${38 + Math.random() * 10}%, ${light}%)`;
+      g.fillRect(x, r * RH, len, RH);
+      // grain: faint darker streaks along the board
+      g.strokeStyle = `hsla(${20 + Math.random() * 8}, 45%, ${light - 12}%, 0.25)`;
+      g.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const gy = r * RH + 4 + Math.random() * (RH - 8);
+        g.beginPath();
+        g.moveTo(x + 2, gy);
+        g.bezierCurveTo(x + len * 0.3, gy + 2, x + len * 0.6, gy - 2, x + len - 2, gy);
+        g.stroke();
+      }
+      // butt joint between boards
+      g.fillStyle = 'rgba(40, 24, 12, 0.55)';
+      g.fillRect(x + len - 1, r * RH, 2, RH);
+      x += len;
+    }
+    // seam between rows
+    g.fillStyle = 'rgba(40, 24, 12, 0.6)';
+    g.fillRect(0, r * RH, c.width, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+const floorTex = makeWoodTexture();
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
+const trimMat = new THREE.MeshStandardMaterial({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
+const ceilMat = new THREE.MeshStandardMaterial({ color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+
+// fixture stand-ins keyed by what the block name says they are
+const applianceMat = new THREE.MeshStandardMaterial({ color: 0xb9bdc1, roughness: 0.35, metalness: 0.65 });
+const porcelainMat = new THREE.MeshStandardMaterial({ color: 0xf4f6f6, roughness: 0.22, metalness: 0.0 });
+const fabricMat = new THREE.MeshStandardMaterial({ color: 0x8d7f6d, roughness: 0.95, metalness: 0.0 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
+const neutralMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
+
+const FIXTURE_MATS = [
+  [/REF|WASHER|DRYER|RANGE|STOVE|CKTOP|OVEN|DW/, applianceMat],
+  [/TOILET|WC|TUB|BATH|SINK|LAV|SHOWER|VANITY/, porcelainMat],
+  [/SOFA|COUCH|CHAIR|BED/, fabricMat],
+  [/TABLE|DESK|CAB|CASE|KIT|ISLAND|COUNTER/, woodMat],
+];
+function fixtureMaterial(name) {
+  const base = name.split('$').pop().toUpperCase();
+  for (const [re, mat] of FIXTURE_MATS) if (re.test(base)) return mat;
+  return neutralMat;
+}
 
 let planGroup = null;   // holds all generated geometry
 let ceiling = null;
@@ -154,10 +223,48 @@ function clearPlan() {
   planGroup = null; ceiling = null; fixtureGroup = null;
 }
 
+// Trim cross-section profiles, in inches, as [out-from-wall-face, up] pairs.
+// Extruded along each wall piece to make real molding - no assets.
+const BASEBOARD_PROFILE = [
+  [0, 0], [0.7, 0], [0.7, 4.4], [0.35, 5.5], [0, 5.5],
+];
+const CROWN_PROFILE = [           // simple cove: wall at bottom, ceiling at top
+  [0, 0], [0.3, 0.7], [0.9, 2.9], [0.9, 3.5], [0, 3.5],
+];
+const CROWN_H = 3.5 * IN2M;
+
+// Extrude a trim profile along [a0,a1] on BOTH faces of a wall piece.
+// baseY: world height of the profile's y=0 line.
+function addTrim(group, worldStart, dir, angle, a0, a1, depth, baseY, profile) {
+  const len = a1 - a0;
+  if (len <= 0.02) return;
+  for (const side of [1, -1]) {
+    const pts = profile.map(([px, py]) =>
+      new THREE.Vector2(side * (depth / 2 + px * IN2M), py * IN2M));
+    if (side < 0) pts.reverse();          // keep winding CCW so normals face out
+    const shape = new THREE.Shape(pts);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
+    geo.rotateY(-Math.PI / 2);            // extrusion runs along the wall
+    const mesh = new THREE.Mesh(geo, trimMat);
+    mesh.position.set(
+      worldStart.x + dir.x * a1,
+      baseY,
+      worldStart.z + dir.z * a1
+    );
+    mesh.rotation.y = angle;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+}
+
 // Build a box piece in wall-local terms and add to `group`.
 // worldStart: THREE.Vector3 at the wall's start; dir: unit XZ direction;
 // a0,a1: along-wall extent (m); zb,zt: vertical extent (m); depth: thickness (m).
-function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth) {
+// wallH: full wall height (m) - pieces touching floor get baseboard, pieces
+// reaching the top get crown molding, so trim runs under windows and across
+// door lintels automatically.
+function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
   const len = a1 - a0;
   if (len <= 1e-4 || zt - zb <= 1e-4) return;
   const geo = new THREE.BoxGeometry(len, zt - zb, depth);
@@ -172,6 +279,11 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   group.add(mesh);
+
+  if (zb === 0)
+    addTrim(group, worldStart, dir, angle, a0, a1, depth, 0, BASEBOARD_PROFILE);
+  if (wallH && zt >= wallH - 1e-4 && wallH > 4 * CROWN_H)
+    addTrim(group, worldStart, dir, angle, a0, a1, depth, wallH - CROWN_H, CROWN_PROFILE);
 }
 
 function buildPlan(plan) {
@@ -225,18 +337,19 @@ function buildPlan(plan) {
     let cursor = 0;
     for (const op of ops) {
       const lo = Math.max(0, op.lo), hi = Math.min(L, op.hi);
-      if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth); // solid
+      if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth, H); // solid
       // lintel above the opening
-      if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth);
+      if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
       // sill below a window
-      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth);
+      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H);
       cursor = Math.max(cursor, hi);
     }
-    if (cursor < L) addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth);
+    if (cursor < L) addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H);
   });
 
-  // floor slab
+  // floor slab - one texture tile per 4 ft so plank scale stays true
   const w = (maxX - minX) * IN2M, d = (maxY - minY) * IN2M;
+  floorTex.repeat.set((w + 0.3) / 1.22, (d + 0.3) / 1.22);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -246,7 +359,7 @@ function buildPlan(plan) {
   fixtureGroup = new THREE.Group();
   for (const f of plan.fixtures || []) {
     const fw = f.size[0] * IN2M, fd = f.size[1] * IN2M, fh = (f.height || 30) * IN2M;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), fixtureMat);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), fixtureMaterial(f.name || ''));
     const pos = toWorld(f.center[0], f.center[1]);
     mesh.position.set(pos.x, fh / 2, pos.z);
     mesh.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
@@ -262,6 +375,7 @@ function buildPlan(plan) {
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.y = H;
   ceiling.visible = false;
+  lamp.intensity = 0;
   group.add(ceiling);
 
   scene.add(group);
@@ -309,7 +423,10 @@ controls.addEventListener('unlock', () => { if (!renderer.xr.isPresenting) overl
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyC' && ceiling) ceiling.visible = !ceiling.visible;
+  if (e.code === 'KeyC' && ceiling) {
+    ceiling.visible = !ceiling.visible;
+    lamp.intensity = ceiling.visible ? 1.6 : 0;
+  }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
 });
 addEventListener('keyup', e => keys[e.code] = false);

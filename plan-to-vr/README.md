@@ -224,9 +224,17 @@ importmap from a CDN, no build step. It:
 - converts inches → meters (1 scene unit = 1 m) and recenters the plan
 - builds each wall as segmented boxes split at openings (solid pieces,
   lintels above doors, sills below windows — no CSG)
-- adds a wood-toned floor slab, a ceiling (toggle **C**), and furniture
+- dresses every wall with **programmatic trim**: a profiled 5½" baseboard
+  and a cove crown molding, extruded along each wall piece on both faces —
+  trim runs under windows and across door lintels automatically
+- themed materials, all generated at runtime (no image assets): eggshell
+  walls, semi-gloss white trim, an oak plank floor drawn onto a canvas
+  texture (staggered boards, grain, seams), stainless appliances,
+  porcelain plumbing, wood/fabric furniture — picked from block names
+- adds the floor slab, a ceiling (toggle **C** — a warm lamp follows the
+  player when the ceiling is on, since it blocks the sun), and furniture
   stand-ins (toggle **F**)
-- hemisphere + directional light with soft shadows
+- warm hemisphere + directional light with soft shadows
 - desktop: PointerLockControls, WASD + mouse look
 - mobile/touch: 1-finger look, **2-finger pan** to move, **pinch** to walk
   forward/back, **long-press** to return to the start position
