@@ -256,6 +256,45 @@ function makeTileTexture() {
   return tex;
 }
 
+function makeStippleTexture() {
+  // fine drywall stipple for ceilings - kills the dead-flat look
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f2efe8';
+  g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = `hsla(45, 10%, ${86 + Math.random() * 10}%, 0.6)`;
+    g.fillRect(Math.random() * 128, Math.random() * 128, 1.5, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(24, 24);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeSidingTexture() {
+  // horizontal clapboard: rows with a shadow line under each lap
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const ROW = 32;
+  for (let y = 0; y < 256; y += ROW) {
+    g.fillStyle = `hsl(210, 12%, ${78 + Math.random() * 5}%)`;
+    g.fillRect(0, y, 256, ROW);
+    const grad = g.createLinearGradient(0, y + ROW - 7, 0, y + ROW);
+    grad.addColorStop(0, 'rgba(40,50,60,0)');
+    grad.addColorStop(1, 'rgba(40,50,60,0.35)');
+    g.fillStyle = grad;
+    g.fillRect(0, y + ROW - 7, 256, 7);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 const floorTex = makeWoodTexture();
 // per-room overlays get UV = position in meters (ShapeGeometry), so their
 // texture repeats are set to world scale here, independent of the slab's
@@ -269,13 +308,17 @@ const floorMat = std({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
 const slabMat = std({ color: 0xcfccc3, roughness: 0.92 });   // concrete under/around rooms
 const roomWoodMat = std({ map: roomWoodTex, color: 0xd8b98e, roughness: 0.62 });
 const roomTileMat = std({ map: roomTileTex, color: 0xf1efe9, roughness: 0.28 });
-const ceilMat = std({ color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const ceilMat = std({ map: makeStippleTexture(), color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const sidingTex = makeSidingTexture();
+sidingTex.repeat.set(1, 2);   // ~15cm clapboard rows on a full-height wall
+const sidingMat = std({ map: sidingTex, color: 0xdfe4e8, roughness: 0.8 });
+const garageDoorMat = std({ color: 0xf0eee8, roughness: 0.5 });
 const lightDiskMat = new THREE.MeshStandardMaterial({
   color: 0xffffff, emissive: 0xfff3dc, emissiveIntensity: 2.2, roughness: 0.4,
 });
 const glassMat = new THREE.MeshStandardMaterial({
-  color: 0xcfe4ec, roughness: 0.05, metalness: 0.0,
-  transparent: true, opacity: 0.22, envMapIntensity: 1.2, side: THREE.DoubleSide,
+  color: 0x8fb6c6, roughness: 0.03, metalness: 0.35,
+  transparent: true, opacity: 0.32, envMapIntensity: 2.4, side: THREE.DoubleSide,
 });
 const doorMat = std({ color: 0xf7f5ef, roughness: 0.4 });
 
@@ -289,13 +332,18 @@ const woodMat = std({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
 const neutralMat = std({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
 
 // lawn the house sits on
+const grassTex = makeGrassTexture();
+grassTex.repeat.set(160, 160);
 const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(90, 48).rotateX(-Math.PI / 2),
-  std({ map: makeGrassTexture(), color: 0xa8bd85, roughness: 1.0 })
+  new THREE.CircleGeometry(240, 48).rotateX(-Math.PI / 2),
+  std({ map: grassTex, color: 0xa8bd85, roughness: 1.0 })
 );
 ground.position.y = -0.025;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// haze toward the horizon so the lawn fades out instead of ending at a rim
+scene.fog = new THREE.Fog(0xdde6ec, 55, 230);
 
 const FIXTURE_MATS = [
   [/REF|WASHER|DRYER|RANGE|STOVE|CKTOP|OVEN|DW/, applianceMat],
@@ -387,19 +435,26 @@ let ceiling = null;
 let fixtureGroup = null;
 let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
+let footprintWorld = null; // building outline in world XZ, or null
 
 // ray-cast point-in-polygon on the XZ plane
-function insideAnyRoom(x, z) {
-  for (const poly of roomPolysWorld) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, zi] = poly[i], [xj, zj] = poly[j];
-      if ((zi > z) !== (zj > z) &&
-          x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside;
-    }
-    if (inside) return true;
+function pointInPoly(x, z, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if ((zi > z) !== (zj > z) &&
+        x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside;
   }
+  return inside;
+}
+
+function insideAnyRoom(x, z) {
+  for (const poly of roomPolysWorld) if (pointInPoly(x, z, poly)) return true;
   return false;
+}
+
+function outsideBuilding(x, z) {
+  return footprintWorld ? !pointInPoly(x, z, footprintWorld) : false;
 }
 
 // ---------------------------------------------------------------- geometry
@@ -410,6 +465,7 @@ function clearPlan() {
   }
   planGroup = null; ceiling = null; fixtureGroup = null;
   roomPolysWorld = [];
+  footprintWorld = null;
 }
 
 // Axis-aligned box placed in wall-local terms: centered at `along` on the
@@ -476,6 +532,23 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     group.add(glass);
   }
 
+  // jamb boards lining the reveal, so the cut faces of the wall never show
+  if (op.type === 'door' || (op.type === 'opening' && w < 90 * IN2M)) {
+    const JT = 0.75 * IN2M;
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - JT / 2, JT, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
+  }
+
+  if (op.type === 'opening' && w >= 90 * IN2M) {
+    // wide exterior opening: fill with a paneled garage door
+    boxOnWall(group, worldStart, dir, angle, mid, w, head / 2, head, 0, 1.5 * IN2M, garageDoorMat);
+    for (let i = 1; i < 4; i++) {   // panel seams
+      boxOnWall(group, worldStart, dir, angle, mid, w, head * i / 4, 0.6 * IN2M,
+        0.8 * IN2M, 0.4 * IN2M, std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY }));
+    }
+  }
+
   if (op.type === 'door') {
     // leaf parked open, flat against whichever side of the jamb has wall
     const LT = 1.75 * IN2M;
@@ -484,9 +557,18 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     if (lo - leafW >= 0) c = lo - leafW / 2;
     else if (hi + leafW <= wallLen) c = hi + leafW / 2;
     if (c !== null) {
+      const out = depth / 2 + CT + LT / 2;
       boxOnWall(group, worldStart, dir, angle, c, leafW,
-        head / 2 - 0.5 * IN2M, head - 1 * IN2M,
-        depth / 2 + CT + LT / 2, LT, doorMat);
+        head / 2, head, out, LT, doorMat);
+      // two recessed panels + a knob so it reads as a door, not a whiteboard
+      const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
+      boxOnWall(group, worldStart, dir, angle, c, leafW * 0.7,
+        head * 0.7, head * 0.35, out + LT * 0.55, 0.01, inset);
+      boxOnWall(group, worldStart, dir, angle, c, leafW * 0.7,
+        head * 0.25, head * 0.28, out + LT * 0.55, 0.01, inset);
+      const knobSide = (c < lo) ? c - leafW * 0.4 : c + leafW * 0.4;
+      boxOnWall(group, worldStart, dir, angle, knobSide, 0.05,
+        38 * IN2M, 0.05, out + LT * 0.8, 0.05, applianceMat);
     }
   }
 }
@@ -564,6 +646,30 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
     addTrim(group, worldStart, dir, angle, a0, a1, depth, 0, BASEBOARD_PROFILE);
   if (wallH && zt >= wallH - 1e-4 && wallH > 4 * CROWN_H)
     addTrim(group, worldStart, dir, angle, a0, a1, depth, wallH - CROWN_H, CROWN_PROFILE);
+
+  // exterior faces (outside the footprint, not in any room) get clapboard
+  // siding as a thin shell over the paint
+  if (footprintWorld) {
+    for (const side of [1, -1]) {
+      const midA = (a0 + a1) / 2;
+      const off = side * (depth / 2 + 0.06);
+      const sx = worldStart.x + dir.x * midA + Math.sin(angle) * off;
+      const sz = worldStart.z + dir.z * midA + Math.cos(angle) * off;
+      if (outsideBuilding(sx, sz) && !insideAnyRoom(sx, sz)) {
+        const shell = new THREE.Mesh(
+          new THREE.BoxGeometry(len, zt - zb, 0.012), sidingMat);
+        const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+        const out = side * (depth / 2 + 0.007);
+        shell.position.set(
+          worldStart.x + dir.x * midA + nrm.x * out,
+          (zb + zt) / 2,
+          worldStart.z + dir.z * midA + nrm.z * out);
+        shell.rotation.y = angle;
+        shell.castShadow = shell.receiveShadow = true;
+        group.add(shell);
+      }
+    }
+  }
 }
 
 function buildPlan(plan) {
@@ -592,6 +698,9 @@ function buildPlan(plan) {
   const rooms = plan.rooms || [];
   roomPolysWorld = rooms.map(r =>
     r.polygon.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M]));
+  footprintWorld = (plan.footprint && plan.footprint.length >= 4)
+    ? plan.footprint.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M])
+    : null;
 
   // group openings by wall
   const byWall = new Map();
@@ -600,6 +709,20 @@ function buildPlan(plan) {
     byWall.get(o.wall_index).push(o);
   });
 
+  // corner closure: a wall endpoint that meets another wall extends by half
+  // its own thickness, so perpendicular boxes fully interpenetrate - no
+  // notches at corners, no hairline seams at T-junctions
+  const endpoints = [];
+  for (const w of walls) endpoints.push(w.start, w.end);
+  const meetsAnother = (pt, self) => {
+    for (const q of endpoints) {
+      if (q === self) continue;
+      const dx = q[0] - pt[0], dy = q[1] - pt[1];
+      if (dx * dx + dy * dy <= 12 * 12) return true;   // within 12 inches
+    }
+    return false;
+  };
+
   walls.forEach((w, wi) => {
     const S = w.start, E = w.end;
     const Lin = Math.hypot(E[0] - S[0], E[1] - S[1]);   // length, inches
@@ -607,21 +730,23 @@ function buildPlan(plan) {
     const depth = (w.thickness || 6) * IN2M;
     const angle = Math.atan2(E[1] - S[1], E[0] - S[0]);
     const dir = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle)); // world XZ dir
-    const worldStart = toWorld(S[0], S[1]);
+    const extS = meetsAnother(S, S) ? depth / 2 : 0;    // metres past each end
+    const extE = meetsAnother(E, E) ? depth / 2 : 0;
+    const worldStart = toWorld(S[0], S[1]).addScaledVector(dir, -extS);
 
-    // opening spans in metres along the wall
+    // opening spans in metres along the (corner-extended) wall
     const ops = (byWall.get(wi) || []).map(o => {
       const c = o.position * Lin;            // centre, inches
       return {
-        lo: (c - o.width / 2) * IN2M,
-        hi: (c + o.width / 2) * IN2M,
+        lo: (c - o.width / 2) * IN2M + extS,
+        hi: (c + o.width / 2) * IN2M + extS,
         sill: (o.sill || 0) * IN2M,
         head: Math.min((o.head || 80), w.height || 96) * IN2M,
         type: o.type || 'opening',
       };
     }).sort((a, b) => a.lo - b.lo);
 
-    const L = Lin * IN2M;
+    const L = Lin * IN2M + extS + extE;
     const solid = (a, b) => {   // blocked span -> collision segment (world XZ)
       if (b - a < 0.01) return;
       collisionSegs.push({
@@ -639,19 +764,31 @@ function buildPlan(plan) {
       if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
       // sill below a window
       if (op.sill > 0) { addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H); solid(lo, hi); }
+      // a closed garage door is solid too
+      if (op.type === 'opening' && hi - lo >= 90 * IN2M) solid(lo, hi);
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
     }
     if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
   });
 
-  // floor slab. With room data the slab is bare concrete and each room lays
-  // its own finished floor: tile in baths/laundry, oak elsewhere.
+  // floor slab. With a footprint it hugs the building outline (no concrete
+  // apron); with room data it is bare concrete and each room lays its own
+  // finished floor: tile in baths/laundry, concrete in the garage, oak else.
   const w = (maxX - minX) * IN2M, d = (maxY - minY) * IN2M;
   floorTex.repeat.set((w + 0.3) / 1.22, (d + 0.3) / 1.22);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3),
-    rooms.length ? slabMat : floorMat);
-  floor.rotation.x = -Math.PI / 2;
+  const footShape = footprintWorld ? new THREE.Shape(
+    footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz))) : null;
+  let floor;
+  if (footShape) {
+    const geo = new THREE.ShapeGeometry(footShape);
+    geo.rotateX(-Math.PI / 2);
+    floor = new THREE.Mesh(geo, rooms.length ? slabMat : floorMat);
+  } else {
+    floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3),
+      rooms.length ? slabMat : floorMat);
+    floor.rotation.x = -Math.PI / 2;
+  }
   floor.receiveShadow = true;
   group.add(floor);
 
@@ -664,7 +801,8 @@ function buildPlan(plan) {
     const geo = new THREE.ShapeGeometry(new THREE.Shape(pts));
     geo.rotateX(-Math.PI / 2);
     const kind = r.kind || 'room';
-    const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat : roomWoodMat;
+    const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat
+      : (kind === 'garage') ? slabMat : roomWoodMat;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = 0.004;
     mesh.receiveShadow = true;
@@ -692,14 +830,22 @@ function buildPlan(plan) {
   group.add(fixtureGroup);
 
   // roof/ceiling slab (toggle with C). It deliberately does NOT cast
-  // shadows, so sunlight still fills the interior - cheap fake skylighting;
-  // from outside it reads as a flat roof with a fascia edge.
+  // shadows, so sunlight still fills the interior - cheap fake skylighting.
+  // With a footprint it follows the building outline instead of the bbox,
+  // so it never cantilevers over open lawn.
   const H = ((walls[0] && walls[0].height) || 96) * IN2M;
-  ceiling = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
-  ceiling.position.y = H + 0.07;
+  if (footShape) {
+    const geo = new THREE.ExtrudeGeometry(footShape, { depth: 0.14, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);   // extrusion axis -> up
+    ceiling = new THREE.Mesh(geo, ceilMat);
+    ceiling.position.y = H;
+  } else {
+    ceiling = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
+    ceiling.position.y = H + 0.07;
+  }
   ceiling.receiveShadow = true;
   ceiling.visible = true;
-  lamp.intensity = 0.45;
+  lamp.intensity = rooms.length ? 0 : 0.45;   // room light disks take over
   group.add(ceiling);
 
   scene.add(group);
