@@ -67,7 +67,7 @@
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
@@ -150,6 +150,7 @@ scene.add(dolly);
 camera.position.set(0, EYE, 0);
 let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
 const spawnPose = { x: 0, z: 0, rot: 0 };
+let tourStops = [];    // world-space waypoints for the automated walkthrough
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
@@ -923,6 +924,30 @@ function buildPlan(plan) {
   spawnPose.x = dolly.position.x;
   spawnPose.z = dolly.position.z;
   spawnPose.rot = dolly.rotation.y;
+
+  // waypoints for the automated tour: real camera poses when the plan has
+  // them, room centroids otherwise, chained nearest-neighbor from spawn
+  const rawStops = (plan.cameras || []).filter(c => c.is_primary).length >= 2
+    ? plan.cameras.filter(c => c.is_primary)
+        .map(c => toWorld(c.position[0], c.position[1]))
+    : roomPolysWorld.map(poly => {
+        let sx = 0, sz = 0;
+        for (const [px, pz] of poly) { sx += px; sz += pz; }
+        return new THREE.Vector3(sx / poly.length, 0, sz / poly.length);
+      });
+  tourStops = [];
+  let cur = new THREE.Vector3(spawnPose.x, 0, spawnPose.z);
+  const pool = [...rawStops];
+  while (pool.length) {
+    let bi = 0, bd = Infinity;
+    pool.forEach((p, i) => {
+      const d = cur.distanceToSquared(p);
+      if (d < bd) { bd = d; bi = i; }
+    });
+    cur = pool.splice(bi, 1)[0];
+    tourStops.push(cur);
+  }
+  stopTour();
   camera.rotation.set(0, 0, 0);
   camera.position.set(0, spawnEyeY, 0);
 
@@ -949,7 +974,7 @@ if (IS_TOUCH) {
   document.getElementById('overlay-title').textContent = 'Tap to enter walkthrough';
   const touchHelp =
     '<b>move your phone</b> to look around · <b>2-finger pan</b> move · ' +
-    '<b>pinch</b> walk forward/back · <b>1-finger drag</b> re-aim heading · ' +
+    '<b>pinch</b> walk forward/back · <b>double-tap</b> auto walkthrough · ' +
     '<b>long-press</b> return to start';
   document.getElementById('overlay-help').innerHTML = touchHelp;
   document.querySelector('#hud .keys').innerHTML = touchHelp;
@@ -972,6 +997,8 @@ addEventListener('keydown', e => {
     lamp.intensity = ceiling.visible ? 0.45 : 0;
   }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
+  if (e.code === 'KeyT') toggleTour();
+  else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
@@ -982,6 +1009,70 @@ function desktopMove(dt) {
   if (keys['KeyS']) controls.moveForward(-speed);
   if (keys['KeyA']) controls.moveRight(-speed);
   if (keys['KeyD']) controls.moveRight(speed);
+}
+
+// ---------------------------------------------------------------- auto tour
+// Double-tap (touch) or T (desktop) glides through every room: walk to a
+// waypoint facing the travel direction, dwell with a slow look-around,
+// move on. Any input stops it. Collision is skipped while touring.
+const tour = { active: false, i: 0, phase: 'move', dwell: 0, yaw0: 0 };
+const TOUR_SPEED = 1.1;        // m/s
+const TOUR_DWELL = 3.2;        // s at each stop
+const TOUR_TURN = 1.6;         // rad/s max heading turn
+
+function startTour() {
+  if (!tourStops.length) { toast('No rooms to tour'); return; }
+  tour.active = true;
+  tour.i = 0;
+  tour.phase = 'move';
+  camera.rotation.set(0, 0, 0);
+  toast('Auto walkthrough — tap to stop');
+}
+function stopTour(silent) {
+  if (tour.active && !silent) toast('Walkthrough stopped');
+  tour.active = false;
+}
+function toggleTour() { tour.active ? stopTour() : startTour(); }
+
+function angleLerp(a, b, t) {
+  let d = (b - a + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+  return a + d * t;
+}
+
+function tourStep(dt) {
+  const target = tourStops[tour.i];
+  if (!target) { stopTour(true); return; }
+  const dx = target.x - dolly.position.x;
+  const dz = target.z - dolly.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (tour.phase === 'move') {
+    if (dist < 0.12) {
+      tour.phase = 'dwell';
+      tour.dwell = 0;
+      tour.yaw0 = dolly.rotation.y;
+      return;
+    }
+    const want = Math.atan2(-dx, -dz);            // face travel direction
+    dolly.rotation.y = angleLerp(dolly.rotation.y, want,
+      Math.min(1, TOUR_TURN * dt * 2));
+    const step = Math.min(dist, TOUR_SPEED * dt);
+    dolly.position.x += (dx / dist) * step;
+    dolly.position.z += (dz / dist) * step;
+  } else {
+    tour.dwell += dt;
+    // gentle 140-degree sweep and back while dwelling
+    const k = tour.dwell / TOUR_DWELL;
+    dolly.rotation.y = tour.yaw0 + Math.sin(k * Math.PI * 2) * 1.2;
+    if (tour.dwell >= TOUR_DWELL) {
+      tour.i += 1;
+      if (tour.i >= tourStops.length) {
+        stopTour(true);
+        toast('Walkthrough complete');
+      } else {
+        tour.phase = 'move';
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------- gyro look
@@ -1081,12 +1172,24 @@ function cancelLongPress() {
 }
 
 const el = renderer.domElement;
+let lastTap = { t: 0, x: 0, y: 0 };
 el.addEventListener('pointerdown', e => {
   if (e.pointerType !== 'touch' || renderer.xr.isPresenting) return;
   touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   touch.lastCentroid = null;
   touch.lastDist = null;
   if (touch.pts.size === 1) {
+    // double-tap starts the automated walkthrough; any tap stops it
+    const now = performance.now();
+    if (tour.active) {
+      stopTour();
+    } else if (now - lastTap.t < 350 &&
+               Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 50) {
+      lastTap.t = 0;
+      startTour();
+      return;
+    }
+    lastTap = { t: now, x: e.clientX, y: e.clientY };
     touch.startXY = { x: e.clientX, y: e.clientY };
     touch.longPress = setTimeout(() => { touch.longPress = null; resetToStart(); }, 650);
   } else {
@@ -1275,8 +1378,9 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   if (renderer.xr.isPresenting) handleVRInput();
+  else if (tour.active) tourStep(dt);
   else { desktopMove(dt); applyGyro(); }
-  resolveCollision();
+  if (!tour.active) resolveCollision();
   renderer.render(scene, camera);
 });
 
