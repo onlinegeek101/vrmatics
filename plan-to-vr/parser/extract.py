@@ -31,6 +31,7 @@ import math
 import sys
 
 import ezdxf
+from ezdxf import bbox as ezbbox
 
 WALL_HEIGHT = 96.0      # 8'-0"
 DOOR_HEAD = 80.0        # 6'-8"
@@ -42,6 +43,25 @@ MIN_WALL_THICK = 2.0    # ignore near-zero "thickness" (duplicate/trim lines)
 MIN_WALL_LEN = 12.0     # drop merged "walls" shorter than this (jamb caps etc.)
 MIN_OPENING = 18.0      # unmatched gaps below this are wall-intersection breaks
 MIN_HINT_LINE = 6.0     # ignore tiny tick lines when hunting window glazing
+
+# drawing-unit -> inch scale factors, keyed by CLI name and $INSUNITS code
+UNIT_SCALES = {
+    "inches": 1.0, "feet": 12.0, "mm": 1.0 / 25.4,
+    "cm": 1.0 / 2.54, "m": 1000.0 / 25.4,
+}
+INSUNITS_NAMES = {1: "inches", 2: "feet", 4: "mm", 5: "cm", 6: "m"}
+
+# fixture stand-in heights (inches) by block-name keyword, first match wins
+FIXTURE_HEIGHTS = [
+    ("TOILET", 15.0), ("WC", 15.0), ("BATH", 22.0), ("TUB", 22.0),
+    ("SHOWER", 80.0), ("LAV", 34.0), ("SINK", 34.0), ("VANITY", 34.0),
+    ("REF", 66.0), ("RANGE", 36.0), ("STOVE", 36.0), ("CKTOP", 36.0),
+    ("OVEN", 36.0), ("DW", 34.0), ("WASHER", 38.0), ("DRYER", 38.0),
+    ("KIT", 36.0), ("CAB", 36.0), ("CASE", 36.0), ("ISLAND", 36.0),
+    ("COUNTER", 36.0), ("BED", 24.0), ("SOFA", 30.0), ("COUCH", 30.0),
+    ("CHAIR", 32.0), ("TABLE", 30.0), ("DESK", 30.0),
+]
+DEFAULT_FIXTURE_HEIGHT = 30.0
 
 
 # --------------------------------------------------------------------------
@@ -121,7 +141,7 @@ def read_wall_segments(msp, wall_layers):
     return [s for s in segs if s.length() > 1e-6]
 
 
-def read_opening_hints(msp, door_layers, window_layers):
+def read_opening_hints(msp, door_layers, window_layers, scale=1.0):
     """Collect evidence of doors/windows from the opening layers.
 
     Real exports differ: some place door/window BLOCKs (INSERT), others draw
@@ -142,15 +162,16 @@ def read_opening_hints(msp, door_layers, window_layers):
         t = e.dxftype()
         if t == "ARC":
             c = e.dxf.center
-            hints.append({"pt": (c.x, c.y), "kind": "door", "prio": 0,
-                          "r": e.dxf.radius})
+            hints.append({"pt": (c.x * scale, c.y * scale), "kind": "door",
+                          "prio": 0, "r": e.dxf.radius * scale})
         elif t == "INSERT":
             kind = "window" if (is_win and not is_door) else "door"
             p = e.dxf.insert
-            hints.append({"pt": (p.x, p.y), "kind": kind, "prio": 1})
+            hints.append({"pt": (p.x * scale, p.y * scale), "kind": kind,
+                          "prio": 1})
         elif t == "LINE":
-            a = (e.dxf.start.x, e.dxf.start.y)
-            b = (e.dxf.end.x, e.dxf.end.y)
+            a = (e.dxf.start.x * scale, e.dxf.start.y * scale)
+            b = (e.dxf.end.x * scale, e.dxf.end.y * scale)
             v = sub(b, a)
             ln = length(v)
             if ln < MIN_HINT_LINE:
@@ -161,6 +182,104 @@ def read_opening_hints(msp, door_layers, window_layers):
                 "dir": unit(v), "len": ln,
             })
     return hints
+
+
+# --------------------------------------------------------------------------
+# 1b. unit detection
+# --------------------------------------------------------------------------
+def detect_units(segs, insunits, max_wall):
+    """Pick the drawing unit by geometry, not by trusting the header.
+
+    Real exports routinely lie: the header says mm while the drawing is in
+    inches. For each unit hypothesis, pair parallel wall lines and look at
+    the median wall thickness in inches; real walls are ~3"-14". The header
+    value ($INSUNITS) is used as a tie-breaker when it is plausible.
+    Returns (unit_name, scale_to_inches).
+    """
+    hint = INSUNITS_NAMES.get(insunits)
+    plausible = {}
+    for name, s in UNIT_SCALES.items():
+        # thresholds must be expressed in drawing units for pairing
+        pieces, _ = pair_segments(list(segs), max_wall / s, MIN_WALL_THICK / s)
+        if not pieces:
+            continue
+        th = sorted(p.thickness * s for p in pieces)
+        median = th[len(th) // 2]
+        # real walls are long and thin; a wrong unit scale "pairs" opposite
+        # walls of rooms instead, whose length/thickness ratio is near 1
+        ratios = sorted(length(sub(p.c1, p.c0)) / p.thickness for p in pieces)
+        median_ratio = ratios[len(ratios) // 2]
+        if 3.0 <= median <= 14.0 and median_ratio >= 5.0:
+            plausible[name] = median_ratio
+
+    if hint in plausible:
+        return hint, UNIT_SCALES[hint]
+    if plausible:
+        best = max(plausible.items(), key=lambda kv: kv[1])
+        return best[0], UNIT_SCALES[best[0]]
+    if hint:
+        return hint, UNIT_SCALES[hint]
+    return "inches", 1.0
+
+
+# --------------------------------------------------------------------------
+# 1c. fixtures (furniture / appliances / plumbing blocks)
+# --------------------------------------------------------------------------
+def fixture_height(name):
+    # strip xref binding prefixes ("xref-house$0$FIXT-...") before matching,
+    # otherwise every name contains "REF"
+    up = name.split("$")[-1].upper()
+    for key, h in FIXTURE_HEIGHTS:
+        if key in up:
+            return h
+    return DEFAULT_FIXTURE_HEIGHT
+
+
+def read_fixtures(doc, msp, fixture_layers, scale):
+    """Turn block INSERTs on the fixture layers into 3D stand-in footprints.
+
+    The block definition's 2D bounding box (cached per block name) gives the
+    footprint; insert scale/rotation place it. Emits inches. Degenerate or
+    implausibly large footprints are skipped.
+    """
+    def local_bbox(name):
+        if name not in local_bbox.cache:
+            try:
+                ext = ezbbox.extents(doc.blocks[name], fast=True)
+            except Exception:
+                ext = None
+            local_bbox.cache[name] = ext if (ext and ext.has_data) else None
+        return local_bbox.cache[name]
+    local_bbox.cache = {}
+
+    fixtures = []
+    for e in msp:
+        if e.dxftype() != "INSERT":
+            continue
+        if not layer_matches(e.dxf.layer, fixture_layers):
+            continue
+        ext = local_bbox(e.dxf.name)
+        if ext is None:
+            continue
+        sx, sy = abs(e.dxf.xscale) or 1.0, abs(e.dxf.yscale) or 1.0
+        w = (ext.extmax.x - ext.extmin.x) * sx * scale
+        d = (ext.extmax.y - ext.extmin.y) * sy * scale
+        if w < 4.0 or d < 4.0 or w > 240.0 or d > 240.0:
+            continue  # ticks, annotations, or something block-sized gone wrong
+        # block-local footprint center -> world, honoring scale + rotation
+        cx = (ext.extmin.x + ext.extmax.x) / 2 * sx
+        cy = (ext.extmin.y + ext.extmax.y) / 2 * sy
+        rot = math.radians(e.dxf.rotation)
+        wx = e.dxf.insert.x + cx * math.cos(rot) - cy * math.sin(rot)
+        wy = e.dxf.insert.y + cx * math.sin(rot) + cy * math.cos(rot)
+        fixtures.append({
+            "name": e.dxf.name,
+            "center": [round(wx * scale, 3), round(wy * scale, 3)],
+            "rotation": round(e.dxf.rotation, 2),
+            "size": [round(w, 2), round(d, 2)],
+            "height": fixture_height(e.dxf.name),
+        })
+    return fixtures
 
 
 # --------------------------------------------------------------------------
@@ -231,9 +350,9 @@ class WallPiece:
         self.axis = unit(sub(c1, c0))
 
 
-def pair_segments(segs, max_wall):
+def pair_segments(segs, max_wall, min_thick=MIN_WALL_THICK):
     """Pair each segment with a facing parallel segment to build wall pieces.
-    Returns (pieces, used_flags)."""
+    Thresholds are in the same units as the segments. Returns (pieces, orphans)."""
     n = len(segs)
     used = [False] * n
     pieces = []
@@ -252,7 +371,7 @@ def pair_segments(segs, max_wall):
             # perpendicular distance between the two infinite lines
             perp = (-ui[1], ui[0])
             d = abs(dot(sub(sj.a, si.a), perp))
-            if d < MIN_WALL_THICK or d > max_wall:
+            if d < min_thick or d > max_wall:
                 continue
             # projections must overlap along the wall direction
             lo_i, hi_i = project_interval(si, si.a, ui)
@@ -476,13 +595,25 @@ Wall.axis = property(lambda self: unit(sub(self.c1, self.c0)))
 # --------------------------------------------------------------------------
 # driver
 # --------------------------------------------------------------------------
-def extract(path, wall_layers, door_layers, window_layers, tol, max_wall):
+def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
+            fixture_layers=(), units="auto"):
     warnings = []
     doc = ezdxf.readfile(path)
     msp = doc.modelspace()
 
     segs = read_wall_segments(msp, wall_layers)
     n_input = len(segs)
+
+    # normalize everything to inches; headers lie, so measure when on auto
+    if units == "auto":
+        unit_name, scale = detect_units(
+            segs, doc.header.get("$INSUNITS", 0), max_wall)
+    else:
+        unit_name, scale = units, UNIT_SCALES[units]
+    if scale != 1.0:
+        for s in segs:
+            s.a = (s.a[0] * scale, s.a[1] * scale)
+            s.b = (s.b[0] * scale, s.b[1] * scale)
 
     snapped = snap_endpoints(segs, tol)
     pieces, orphans = pair_segments(segs, max_wall)
@@ -493,8 +624,25 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall):
     walls = [w for w in walls if length(sub(w.c1, w.c0)) >= MIN_WALL_LEN]
     snapped += snap_wall_endpoints(walls, tol)
 
-    hints = read_opening_hints(msp, door_layers, window_layers)
+    hints = read_opening_hints(msp, door_layers, window_layers, scale)
     openings, pass_through, filled = classify_openings(walls, hints, tol)
+
+    fixtures = read_fixtures(doc, msp, fixture_layers, scale) \
+        if fixture_layers else []
+    # real drawings park detail vignettes / legends beside the plan; keep
+    # only fixtures that actually sit inside the walls' bounding box
+    outside = 0
+    if fixtures and walls:
+        xs = [c[0] for w in walls for c in (w.c0, w.c1)]
+        ys = [c[1] for w in walls for c in (w.c0, w.c1)]
+        margin = 12.0
+        lo_x, hi_x = min(xs) - margin, max(xs) + margin
+        lo_y, hi_y = min(ys) - margin, max(ys) + margin
+        kept = [f for f in fixtures
+                if lo_x <= f["center"][0] <= hi_x
+                and lo_y <= f["center"][1] <= hi_y]
+        outside = len(fixtures) - len(kept)
+        fixtures = kept
 
     for s in orphans:
         warnings.append(
@@ -511,9 +659,15 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall):
             f"{pass_through} wide gap(s) had no door/window evidence; kept as "
             f"full-height cased openings"
         )
+    if outside:
+        warnings.append(
+            f"{outside} fixture block(s) outside the plan bounds skipped "
+            f"(detail vignettes / legend symbols)"
+        )
 
     plan = {
         "units": "inches",
+        "drawing_units": unit_name,
         "walls": [
             {
                 "start": [round(w.c0[0], 3), round(w.c0[1], 3)],
@@ -524,6 +678,7 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall):
             for w in walls
         ],
         "openings": openings,
+        "fixtures": fixtures,
         "warnings": warnings,
     }
 
@@ -532,9 +687,11 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall):
         kinds[o["type"]] = kinds.get(o["type"], 0) + 1
     report = {
         "input_segments": n_input,
+        "drawing_units": unit_name,
         "walls_found": len(walls),
         "openings_matched": len(openings),
         "opening_kinds": kinds,
+        "fixtures_found": len(fixtures),
         "orphan_lines": len(orphans),
         "short_pieces_dropped": len(short),
         "gaps_snapped": snapped,
@@ -552,10 +709,17 @@ def main():
                     help="comma-separated wall layer names")
     ap.add_argument("--door-layers", default="A-DOOR")
     ap.add_argument("--window-layers", default="A-GLAZ")
+    ap.add_argument("--fixture-layers", default="",
+                    help="layers whose block INSERTs become 3D furniture "
+                         "stand-ins (e.g. A-FIXTURE,A-CASE-1,A-FURN)")
+    ap.add_argument("--units", default="auto",
+                    choices=["auto"] + list(UNIT_SCALES),
+                    help="drawing units; 'auto' measures wall thickness "
+                         "instead of trusting the DXF header")
     ap.add_argument("--tolerance", type=float, default=2.0,
-                    help="endpoint snap tolerance in drawing units (inches)")
+                    help="endpoint snap tolerance in inches")
     ap.add_argument("--max-wall", type=float, default=12.0,
-                    help="max wall thickness for pairing parallel lines")
+                    help="max wall thickness (inches) for pairing lines")
     args = ap.parse_args()
 
     def split(s):
@@ -569,6 +733,8 @@ def main():
             set(split(args.window_layers)),
             args.tolerance,
             args.max_wall,
+            fixture_layers=set(split(args.fixture_layers)),
+            units=args.units,
         )
     except IOError:
         print(f"error: cannot read '{args.input}'", file=sys.stderr)
@@ -593,11 +759,15 @@ def main():
     # summary report
     kinds = ", ".join(f"{v} {k}" for k, v in sorted(report["opening_kinds"].items()))
     print(f"Parsed {args.input} -> {args.output}")
+    print(f"  drawing units       : {report['drawing_units']}"
+          + (" (auto-detected)" if args.units == "auto" else ""))
     print(f"  input wall segments : {report['input_segments']}")
     print(f"  walls found         : {report['walls_found']}")
     print(f"  openings matched    : {report['openings_matched']}"
           + (f" ({kinds})" if kinds else "")
           + f" from {report['opening_hints']} hints")
+    if report["fixtures_found"]:
+        print(f"  fixtures found      : {report['fixtures_found']}")
     print(f"  gaps snapped        : {report['gaps_snapped']}")
     print(f"  gaps filled (breaks): {report['gaps_filled']}")
     print(f"  orphan lines skipped: {report['orphan_lines']}")

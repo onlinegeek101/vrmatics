@@ -46,8 +46,9 @@
   <h1>Plan-to-VR</h1>
   <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
   <div class="row"><span>openings</span><span id="hud-openings">0</span></div>
+  <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
@@ -120,9 +121,11 @@ scene.add(sun);
 const wallMat = new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0.0 });
 const floorMat = new THREE.MeshStandardMaterial({ color: 0xcaa472, roughness: 0.85 });
 const ceilMat = new THREE.MeshStandardMaterial({ color: 0xece9e3, roughness: 0.95, side: THREE.DoubleSide });
+const fixtureMat = new THREE.MeshStandardMaterial({ color: 0xa8b8c8, roughness: 0.6 });
 
 let planGroup = null;   // holds all generated geometry
 let ceiling = null;
+let fixtureGroup = null;
 
 // ---------------------------------------------------------------- geometry
 function clearPlan() {
@@ -130,7 +133,7 @@ function clearPlan() {
     scene.remove(planGroup);
     planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
-  planGroup = null; ceiling = null;
+  planGroup = null; ceiling = null; fixtureGroup = null;
 }
 
 // Build a box piece in wall-local terms and add to `group`.
@@ -221,6 +224,20 @@ function buildPlan(plan) {
   floor.receiveShadow = true;
   group.add(floor);
 
+  // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
+  fixtureGroup = new THREE.Group();
+  for (const f of plan.fixtures || []) {
+    const fw = f.size[0] * IN2M, fd = f.size[1] * IN2M, fh = (f.height || 30) * IN2M;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), fixtureMat);
+    const pos = toWorld(f.center[0], f.center[1]);
+    mesh.position.set(pos.x, fh / 2, pos.z);
+    mesh.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    fixtureGroup.add(mesh);
+  }
+  group.add(fixtureGroup);
+
   // ceiling (toggle with C)
   const H = ((walls[0] && walls[0].height) || 96) * IN2M;
   ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), ceilMat);
@@ -242,6 +259,7 @@ function buildPlan(plan) {
   hud.hidden = false;
   document.getElementById('hud-walls').textContent = walls.length;
   document.getElementById('hud-openings').textContent = openings.length;
+  document.getElementById('hud-fixtures').textContent = (plan.fixtures || []).length;
   const warnBox = document.getElementById('hud-warn');
   const warns = plan.warnings || [];
   warnBox.innerHTML = warns.length
@@ -261,6 +279,7 @@ const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyC' && ceiling) ceiling.visible = !ceiling.visible;
+  if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
 });
 addEventListener('keyup', e => keys[e.code] = false);
 

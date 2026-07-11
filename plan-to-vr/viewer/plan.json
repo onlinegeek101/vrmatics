@@ -1,5 +1,6 @@
 {
   "units": "inches",
+  "drawing_units": "inches",
   "walls": [
     {
       "start": [
@@ -592,6 +593,86 @@
       "head": 80.0
     }
   ],
+  "fixtures": [
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-DBLKIT32",
+      "center": [
+        -29.227,
+        110.519
+      ],
+      "rotation": 90.0,
+      "size": [
+        32.01,
+        20.98
+      ],
+      "height": 36.0
+    },
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-CKTOP24E",
+      "center": [
+        14.165,
+        57.328
+      ],
+      "rotation": 180.0,
+      "size": [
+        24.06,
+        20.03
+      ],
+      "height": 36.0
+    },
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-DRYERE28",
+      "center": [
+        140.113,
+        60.379
+      ],
+      "rotation": 180.0,
+      "size": [
+        28.08,
+        27.04
+      ],
+      "height": 38.0
+    },
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-WASHER26",
+      "center": [
+        109.893,
+        60.379
+      ],
+      "rotation": 180.0,
+      "size": [
+        26.03,
+        27.04
+      ],
+      "height": 38.0
+    },
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-SNGREF30",
+      "center": [
+        98.773,
+        145.896
+      ],
+      "rotation": 270.0,
+      "size": [
+        30.0,
+        29.96
+      ],
+      "height": 66.0
+    },
+    {
+      "name": "xref-Bishop-Overland-08$0$FIXT-OVALBATH",
+      "center": [
+        -412.48,
+        329.731
+      ],
+      "rotation": 0,
+      "size": [
+        20.02,
+        17.75
+      ],
+      "height": 22.0
+    }
+  ],
   "warnings": [
     "orphan line not paired into a wall: (-220.8,341.4)->(-260.8,341.4)",
     "orphan line not paired into a wall: (41.2,45.4)->(41.2,92.4)",
@@ -631,6 +712,7 @@
     "orphan line not paired into a wall: (-322.8,341.4)->(-322.8,285.0)",
     "orphan line not paired into a wall: (-266.4,341.4)->(-322.8,341.4)",
     "4 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-    "8 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+    "8 wide gap(s) had no door/window evidence; kept as full-height cased openings",
+    "4 fixture block(s) outside the plan bounds skipped (detail vignettes / legend symbols)"
   ]
 }
