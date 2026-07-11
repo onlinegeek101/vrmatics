@@ -228,6 +228,9 @@ importmap from a CDN, no build step. It:
   stand-ins (toggle **F**)
 - hemisphere + directional light with soft shadows
 - desktop: PointerLockControls, WASD + mouse look
+- mobile/touch: 1-finger look, **2-finger pan** to move, **pinch** to walk
+  forward/back, **long-press** to return to the start position
+- a plan picker in the HUD switches between the bundled sample plans
 - VR: standard `VRButton`; left-stick arc teleport, right-stick 45° snap turn
 - desktop HUD with wall/opening counts and parser warnings
 

@@ -4,10 +4,18 @@
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: #10121a; }
-  canvas { display: block; }
+  canvas { display: block; touch-action: none; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
+    z-index: 15; font: 13px system-ui, sans-serif; color: #eef2fa;
+    background: rgba(24,28,40,.92); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 8px; padding: 8px 14px; opacity: 0; pointer-events: none;
+    transition: opacity .25s;
+  }
 
   #hud {
-    position: fixed; top: 12px; left: 12px; z-index: 10;
+    position: fixed; top: 12px; left: 12px; z-index: 25;
     font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
     color: #dfe6f2; background: rgba(16,18,26,.72);
     border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
@@ -18,6 +26,11 @@
   #hud .warn { margin-top: 6px; color: #ffcf6b; }
   #hud .warn div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #hud .keys { margin-top: 8px; color: #9aa4b8; }
+  #hud select {
+    width: 100%; margin-bottom: 8px; font: inherit; color: inherit;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 6px; padding: 4px 6px;
+  }
 
   #overlay {
     position: fixed; inset: 0; z-index: 20; display: flex;
@@ -44,6 +57,10 @@
 
 <div id="hud" hidden>
   <h1>Plan-to-VR</h1>
+  <select id="plan-select">
+    <option value="plan.json">Bishop-Overland — imperial ranch house</option>
+    <option value="plans/ceco.json">Ceco.NET — metric building</option>
+  </select>
   <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
   <div class="row"><span>openings</span><span id="hud-openings">0</span></div>
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
@@ -55,12 +72,13 @@
 
 <div id="overlay">
   <div class="card">
-    <h2>Click to enter walkthrough</h2>
-    <div>Move with <b>WASD</b>, look with the mouse, press <b>C</b> for ceiling.</div>
+    <h2 id="overlay-title">Click to enter walkthrough</h2>
+    <div id="overlay-help">Move with <b>WASD</b>, look with the mouse, press <b>C</b> for ceiling.</div>
     <small>Or tap <b>Enter VR</b> (bottom of screen) on a headset.</small>
   </div>
 </div>
 
+<div id="toast"></div>
 <div id="err"></div>
 
 <!-- optional embedded plan (written by the parser next to plan.json);
@@ -269,9 +287,22 @@ function buildPlan(plan) {
 }
 
 // ---------------------------------------------------------------- desktop controls
+const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const controls = new PointerLockControls(camera, renderer.domElement);
 const overlay = document.getElementById('overlay');
-overlay.addEventListener('click', () => { if (!renderer.xr.isPresenting) controls.lock(); });
+if (IS_TOUCH) {
+  document.getElementById('overlay-title').textContent = 'Tap to enter walkthrough';
+  const touchHelp =
+    '<b>1 finger</b> look · <b>2-finger pan</b> move · <b>pinch</b> walk ' +
+    'forward/back · <b>long-press</b> return to start';
+  document.getElementById('overlay-help').innerHTML = touchHelp;
+  document.querySelector('#hud .keys').innerHTML = touchHelp;
+}
+overlay.addEventListener('click', () => {
+  if (renderer.xr.isPresenting) return;
+  if (IS_TOUCH) overlay.style.display = 'none';   // no pointer lock on touch
+  else controls.lock();
+});
 controls.addEventListener('lock', () => overlay.style.display = 'none');
 controls.addEventListener('unlock', () => { if (!renderer.xr.isPresenting) overlay.style.display = 'flex'; });
 
@@ -291,6 +322,112 @@ function desktopMove(dt) {
   if (keys['KeyA']) controls.moveRight(-speed);
   if (keys['KeyD']) controls.moveRight(speed);
 }
+
+// ---------------------------------------------------------------- touch controls
+// 1 finger: look · 2-finger pan: move · pinch: walk forward/back ·
+// long-press: return to the start position
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.style.opacity = 0, 1400);
+}
+
+function resetToStart() {
+  dolly.position.set(0, 0, 0);
+  dolly.rotation.set(0, 0, 0);
+  camera.rotation.set(0, 0, 0);
+  camera.position.set(0, EYE, 0);
+  toast('Back at start');
+}
+
+const touch = {
+  pts: new Map(),          // pointerId -> {x, y}
+  lastCentroid: null,
+  lastDist: null,
+  longPress: null,         // timer
+  startXY: null,           // long-press anchor
+};
+camera.rotation.order = 'YXZ';           // yaw/pitch look without roll
+
+const LOOK_SPEED = 0.0035;               // rad per px
+const PAN_SPEED = 0.011;                 // m per px
+const PINCH_SPEED = 0.014;               // m per px of pinch
+
+function groundBasis() {
+  // camera heading projected onto the floor
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  fwd.y = 0; fwd.normalize();
+  const right = new THREE.Vector3(fwd.z, 0, -fwd.x).negate();
+  return { fwd, right };
+}
+
+function cancelLongPress() {
+  if (touch.longPress) { clearTimeout(touch.longPress); touch.longPress = null; }
+}
+
+const el = renderer.domElement;
+el.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch' || renderer.xr.isPresenting) return;
+  touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touch.lastCentroid = null;
+  touch.lastDist = null;
+  if (touch.pts.size === 1) {
+    touch.startXY = { x: e.clientX, y: e.clientY };
+    touch.longPress = setTimeout(() => { touch.longPress = null; resetToStart(); }, 650);
+  } else {
+    cancelLongPress();
+  }
+});
+
+el.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'touch' || !touch.pts.has(e.pointerId)) return;
+  const prev = touch.pts.get(e.pointerId);
+  touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (touch.pts.size === 1) {
+    if (touch.startXY && Math.hypot(e.clientX - touch.startXY.x,
+                                    e.clientY - touch.startXY.y) > 12) {
+      cancelLongPress();                 // moved too far: it's a look, not a press
+    }
+    camera.rotation.y -= (e.clientX - prev.x) * LOOK_SPEED;
+    camera.rotation.x = Math.max(-1.3, Math.min(1.3,
+      camera.rotation.x - (e.clientY - prev.y) * LOOK_SPEED));
+    return;
+  }
+
+  if (touch.pts.size === 2) {
+    cancelLongPress();
+    const [a, b] = [...touch.pts.values()];
+    const centroid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (touch.lastCentroid) {
+      const { fwd, right } = groundBasis();
+      const dx = centroid.x - touch.lastCentroid.x;
+      const dy = centroid.y - touch.lastCentroid.y;
+      // joystick-style pan: drag up walks forward, drag right strafes right
+      dolly.position.addScaledVector(right, dx * PAN_SPEED);
+      dolly.position.addScaledVector(fwd, -dy * PAN_SPEED);
+      // pinch out walks forward, pinch in walks back
+      dolly.position.addScaledVector(fwd, (dist - touch.lastDist) * PINCH_SPEED);
+    }
+    touch.lastCentroid = centroid;
+    touch.lastDist = dist;
+  }
+});
+
+function touchEnd(e) {
+  if (e.pointerType !== 'touch') return;
+  touch.pts.delete(e.pointerId);
+  touch.lastCentroid = null;
+  touch.lastDist = null;
+  cancelLongPress();
+}
+el.addEventListener('pointerup', touchEnd);
+el.addEventListener('pointercancel', touchEnd);
 
 // ---------------------------------------------------------------- VR locomotion
 // left thumbstick: arc-teleport   ·   right thumbstick: 45deg snap turn
@@ -416,18 +553,25 @@ function loadPlan(plan) {
   buildPlan(plan);
 }
 
-fetch('plan.json')
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(loadPlan)
-  .catch(() => {
-    // file:// or missing plan.json - fall back to the embedded copy
-    if (window.PLAN_TO_VR_EMBEDDED) loadPlan(window.PLAN_TO_VR_EMBEDDED);
-    else showError(
-      'Could not fetch plan.json from this folder. ' +
-      'Serve the viewer next to a plan.json (python -m http.server), ' +
-      'or drag-and-drop a plan.json onto the page.'
-    );
-  });
+function fetchPlan(url) {
+  fetch(url)
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(loadPlan)
+    .catch(() => {
+      // file:// or missing plan.json - fall back to the embedded copy
+      if (window.PLAN_TO_VR_EMBEDDED) loadPlan(window.PLAN_TO_VR_EMBEDDED);
+      else showError(
+        'Could not fetch ' + url + ' from this folder. ' +
+        'Serve the viewer next to a plan.json (python -m http.server), ' +
+        'or drag-and-drop a plan.json onto the page.'
+      );
+    });
+}
+
+fetchPlan('plan.json');
+document.getElementById('plan-select').addEventListener('change', e => {
+  fetchPlan(e.target.value);
+});
 
 // drag-and-drop a plan.json
 addEventListener('dragover', e => e.preventDefault());
