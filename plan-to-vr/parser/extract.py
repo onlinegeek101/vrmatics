@@ -715,6 +715,97 @@ def detect_rooms(walls, fixtures, warnings):
 
 
 # --------------------------------------------------------------------------
+# 6b. building footprint + garage classification
+# --------------------------------------------------------------------------
+FOOTPRINT_SIMPLIFY = 1.0
+GARAGE_MIN_AREA = 250.0 * 144.0   # 250 sq ft in sq inches
+GARAGE_MIN_OPENING = 90.0         # opening width (in) suggesting a car door
+GARAGE_EDGE_TOL = 12.0            # opening center must sit this close to room
+
+
+def compute_footprint(walls, warnings):
+    """Building footprint: buffer each wall centerline by half its thickness
+    (square caps), union everything, take the largest polygon's exterior
+    ring, simplified. Returns [[x, y], ...] in inches without the closing
+    duplicate point. Never raises; warns and returns [] on failure."""
+    try:
+        from shapely.geometry import LineString
+        from shapely.ops import unary_union
+    except ImportError:
+        warnings.append("shapely not installed; footprint skipped")
+        return []
+    try:
+        bufs = [LineString([w.c0, w.c1]).buffer(w.thickness / 2.0,
+                                                cap_style="square")
+                for w in walls]
+        merged = unary_union(bufs)
+        polys = list(getattr(merged, "geoms", [merged]))
+        polys = [p for p in polys if p.geom_type == "Polygon" and p.area > 0]
+        if not polys:
+            warnings.append("footprint failed: wall union produced no polygon")
+            return []
+        largest = max(polys, key=lambda p: p.area)
+        ring = largest.exterior.simplify(FOOTPRINT_SIMPLIFY)
+        coords = list(ring.coords)[:-1]   # drop closing duplicate
+        if len(coords) < 3:
+            warnings.append("footprint failed: degenerate exterior ring")
+            return []
+        return [[round(x, 3), round(y, 3)] for x, y in coords]
+    except Exception as exc:
+        warnings.append(f"footprint failed: {exc}")
+        return []
+
+
+def classify_garages(rooms, walls, openings, warnings, footprint=None):
+    """Reclassify rooms as 'garage': area >= 250 sq ft AND some opening at
+    least 90\" wide sits on the room boundary (its center - taken from the
+    owning wall's centerline at the position fraction - lies within 12\" of
+    the room polygon's exterior). Garage doors face outside, so when a
+    footprint is available the opening must also sit on the building
+    boundary - this keeps wide interior pass-throughs (cased openings
+    between living spaces) from reading as garages. Mutates room dicts in
+    place; never raises."""
+    try:
+        from shapely.geometry import Point, Polygon, LinearRing
+    except ImportError:
+        warnings.append("shapely not installed; garage classification skipped")
+        return
+    try:
+        boundary = LinearRing(footprint) if footprint and len(footprint) >= 4 \
+            else None
+        centers = []
+        for o in openings:
+            # garage doors surface as bare cased "opening"s; wide windows
+            # (sliding glass doors) and double doors must not count
+            if o["width"] < GARAGE_MIN_OPENING or o["type"] != "opening":
+                continue
+            w = walls[o["wall_index"]]
+            axis = unit(sub(w.c1, w.c0))
+            t = o["position"] * length(sub(w.c1, w.c0))
+            c = (w.c0[0] + axis[0] * t, w.c0[1] + axis[1] * t)
+            if boundary is not None and \
+                    boundary.distance(Point(c)) > GARAGE_EDGE_TOL:
+                continue  # interior pass-through, not a garage door
+            centers.append(c)
+        if not centers:
+            return
+        for room in rooms:
+            if room["area"] < GARAGE_MIN_AREA:
+                continue
+            poly = Polygon(room["polygon"])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty or not hasattr(poly, "exterior") \
+                    or poly.exterior is None:
+                continue
+            if any(poly.exterior.distance(Point(c)) <= GARAGE_EDGE_TOL
+                   for c in centers):
+                room["kind"] = "garage"
+    except Exception as exc:
+        warnings.append(f"garage classification failed: {exc}")
+
+
+# --------------------------------------------------------------------------
 # driver
 # --------------------------------------------------------------------------
 def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
@@ -767,6 +858,8 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         fixtures = kept
 
     rooms = detect_rooms(walls, fixtures, warnings)
+    footprint = compute_footprint(walls, warnings)
+    classify_garages(rooms, walls, openings, warnings, footprint)
 
     for s in orphans:
         warnings.append(
@@ -804,6 +897,7 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         "openings": openings,
         "fixtures": fixtures,
         "rooms": rooms,
+        "footprint": footprint,
         "warnings": warnings,
     }
 
@@ -822,6 +916,7 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         "fixtures_found": len(fixtures),
         "rooms_found": len(rooms),
         "room_kinds": room_kinds,
+        "footprint_points": len(footprint),
         "orphan_lines": len(orphans),
         "short_pieces_dropped": len(short),
         "gaps_snapped": snapped,
@@ -902,6 +997,7 @@ def main():
         f"{v} {k}" for k, v in sorted(report["room_kinds"].items()))
     print(f"  rooms found         : {report['rooms_found']}"
           + (f" ({room_kinds})" if room_kinds else ""))
+    print(f"  footprint           : {report['footprint_points']} points")
     print(f"  gaps snapped        : {report['gaps_snapped']}")
     print(f"  gaps filled (breaks): {report['gaps_filled']}")
     print(f"  orphan lines skipped: {report['orphan_lines']}")

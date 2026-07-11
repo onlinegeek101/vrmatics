@@ -540,8 +540,9 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     boxOnWall(group, worldStart, dir, angle, hi - JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
   }
 
-  if (op.type === 'opening' && w >= 90 * IN2M) {
-    // wide exterior opening: fill with a paneled garage door
+  if (op.type === 'opening' && w >= 90 * IN2M && openingIsExterior(worldStart, dir, angle, lo, hi, depth)) {
+    // wide EXTERIOR opening: fill with a paneled garage door. Wide interior
+    // pass-throughs stay open.
     boxOnWall(group, worldStart, dir, angle, mid, w, head / 2, head, 0, 1.5 * IN2M, garageDoorMat);
     for (let i = 1; i < 4; i++) {   // panel seams
       boxOnWall(group, worldStart, dir, angle, mid, w, head * i / 4, 0.6 * IN2M,
@@ -585,6 +586,19 @@ const CROWN_H = 3.5 * IN2M;
 
 // Extrude a trim profile along [a0,a1] on BOTH faces of a wall piece.
 // baseY: world height of the profile's y=0 line.
+// Does this opening face the outdoors on either side?
+function openingIsExterior(worldStart, dir, angle, lo, hi, depth) {
+  if (!footprintWorld) return true;   // no footprint data: assume exterior
+  const mid = (lo + hi) / 2;
+  for (const side of [1, -1]) {
+    const off = side * (depth / 2 + 0.15);
+    const x = worldStart.x + dir.x * mid + Math.sin(angle) * off;
+    const z = worldStart.z + dir.z * mid + Math.cos(angle) * off;
+    if (outsideBuilding(x, z)) return true;
+  }
+  return false;
+}
+
 // Is this face of a wall span inside a room? Sample the face midpoint just
 // off the wall surface. With no room data, treat every face as interior.
 function faceIsInterior(worldStart, dir, angle, a0, a1, depth, side) {
@@ -765,7 +779,8 @@ function buildPlan(plan) {
       // sill below a window
       if (op.sill > 0) { addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H); solid(lo, hi); }
       // a closed garage door is solid too
-      if (op.type === 'opening' && hi - lo >= 90 * IN2M) solid(lo, hi);
+      if (op.type === 'opening' && hi - lo >= 90 * IN2M &&
+          openingIsExterior(worldStart, dir, angle, lo, hi, depth)) solid(lo, hi);
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
     }

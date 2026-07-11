@@ -58,7 +58,9 @@ ANGLE_TOL_DEG = 2.0         # parallel test for facing edges
 MAX_WALL = 14.0             # max separation (in) to pair facing edges
 COINCIDENT_TOL = 1.0        # below this the two edges are the same line
 MIN_OVERLAP = 3.0           # min facing overlap (in) worth a shared wall
-MIN_WALL_LEN = 6.0          # drop leftover exterior slivers below this
+MIN_WALL_LEN = 2.0          # drop leftover exterior slivers below this
+MERGE_PERP_TOL = 1.0        # collinear-merge: max offset from shared line
+MERGE_GAP_TOL = 2.0         # collinear-merge: max endpoint gap along line
 OPENING_SNAP = 6.0          # extra reach (in) when snapping W/D/O to walls
 ASSUMED_DOOR_M = 0.81       # ~32" door, for scale estimation fallback
 
@@ -320,16 +322,68 @@ def pair_edges(edges):
     return walls
 
 
+def merge_collinear_spans(spans):
+    """Merge collinear near-adjacent segments into single spans.
+
+    Two spans merge when they lie on the same infinite line (both endpoints
+    within MERGE_PERP_TOL perpendicular) and their intervals along that line
+    touch, overlap, or gap by no more than MERGE_GAP_TOL. This welds the
+    chains of tiny uncovered exterior slivers (left where facing-edge
+    coverage is fragmented) back into continuous walls instead of letting
+    the length filter punch holes to the outside. `spans` is a list of
+    (p0, p1) tuples; returns merged (p0, p1) tuples.
+    """
+    groups = []   # {"origin", "axis", "intervals": [[lo, hi], ...]}
+    for p0, p1 in spans:
+        axis = unit(sub(p1, p0))
+        if axis == (0.0, 0.0):
+            continue
+        placed = False
+        for g in groups:
+            if not parallel(axis, g["axis"]):
+                continue
+            perp = (-g["axis"][1], g["axis"][0])
+            if abs(dot(sub(p0, g["origin"]), perp)) > MERGE_PERP_TOL:
+                continue
+            if abs(dot(sub(p1, g["origin"]), perp)) > MERGE_PERP_TOL:
+                continue
+            t0 = dot(sub(p0, g["origin"]), g["axis"])
+            t1 = dot(sub(p1, g["origin"]), g["axis"])
+            g["intervals"].append([min(t0, t1), max(t0, t1)])
+            placed = True
+            break
+        if not placed:
+            groups.append({"origin": p0, "axis": axis,
+                           "intervals": [[0.0, length(sub(p1, p0))]]})
+
+    merged = []
+    for g in groups:
+        intervals = sorted(g["intervals"])
+        out = [list(intervals[0])]
+        for lo, hi in intervals[1:]:
+            if lo <= out[-1][1] + MERGE_GAP_TOL:
+                out[-1][1] = max(out[-1][1], hi)
+            else:
+                out.append([lo, hi])
+        o, ax = g["origin"], g["axis"]
+        for lo, hi in out:
+            merged.append(((o[0] + ax[0] * lo, o[1] + ax[1] * lo),
+                           (o[0] + ax[0] * hi, o[1] + ax[1] * hi)))
+    return merged
+
+
 def leftover_walls(edges, exterior_thickness):
     """Spans of each edge not covered by a shared wall become exterior
     walls, pushed outward by half the thickness so the interior face of
-    the wall stays on the room polygon. Returns (walls, n_slivers)."""
-    walls = []
-    slivers = 0
+    the wall stays on the room polygon. Collinear adjacent spans are merged
+    first so fragmented coverage does not shred a straight exterior wall
+    into slivers; only what is still shorter than MIN_WALL_LEN after
+    merging gets dropped. Returns (walls, n_slivers)."""
+    spans = []
     for e in edges:
-        spans = sorted(e.covered)
+        covered = sorted(e.covered)
         merged = []
-        for lo, hi in spans:
+        for lo, hi in covered:
             if merged and lo <= merged[-1][1] + COINCIDENT_TOL:
                 merged[-1][1] = max(merged[-1][1], hi)
             else:
@@ -344,15 +398,20 @@ def leftover_walls(edges, exterior_thickness):
             gaps.append((cursor, e.len))
         off = exterior_thickness / 2.0
         for lo, hi in gaps:
-            if hi - lo < MIN_WALL_LEN:
-                slivers += 1
-                continue
             c0, c1 = e.point(lo), e.point(hi)
-            walls.append({
-                "start": (c0[0] + e.outward[0] * off, c0[1] + e.outward[1] * off),
-                "end": (c1[0] + e.outward[0] * off, c1[1] + e.outward[1] * off),
-                "thickness": exterior_thickness,
-            })
+            spans.append((
+                (c0[0] + e.outward[0] * off, c0[1] + e.outward[1] * off),
+                (c1[0] + e.outward[0] * off, c1[1] + e.outward[1] * off),
+            ))
+
+    walls = []
+    slivers = 0
+    for p0, p1 in merge_collinear_spans(spans):
+        if length(sub(p1, p0)) < MIN_WALL_LEN:
+            slivers += 1
+            continue
+        walls.append({"start": p0, "end": p1,
+                      "thickness": exterior_thickness})
     return walls, slivers
 
 
@@ -521,6 +580,97 @@ def read_cameras(data, floor_id, scale_in, warnings):
 
 
 # --------------------------------------------------------------------------
+# 6. building footprint + garage classification
+# --------------------------------------------------------------------------
+FOOTPRINT_SIMPLIFY = 1.0
+GARAGE_MIN_AREA = 250.0 * 144.0   # 250 sq ft in sq inches
+GARAGE_MIN_OPENING = 90.0         # opening width (in) suggesting a car door
+GARAGE_EDGE_TOL = 12.0            # opening center must sit this close to room
+
+# ZInD pin labels that carry no real information; only these may be
+# overridden by the geometric garage rule
+GENERIC_ROOM_KINDS = {"room", "unknown", "undefined", ""}
+
+
+def compute_footprint(walls, warnings):
+    """Building footprint: buffer each wall centerline by half its thickness
+    (square caps), union everything, take the largest polygon's exterior
+    ring, simplified. Returns [[x, y], ...] in inches without the closing
+    duplicate point. Never raises; warns and returns [] on failure."""
+    try:
+        from shapely.geometry import LineString
+        from shapely.ops import unary_union
+    except ImportError:
+        warnings.append("shapely not installed; footprint skipped")
+        return []
+    try:
+        bufs = [LineString([w["start"], w["end"]])
+                .buffer(w["thickness"] / 2.0, cap_style="square")
+                for w in walls]
+        merged = unary_union(bufs)
+        polys = list(getattr(merged, "geoms", [merged]))
+        polys = [p for p in polys if p.geom_type == "Polygon" and p.area > 0]
+        if not polys:
+            warnings.append("footprint failed: wall union produced no polygon")
+            return []
+        largest = max(polys, key=lambda p: p.area)
+        ring = largest.exterior.simplify(FOOTPRINT_SIMPLIFY)
+        coords = list(ring.coords)[:-1]   # drop closing duplicate
+        if len(coords) < 3:
+            warnings.append("footprint failed: degenerate exterior ring")
+            return []
+        return [[round(x, 3), round(y, 3)] for x, y in coords]
+    except Exception as exc:
+        warnings.append(f"footprint failed: {exc}")
+        return []
+
+
+def classify_garages(rooms, walls, openings, warnings):
+    """Garage detection on top of the ZInD pin labels.
+
+    A pin that already says garage is normalized to exactly \"garage\".
+    Otherwise the geometric rule may override ONLY a generic/unknown pin
+    kind: area >= 250 sq ft AND some opening at least 90\" wide sits on the
+    room boundary (its center - taken from the owning wall's centerline at
+    the position fraction - lies within 12\" of the polygon's exterior).
+    Mutates room dicts in place; never raises."""
+    try:
+        from shapely.geometry import Point, Polygon
+    except ImportError:
+        warnings.append("shapely not installed; garage classification skipped")
+        return
+    try:
+        centers = []
+        for o in openings:
+            if o["width"] < GARAGE_MIN_OPENING:
+                continue
+            w = walls[o["wall_index"]]
+            axis = unit(sub(w["end"], w["start"]))
+            t = o["position"] * length(sub(w["end"], w["start"]))
+            centers.append((w["start"][0] + axis[0] * t,
+                            w["start"][1] + axis[1] * t))
+        for room in rooms:
+            kind = str(room.get("kind", "")).strip().lower()
+            if "garage" in kind:
+                room["kind"] = "garage"
+                continue
+            if kind not in GENERIC_ROOM_KINDS or not centers:
+                continue
+            poly = Polygon(room["polygon"])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty or poly.geom_type != "Polygon":
+                continue
+            if poly.area < GARAGE_MIN_AREA:
+                continue
+            if any(poly.exterior.distance(Point(c)) <= GARAGE_EDGE_TOL
+                   for c in centers):
+                room["kind"] = "garage"
+    except Exception as exc:
+        warnings.append(f"garage classification failed: {exc}")
+
+
+# --------------------------------------------------------------------------
 # driver
 # --------------------------------------------------------------------------
 def convert(path, floor_arg, exterior_thickness):
@@ -565,6 +715,9 @@ def convert(path, floor_arg, exterior_thickness):
                                  warnings)
     openings, duplicates = map_openings(segments, walls, warnings)
 
+    classify_garages(rooms_in, walls, openings, warnings)
+    footprint = compute_footprint(walls, warnings)
+
     if slivers:
         warnings.append(f"{slivers} exterior sliver(s) shorter than "
                         f"{MIN_WALL_LEN:.0f}\" dropped")
@@ -586,6 +739,7 @@ def convert(path, floor_arg, exterior_thickness):
         ],
         "openings": openings,
         "rooms": rooms_in,
+        "footprint": footprint,
         "cameras": cameras,
         "warnings": warnings,
     }
@@ -593,11 +747,16 @@ def convert(path, floor_arg, exterior_thickness):
     kinds = {}
     for o in openings:
         kinds[o["type"]] = kinds.get(o["type"], 0) + 1
+    room_kinds = {}
+    for r in rooms_in:
+        room_kinds[r["kind"]] = room_kinds.get(r["kind"], 0) + 1
     report = {
         "floor": floor_id,
         "floors": len(floors),
         "rooms_source": rooms_source,
         "rooms": len(rooms_in),
+        "room_kinds": room_kinds,
+        "footprint_points": len(footprint),
         "walls": len(walls),
         "shared_walls": len(shared),
         "exterior_walls": len(exterior),
@@ -653,8 +812,12 @@ def main():
     print(f"Parsed {args.input} -> {args.output}")
     print(f"  floor               : {report['floor']} "
           f"(1 of {report['floors']} in tour)")
+    room_kinds = ", ".join(
+        f"{v} {k}" for k, v in sorted(report["room_kinds"].items()))
     print(f"  rooms               : {report['rooms']} "
-          f"(from {report['rooms_source']})")
+          f"(from {report['rooms_source']})"
+          + (f" ({room_kinds})" if room_kinds else ""))
+    print(f"  footprint           : {report['footprint_points']} points")
     print(f"  walls               : {report['walls']} "
           f"({report['shared_walls']} shared, "
           f"{report['exterior_walls']} exterior)")
