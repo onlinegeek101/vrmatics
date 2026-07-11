@@ -580,6 +580,16 @@ def main():
     with open(args.output, "w") as f:
         json.dump(plan, f, indent=2)
 
+    # Sibling .js copy so the viewer also works opened straight from disk
+    # (file://), where browsers block fetch() of local JSON.
+    embed_path = None
+    if args.output.endswith(".json"):
+        embed_path = args.output[:-5] + ".js"
+        with open(embed_path, "w") as f:
+            f.write("window.PLAN_TO_VR_EMBEDDED = ")
+            json.dump(plan, f, indent=2)
+            f.write(";\n")
+
     # summary report
     kinds = ", ".join(f"{v} {k}" for k, v in sorted(report["opening_kinds"].items()))
     print(f"Parsed {args.input} -> {args.output}")
@@ -596,6 +606,8 @@ def main():
     if plan["warnings"]:
         print(f"  warnings            : {len(plan['warnings'])} "
               f"(see 'warnings' in {args.output})")
+    if embed_path:
+        print(f"  embedded copy       : {embed_path} (lets the viewer open via file://)")
 
 
 if __name__ == "__main__":

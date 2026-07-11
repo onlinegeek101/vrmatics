@@ -27,6 +27,15 @@ plan-to-vr/
   WebXR headset) for VR. No build step, no npm — the viewer is one HTML file
   that pulls Three.js from a CDN.
 
+## Zero-setup: just open it
+
+The parsed result for the sample is checked in (`viewer/plan.json` plus an
+embedded copy in `viewer/plan.js`), so you can simply **double-click
+`viewer/index.html`** — no server, no Python. The desktop walkthrough works
+directly from disk (internet access is needed once for the Three.js CDN).
+VR requires serving over HTTP — browsers only expose WebXR to pages with an
+origin — so for the Quest follow the steps below.
+
 ## Quick start (full flow)
 
 ```bash
@@ -154,7 +163,8 @@ centerline. `type` is `door`, `window`, or `opening`.
 `viewer/index.html` is self-contained: Three.js r160 via es-module-shims +
 importmap from a CDN, no build step. It:
 
-- fetches `plan.json` from its own directory (or accepts drag-and-drop)
+- fetches `plan.json` from its own directory; falls back to the embedded
+  `plan.js` copy when opened via `file://`, and accepts drag-and-drop
 - converts inches → meters (1 scene unit = 1 m) and recenters the plan
 - builds each wall as segmented boxes split at openings (solid pieces,
   lintels above doors, sills below windows — no CSG)
