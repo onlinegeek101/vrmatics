@@ -160,6 +160,27 @@ full dataset needs registration at bridgedataoutput.com/register/zgindoor
 (academic/non-commercial, manually approved). Homes are anonymized — no
 addresses, so specific properties can't be looked up.
 
+## IFC / BIM models
+
+`parser/ifc2plan.py` converts an IFC building model (the format BIM tools
+export) straight into `plan.json`, one storey at a time - walls, openings
+with true sills/heads, rooms from IfcSpaces, furniture from
+IfcFurnishingElements:
+
+```bash
+python parser/ifc2plan.py sample/duplex.ifc -o viewer/plans/duplex-l1.json --storey "Level 1"
+python parser/audit_ifc.py sample/duplex.ifc viewer/plans/duplex-l1.json --storey "Level 1"
+```
+
+The auditor compares the converted plan against the IFC's own schedule
+(OverallWidth/Height, material layer thicknesses, space names) - on the
+bundled two-storey buildingSMART Duplex Apartment it matches 36/36
+openings with width MAE 0.00" and height MAE under 0.1", and all 20 rooms
+by name. The Schependomlaan dataset (a real built Dutch project with
+drone photos and point clouds alongside its IFC) converts the same way;
+its ground floor ships as a stress-test plan. Requires `pip install
+ifcopenshell shapely`.
+
 ## Parser
 
 ```

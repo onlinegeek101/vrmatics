@@ -1,0 +1,1180 @@
+{
+  "units": "inches",
+  "drawing_units": "meters",
+  "storey": "Level 1",
+  "storey_elevation": 0.0,
+  "storeys_available": [
+    {
+      "name": "T/FDN",
+      "elevation": -49.21,
+      "walls": 7
+    },
+    {
+      "name": "Level 1",
+      "elevation": 0.0,
+      "walls": 21
+    },
+    {
+      "name": "Level 2",
+      "elevation": 122.05,
+      "walls": 25
+    },
+    {
+      "name": "Roof",
+      "elevation": 236.22,
+      "walls": 4
+    }
+  ],
+  "walls": [
+    {
+      "start": [
+        99.921,
+        -157.48
+      ],
+      "end": [
+        99.921,
+        -16.417
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        164.646,
+        -308.209
+      ],
+      "end": [
+        330.04,
+        -308.209
+      ],
+      "thickness": 19.41,
+      "height": 110.0
+    },
+    {
+      "start": [
+        16.417,
+        -392.579
+      ],
+      "end": [
+        181.811,
+        -392.579
+      ],
+      "thickness": 19.41,
+      "height": 110.0
+    },
+    {
+      "start": [
+        173.228,
+        -393.701
+      ],
+      "end": [
+        173.228,
+        -307.087
+      ],
+      "thickness": 21.65,
+      "height": 110.0
+    },
+    {
+      "start": [
+        187.795,
+        -405.827
+      ],
+      "end": [
+        245.118,
+        -405.827
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        246.536,
+        -684.37
+      ],
+      "end": [
+        246.536,
+        -543.307
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        338.249,
+        -16.417
+      ],
+      "end": [
+        338.249,
+        -700.788
+      ],
+      "thickness": 16.42,
+      "height": 122.0
+    },
+    {
+      "start": [
+        8.209,
+        -16.417
+      ],
+      "end": [
+        8.209,
+        -684.37
+      ],
+      "thickness": 16.42,
+      "height": 122.0
+    },
+    {
+      "start": [
+        247.559,
+        -432.874
+      ],
+      "end": [
+        247.559,
+        -317.914
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        98.898,
+        -382.874
+      ],
+      "end": [
+        98.898,
+        -267.914
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        0.0,
+        -8.209
+      ],
+      "end": [
+        346.457,
+        -8.209
+      ],
+      "thickness": 16.42,
+      "height": 122.0
+    },
+    {
+      "start": [
+        0.0,
+        -692.579
+      ],
+      "end": [
+        330.04,
+        -692.579
+      ],
+      "thickness": 16.42,
+      "height": 122.0
+    },
+    {
+      "start": [
+        158.662,
+        -295.512
+      ],
+      "end": [
+        330.04,
+        -295.512
+      ],
+      "thickness": 5.98,
+      "height": 110.0
+    },
+    {
+      "start": [
+        161.654,
+        -298.504
+      ],
+      "end": [
+        161.654,
+        -382.874
+      ],
+      "thickness": 5.98,
+      "height": 122.0
+    },
+    {
+      "start": [
+        101.339,
+        -294.961
+      ],
+      "end": [
+        158.662,
+        -294.961
+      ],
+      "thickness": 4.88,
+      "height": 110.0
+    },
+    {
+      "start": [
+        184.803,
+        -317.914
+      ],
+      "end": [
+        184.803,
+        -408.268
+      ],
+      "thickness": 5.98,
+      "height": 110.0
+    },
+    {
+      "start": [
+        16.417,
+        -405.276
+      ],
+      "end": [
+        181.811,
+        -405.276
+      ],
+      "thickness": 5.98,
+      "height": 110.0
+    }
+  ],
+  "openings": [
+    {
+      "wall_index": 6,
+      "position": 0.9067,
+      "width": 49.21,
+      "type": "door",
+      "sill": 0.0,
+      "head": 79.1
+    },
+    {
+      "wall_index": 7,
+      "position": 0.071,
+      "width": 49.21,
+      "type": "door",
+      "sill": 0.0,
+      "head": 79.1
+    },
+    {
+      "wall_index": 8,
+      "position": 0.4531,
+      "width": 30.0,
+      "type": "door",
+      "sill": 0.0,
+      "head": 80.0
+    },
+    {
+      "wall_index": 9,
+      "position": 0.5462,
+      "width": 30.0,
+      "type": "door",
+      "sill": 0.0,
+      "head": 80.0
+    },
+    {
+      "wall_index": 10,
+      "position": 0.3456,
+      "width": 32.01,
+      "type": "door",
+      "sill": 0.0,
+      "head": 95.3
+    },
+    {
+      "wall_index": 11,
+      "position": 0.6869,
+      "width": 32.01,
+      "type": "door",
+      "sill": 0.0,
+      "head": 95.3
+    },
+    {
+      "wall_index": 10,
+      "position": 0.6779,
+      "width": 190.35,
+      "type": "window",
+      "sill": 3.9,
+      "head": 99.2
+    },
+    {
+      "wall_index": 11,
+      "position": 0.3381,
+      "width": 190.35,
+      "type": "window",
+      "sill": 3.9,
+      "head": 99.2
+    },
+    {
+      "wall_index": 6,
+      "position": 0.2964,
+      "width": 29.53,
+      "type": "window",
+      "sill": 3.9,
+      "head": 90.6
+    },
+    {
+      "wall_index": 7,
+      "position": 0.6963,
+      "width": 29.53,
+      "type": "window",
+      "sill": 3.9,
+      "head": 90.6
+    }
+  ],
+  "rooms": [
+    {
+      "polygon": [
+        [
+          248.977,
+          -684.37
+        ],
+        [
+          244.095,
+          -543.307
+        ],
+        [
+          244.095,
+          -496.063
+        ],
+        [
+          245.118,
+          -432.874
+        ],
+        [
+          250.0,
+          -317.914
+        ],
+        [
+          290.103,
+          -317.914
+        ],
+        [
+          330.04,
+          -465.551
+        ],
+        [
+          330.04,
+          -684.37
+        ]
+      ],
+      "kind": "room",
+      "name": "A101",
+      "label": "Foyer",
+      "ceiling": 101.6
+    },
+    {
+      "polygon": [
+        [
+          101.339,
+          -382.874
+        ],
+        [
+          101.339,
+          -297.402
+        ],
+        [
+          158.662,
+          -297.402
+        ],
+        [
+          158.662,
+          -382.874
+        ]
+      ],
+      "kind": "bath",
+      "name": "B104",
+      "label": "Bathroom 1",
+      "ceiling": 101.9
+    },
+    {
+      "polygon": [
+        [
+          56.354,
+          -382.874
+        ],
+        [
+          16.417,
+          -235.236
+        ],
+        [
+          16.417,
+          -16.417
+        ],
+        [
+          97.48,
+          -16.417
+        ],
+        [
+          102.362,
+          -157.48
+        ],
+        [
+          102.362,
+          -204.725
+        ],
+        [
+          101.339,
+          -267.914
+        ],
+        [
+          96.457,
+          -382.874
+        ]
+      ],
+      "kind": "room",
+      "name": "B101",
+      "label": "Foyer",
+      "ceiling": 101.6
+    },
+    {
+      "polygon": [
+        [
+          290.103,
+          -465.551
+        ],
+        [
+          290.103,
+          -317.914
+        ],
+        [
+          330.04,
+          -317.914
+        ],
+        [
+          330.04,
+          -465.551
+        ]
+      ],
+      "kind": "room",
+      "name": "A105",
+      "label": "Stair",
+      "ceiling": 223.7
+    },
+    {
+      "polygon": [
+        [
+          16.417,
+          -382.874
+        ],
+        [
+          16.417,
+          -235.236
+        ],
+        [
+          56.354,
+          -235.236
+        ],
+        [
+          56.354,
+          -382.874
+        ]
+      ],
+      "kind": "room",
+      "name": "B105",
+      "label": "Room",
+      "ceiling": 223.7
+    },
+    {
+      "polygon": [
+        [
+          102.362,
+          -204.725
+        ],
+        [
+          102.362,
+          -16.417
+        ],
+        [
+          330.04,
+          -16.417
+        ],
+        [
+          330.04,
+          -204.725
+        ]
+      ],
+      "kind": "room",
+      "name": "B102",
+      "label": "Living Room",
+      "ceiling": 101.6
+    },
+    {
+      "polygon": [
+        [
+          16.417,
+          -684.37
+        ],
+        [
+          16.417,
+          -496.063
+        ],
+        [
+          244.095,
+          -496.063
+        ],
+        [
+          244.095,
+          -684.37
+        ]
+      ],
+      "kind": "room",
+      "name": "A102",
+      "label": "Living Room",
+      "ceiling": 101.6
+    },
+    {
+      "polygon": [
+        [
+          16.417,
+          -496.063
+        ],
+        [
+          16.417,
+          -408.268
+        ],
+        [
+          245.118,
+          -408.268
+        ],
+        [
+          245.118,
+          -496.063
+        ]
+      ],
+      "kind": "kitchen",
+      "name": "A103",
+      "label": "Kitchen",
+      "ceiling": 101.9
+    },
+    {
+      "polygon": [
+        [
+          101.339,
+          -292.52
+        ],
+        [
+          101.339,
+          -204.725
+        ],
+        [
+          330.04,
+          -204.725
+        ],
+        [
+          330.04,
+          -292.52
+        ]
+      ],
+      "kind": "kitchen",
+      "name": "B103",
+      "label": "Kitchen",
+      "ceiling": 101.9
+    },
+    {
+      "polygon": [
+        [
+          187.795,
+          -403.386
+        ],
+        [
+          187.795,
+          -317.914
+        ],
+        [
+          245.118,
+          -317.914
+        ],
+        [
+          245.118,
+          -403.386
+        ]
+      ],
+      "kind": "bath",
+      "name": "A104",
+      "label": "Bathroom 1",
+      "ceiling": 101.9
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:159159",
+      "center": [
+        229.685,
+        -280.209
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:159262",
+      "center": [
+        269.055,
+        -280.225
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:160671",
+      "center": [
+        190.315,
+        -280.209
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:160717",
+      "center": [
+        121.024,
+        -280.209
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Counter Top w Sink Hole:600mm Depth:600mm Depth:161165",
+      "center": [
+        229.681,
+        -280.217
+      ],
+      "rotation": 180.0,
+      "size": [
+        118.11,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Counter Top:600mm Depth:600mm Depth:161646",
+      "center": [
+        121.024,
+        -280.217
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162230",
+      "center": [
+        121.024,
+        -217.036
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Counter Top:600mm Depth:600mm Depth:162231",
+      "center": [
+        180.079,
+        -216.555
+      ],
+      "rotation": 0.0,
+      "size": [
+        158.43,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162311",
+      "center": [
+        160.394,
+        -217.036
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162357",
+      "center": [
+        199.764,
+        -217.036
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162383",
+      "center": [
+        239.134,
+        -217.036
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162486",
+      "center": [
+        116.772,
+        -420.579
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162487",
+      "center": [
+        77.402,
+        -420.579
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162488",
+      "center": [
+        156.142,
+        -420.579
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162489",
+      "center": [
+        225.433,
+        -420.579
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Counter Top w Sink Hole:600mm Depth:600mm Depth:162490",
+      "center": [
+        116.776,
+        -420.571
+      ],
+      "rotation": 0.0,
+      "size": [
+        118.11,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Counter Top:600mm Depth:600mm Depth:162491",
+      "center": [
+        225.433,
+        -420.571
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162493",
+      "center": [
+        225.433,
+        -483.752
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Counter Top:600mm Depth:600mm Depth:162494",
+      "center": [
+        166.378,
+        -484.233
+      ],
+      "rotation": 180.0,
+      "size": [
+        158.43,
+        24.61
+      ],
+      "height": 5.6
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162495",
+      "center": [
+        186.063,
+        -483.752
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162496",
+      "center": [
+        146.693,
+        -483.752
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Base Cabinet-Double Door & 2 Drawer:1000mm:1000mm:162497",
+      "center": [
+        107.323,
+        -483.752
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        24.62
+      ],
+      "height": 33.9
+    },
+    {
+      "name": "M_Sofa:1830mm:1830mm:167283",
+      "center": [
+        314.292,
+        -90.551
+      ],
+      "rotation": 270.0,
+      "size": [
+        72.05,
+        26.0
+      ],
+      "height": 32.0
+    },
+    {
+      "name": "M_Sofa:1830mm:1830mm:167426",
+      "center": [
+        247.362,
+        -141.732
+      ],
+      "rotation": 180.0,
+      "size": [
+        72.05,
+        26.0
+      ],
+      "height": 32.0
+    },
+    {
+      "name": "M_Table-Coffee:0610 x 0610 x 0610mm:0610 x 0610 x 0610mm:167584",
+      "center": [
+        302.48,
+        -141.732
+      ],
+      "rotation": 0.0,
+      "size": [
+        24.02,
+        24.02
+      ],
+      "height": 24.0
+    },
+    {
+      "name": "M_Table-Coffee:0610 x 0610 x 0610mm:0610 x 0610 x 0610mm:167655",
+      "center": [
+        314.292,
+        -36.102
+      ],
+      "rotation": 0.0,
+      "size": [
+        24.02,
+        24.02
+      ],
+      "height": 24.0
+    },
+    {
+      "name": "M_Table-Coffee:0915 x 1830 x 0457mm:0915 x 1830 x 0457mm:168031",
+      "center": [
+        247.362,
+        -87.284
+      ],
+      "rotation": 0.0,
+      "size": [
+        72.05,
+        36.02
+      ],
+      "height": 18.0
+    },
+    {
+      "name": "M_Sofa:1830mm:1830mm:168377",
+      "center": [
+        35.468,
+        -604.543
+      ],
+      "rotation": 90.0,
+      "size": [
+        72.05,
+        26.0
+      ],
+      "height": 32.0
+    },
+    {
+      "name": "M_Sofa:1830mm:1830mm:168378",
+      "center": [
+        102.398,
+        -553.362
+      ],
+      "rotation": 0.0,
+      "size": [
+        72.05,
+        26.0
+      ],
+      "height": 32.0
+    },
+    {
+      "name": "M_Table-Coffee:0610 x 0610 x 0610mm:0610 x 0610 x 0610mm:168379",
+      "center": [
+        47.28,
+        -553.362
+      ],
+      "rotation": 180.0,
+      "size": [
+        24.02,
+        24.02
+      ],
+      "height": 24.0
+    },
+    {
+      "name": "M_Table-Coffee:0610 x 0610 x 0610mm:0610 x 0610 x 0610mm:168380",
+      "center": [
+        35.468,
+        -658.992
+      ],
+      "rotation": 180.0,
+      "size": [
+        24.02,
+        24.02
+      ],
+      "height": 24.0
+    },
+    {
+      "name": "M_Table-Coffee:0915 x 1830 x 0457mm:0915 x 1830 x 0457mm:168381",
+      "center": [
+        102.398,
+        -607.811
+      ],
+      "rotation": 180.0,
+      "size": [
+        72.05,
+        36.02
+      ],
+      "height": 18.0
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:191401",
+      "center": [
+        225.433,
+        -415.048
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:191557",
+      "center": [
+        156.142,
+        -415.048
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:191680",
+      "center": [
+        116.772,
+        -415.048
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000mm:1000mm:191768",
+      "center": [
+        77.402,
+        -415.048
+      ],
+      "rotation": 180.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:192153",
+      "center": [
+        121.024,
+        -285.739
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:192331",
+      "center": [
+        190.315,
+        -285.739
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000 mm:1000 mm:192508",
+      "center": [
+        229.685,
+        -285.739
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Upper Cabinet-Double Door-Wall:1000mm:1000mm:192610",
+      "center": [
+        269.055,
+        -285.739
+      ],
+      "rotation": 0.0,
+      "size": [
+        39.37,
+        13.56
+      ],
+      "height": 23.6
+    },
+    {
+      "name": "M_Vanity Cabinet-Double Door Sink Unit:450 x 450 mm:450 x 450 mm:205548",
+      "center": [
+        197.154,
+        -360.532
+      ],
+      "rotation": 90.0,
+      "size": [
+        17.72,
+        18.72
+      ],
+      "height": 32.3
+    }
+  ],
+  "footprint": [
+    [
+      -8.209,
+      -700.788
+    ],
+    [
+      -8.209,
+      -684.37
+    ],
+    [
+      0.0,
+      -684.37
+    ],
+    [
+      0.0,
+      -16.417
+    ],
+    [
+      -8.209,
+      -16.417
+    ],
+    [
+      -8.209,
+      0.0
+    ],
+    [
+      354.666,
+      0.0
+    ],
+    [
+      354.666,
+      -16.417
+    ],
+    [
+      346.457,
+      -16.417
+    ],
+    [
+      346.457,
+      -708.996
+    ],
+    [
+      330.04,
+      -708.996
+    ],
+    [
+      330.04,
+      -700.788
+    ]
+  ],
+  "warnings": [
+    "2 wall(s) with bases more than 72\" above the storey floor dropped (soffits / roof chases)",
+    "12 projected opening dimension(s) included frame trim; replaced with OverallWidth/Height",
+    "2 space(s) had concave footprints approximated by their convex hull"
+  ]
+}
