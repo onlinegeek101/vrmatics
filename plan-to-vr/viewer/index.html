@@ -59,6 +59,7 @@
   <h1>Plan-to-VR</h1>
   <select id="plan-select">
     <option value="plan.json">Bishop-Overland — imperial ranch house</option>
+    <option value="plans/zind-000.json">ZInD 000 — real home (Zillow dataset)</option>
     <option value="plans/ceco.json">Ceco.NET — metric building</option>
   </select>
   <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
@@ -704,9 +705,18 @@ function buildPlan(plan) {
   scene.add(group);
   planGroup = group;
 
-  // start the player at the plan center (world origin after recentring)
-  dolly.position.set(0, 0, 0);
-  dolly.rotation.y = 0;
+  // start the player where a real photo was taken if the plan carries
+  // localized cameras (ZInD tours); otherwise at the plan center
+  const cam = (plan.cameras || []).find(c => c.is_primary) || (plan.cameras || [])[0];
+  if (cam) {
+    const p = toWorld(cam.position[0], cam.position[1]);
+    dolly.position.set(p.x, 0, p.z);
+    dolly.rotation.y = (cam.rotation || 0) * Math.PI / 180;
+  } else {
+    dolly.position.set(0, 0, 0);
+    dolly.rotation.y = 0;
+  }
+  camera.rotation.set(0, 0, 0);
   camera.position.set(0, EYE, 0);
 
   // HUD

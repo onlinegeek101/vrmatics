@@ -142,6 +142,24 @@ are rare — most CAD sites serve DWG behind logins. Reasonable sources:
 DWG files can be converted to DXF with the free ODA File Converter, then fed
 straight to the parser.
 
+## ZInD (Zillow Indoor Dataset) tours
+
+`parser/zind2plan.py` converts a [ZInD](https://github.com/zillow/zind)
+tour (`zind_data.json`) into the same `plan.json`:
+
+```bash
+python parser/zind2plan.py sample/zind_sample_000.json -o viewer/plans/zind-000.json [--floor 0]
+```
+
+ZInD is 1,524 real, unfurnished homes with 71k real 360° panoramas, each
+localized on the floor plan — the converter emits those camera poses, and
+the viewer spawns you exactly where a real photo was taken, which makes
+photo-vs-VR comparison possible. The repo's public sample tour is bundled
+(`sample/zind_sample_000.json`, 16 rooms / 72 walls / 28 openings); the
+full dataset needs registration at bridgedataoutput.com/register/zgindoor
+(academic/non-commercial, manually approved). Homes are anonymized — no
+addresses, so specific properties can't be looked up.
+
 ## Parser
 
 ```
