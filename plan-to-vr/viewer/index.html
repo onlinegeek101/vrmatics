@@ -64,6 +64,7 @@
   <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
   <div class="row"><span>openings</span><span id="hud-openings">0</span></div>
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
+  <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
   <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · drag-drop a plan.json</div>
 </div>
@@ -229,11 +230,48 @@ function makeGrassTexture() {
   return tex;
 }
 
+function makeTileTexture() {
+  // 12" ceramic tiles with grout, 4x4 per canvas (= one 4 ft repeat)
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const T = 64;
+  for (let ty = 0; ty < 4; ty++) {
+    for (let tx = 0; tx < 4; tx++) {
+      g.fillStyle = `hsl(${40 + Math.random() * 8}, ${8 + Math.random() * 6}%, ${82 + Math.random() * 8}%)`;
+      g.fillRect(tx * T + 2, ty * T + 2, T - 4, T - 4);
+    }
+  }
+  g.strokeStyle = 'rgba(120, 115, 105, 0.9)';
+  g.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) {
+    g.beginPath(); g.moveTo(i * T, 0); g.lineTo(i * T, 256); g.stroke();
+    g.beginPath(); g.moveTo(0, i * T); g.lineTo(256, i * T); g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
 const floorTex = makeWoodTexture();
+// per-room overlays get UV = position in meters (ShapeGeometry), so their
+// texture repeats are set to world scale here, independent of the slab's
+const roomWoodTex = makeWoodTexture();
+roomWoodTex.repeat.set(1 / 1.22, 1 / 1.22);
+const roomTileTex = makeTileTexture();
+roomTileTex.repeat.set(1 / 1.22, 1 / 1.22);
 const wallMat = std({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
 const trimMat = std({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
 const floorMat = std({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
+const slabMat = std({ color: 0xcfccc3, roughness: 0.92 });   // concrete under/around rooms
+const roomWoodMat = std({ map: roomWoodTex, color: 0xd8b98e, roughness: 0.62 });
+const roomTileMat = std({ map: roomTileTex, color: 0xf1efe9, roughness: 0.28 });
 const ceilMat = std({ color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const lightDiskMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0xfff3dc, emissiveIntensity: 2.2, roughness: 0.4,
+});
 const glassMat = new THREE.MeshStandardMaterial({
   color: 0xcfe4ec, roughness: 0.05, metalness: 0.0,
   transparent: true, opacity: 0.22, envMapIntensity: 1.2, side: THREE.DoubleSide,
@@ -347,6 +385,21 @@ let planGroup = null;   // holds all generated geometry
 let ceiling = null;
 let fixtureGroup = null;
 let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
+let roomPolysWorld = []; // room polygons in world XZ, for interior tests
+
+// ray-cast point-in-polygon on the XZ plane
+function insideAnyRoom(x, z) {
+  for (const poly of roomPolysWorld) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, zi] = poly[i], [xj, zj] = poly[j];
+      if ((zi > z) !== (zj > z) &&
+          x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside;
+    }
+    if (inside) return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------- geometry
 function clearPlan() {
@@ -355,6 +408,7 @@ function clearPlan() {
     planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   planGroup = null; ceiling = null; fixtureGroup = null;
+  roomPolysWorld = [];
 }
 
 // Axis-aligned box placed in wall-local terms: centered at `along` on the
@@ -386,6 +440,7 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
   const sideBase = sill > 0 ? sill - CW : 0;
 
   for (const side of [1, -1]) {
+    if (!faceIsInterior(worldStart, dir, angle, lo, hi, depth, side)) continue;
     const out = side * (depth / 2 + CT / 2);
     // side casings
     boxOnWall(group, worldStart, dir, angle, lo - CW / 2, CW,
@@ -447,10 +502,22 @@ const CROWN_H = 3.5 * IN2M;
 
 // Extrude a trim profile along [a0,a1] on BOTH faces of a wall piece.
 // baseY: world height of the profile's y=0 line.
+// Is this face of a wall span inside a room? Sample the face midpoint just
+// off the wall surface. With no room data, treat every face as interior.
+function faceIsInterior(worldStart, dir, angle, a0, a1, depth, side) {
+  if (!roomPolysWorld.length) return true;
+  const mid = (a0 + a1) / 2;
+  const off = side * (depth / 2 + 0.06);
+  const x = worldStart.x + dir.x * mid + Math.sin(angle) * off;
+  const z = worldStart.z + dir.z * mid + Math.cos(angle) * off;
+  return insideAnyRoom(x, z);
+}
+
 function addTrim(group, worldStart, dir, angle, a0, a1, depth, baseY, profile) {
   const len = a1 - a0;
   if (len <= 0.02) return;
   for (const side of [1, -1]) {
+    if (!faceIsInterior(worldStart, dir, angle, a0, a1, depth, side)) continue;
     const pts = profile.map(([px, py]) =>
       new THREE.Vector2(side * (depth / 2 + px * IN2M), py * IN2M));
     if (side < 0) pts.reverse();          // keep winding CCW so normals face out
@@ -519,6 +586,12 @@ function buildPlan(plan) {
   // plan (x,y) inches -> world (x, -y) metres, recentred
   const toWorld = (px, py) => new THREE.Vector3((px - cx) * IN2M, 0, -(py - cy) * IN2M);
 
+  // room polygons (from the parser) drive interior-only trim, per-room
+  // floors, and ceiling lights; everything degrades gracefully without them
+  const rooms = plan.rooms || [];
+  roomPolysWorld = rooms.map(r =>
+    r.polygon.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M]));
+
   // group openings by wall
   const byWall = new Map();
   openings.forEach(o => {
@@ -571,13 +644,40 @@ function buildPlan(plan) {
     if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
   });
 
-  // floor slab - one texture tile per 4 ft so plank scale stays true
+  // floor slab. With room data the slab is bare concrete and each room lays
+  // its own finished floor: tile in baths/laundry, oak elsewhere.
   const w = (maxX - minX) * IN2M, d = (maxY - minY) * IN2M;
   floorTex.repeat.set((w + 0.3) / 1.22, (d + 0.3) / 1.22);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3), floorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3),
+    rooms.length ? slabMat : floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);
+
+  const H0 = ((walls[0] && walls[0].height) || 96) * IN2M;
+  rooms.forEach((r, i) => {
+    // ShapeGeometry point (sx, sy) lands at world (sx, 0, -sy) after
+    // rotateX(-90), matching toWorld's recentred metres
+    const pts = r.polygon.map(([px, py]) =>
+      new THREE.Vector2((px - cx) * IN2M, (py - cy) * IN2M));
+    const geo = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    geo.rotateX(-Math.PI / 2);
+    const kind = r.kind || 'room';
+    const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat : roomWoodMat;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.004;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+
+    // one recessed ceiling light per room at the centroid
+    let ax = 0, ay = 0;
+    for (const p of pts) { ax += p.x; ay += p.y; }
+    ax /= pts.length; ay /= pts.length;
+    const disk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.02, 20), lightDiskMat);
+    disk.position.set(ax, H0 - 0.012, -ay);
+    group.add(disk);
+  });
 
   // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
   fixtureGroup = new THREE.Group();
@@ -615,6 +715,7 @@ function buildPlan(plan) {
   document.getElementById('hud-walls').textContent = walls.length;
   document.getElementById('hud-openings').textContent = openings.length;
   document.getElementById('hud-fixtures').textContent = (plan.fixtures || []).length;
+  document.getElementById('hud-rooms').textContent = rooms.length;
   const warnBox = document.getElementById('hud-warn');
   const warns = plan.warnings || [];
   warnBox.innerHTML = warns.length

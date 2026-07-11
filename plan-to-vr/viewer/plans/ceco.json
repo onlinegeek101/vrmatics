@@ -286,6 +286,30 @@
     }
   ],
   "fixtures": [],
+  "rooms": [
+    {
+      "polygon": [
+        [
+          829.987,
+          332.211
+        ],
+        [
+          615.556,
+          332.211
+        ],
+        [
+          615.556,
+          356.671
+        ],
+        [
+          829.987,
+          356.671
+        ]
+      ],
+      "kind": "room",
+      "area": 5244.9
+    }
+  ],
   "warnings": [
     "orphan line not paired into a wall: (1126.3,573.4)->(1301.5,573.4)",
     "orphan line not paired into a wall: (1301.5,573.4)->(1301.5,648.2)",

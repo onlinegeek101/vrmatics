@@ -593,6 +593,128 @@ Wall.axis = property(lambda self: unit(sub(self.c1, self.c0)))
 
 
 # --------------------------------------------------------------------------
+# 6. room detection (polygonize the wall centerline network)
+# --------------------------------------------------------------------------
+MIN_ROOM_AREA = 15.0 * 144.0   # 15 sq ft in sq inches
+ROOM_SNAP = 6.0                # snap endpoint onto a nearby centerline
+ROOM_EXTEND = 8.0              # extend a dangling endpoint to reach a line
+ROOM_SIMPLIFY = 0.5
+
+_BATH_KEYS = ("TOILET", "WC", "TUB", "BATH", "SHOWER", "LAV")
+_KITCHEN_KEYS = ("REF", "RANGE", "STOVE", "CKTOP", "OVEN", "DW", "KIT")
+_LAUNDRY_KEYS = ("WASHER", "DRYER")
+
+
+def fixture_room_kind(name):
+    """Map a fixture block name to a room category (or None).
+    Matches the last '$'-segment so xref prefixes don't hit 'REF' etc."""
+    up = name.split("$")[-1].upper()
+    if any(k in up for k in _BATH_KEYS):
+        return "bath"
+    if any(k in up for k in _KITCHEN_KEYS):
+        return "kitchen"
+    if any(k in up for k in _LAUNDRY_KEYS):
+        return "laundry"
+    return None
+
+
+def detect_rooms(walls, fixtures, warnings):
+    """Detect enclosed rooms by polygonizing the wall centerline network.
+
+    Centerlines span full walls (door gaps included), so rooms stay closed
+    across openings. Junction gaps are healed first: an endpoint within
+    ROOM_SNAP of another centerline is snapped onto it, and a dangling
+    endpoint is extended along its wall by up to ROOM_EXTEND if that reaches
+    another line. unary_union then nodes the network and polygonize yields
+    candidate faces; slivers and the outer/building face are dropped. Rooms
+    are classified by the fixtures whose centers they contain. Never raises;
+    on any failure appends a warning and returns [].
+    """
+    try:
+        from shapely.geometry import LineString, Point
+        from shapely.ops import polygonize, unary_union
+    except ImportError:
+        warnings.append("shapely not installed; room detection skipped")
+        return []
+
+    try:
+        ends = [[w.c0, w.c1] for w in walls]  # mutable endpoint pairs
+
+        def others(i):
+            return [LineString(ends[j]) for j in range(len(ends)) if j != i]
+
+        # heal junction gaps: snap or extend each endpoint onto the network
+        for i in range(len(ends)):
+            for e in (0, 1):
+                p = Point(ends[i][e])
+                best = None  # (dist, linestring)
+                for ls in others(i):
+                    d = ls.distance(p)
+                    if best is None or d < best[0]:
+                        best = (d, ls)
+                if best is None:
+                    continue
+                d, ls = best
+                if 1e-9 < d <= ROOM_SNAP:
+                    proj = ls.interpolate(ls.project(p))
+                    ends[i][e] = (proj.x, proj.y)
+                elif d > ROOM_SNAP:
+                    # extend outward along the wall axis by up to ROOM_EXTEND
+                    o = ends[i][1 - e]
+                    dvec = unit(sub(ends[i][e], o))
+                    if dvec == (0.0, 0.0):
+                        continue
+                    tip = (ends[i][e][0] + dvec[0] * ROOM_EXTEND,
+                           ends[i][e][1] + dvec[1] * ROOM_EXTEND)
+                    probe = LineString([ends[i][e], tip])
+                    hit = None
+                    for ls in others(i):
+                        x = probe.intersection(ls)
+                        if x.is_empty:
+                            continue
+                        for g in getattr(x, "geoms", [x]):
+                            pt = (g.centroid if g.geom_type != "Point"
+                                  else g)
+                            dd = p.distance(pt)
+                            if hit is None or dd < hit[0]:
+                                hit = (dd, (pt.x, pt.y))
+                    if hit:
+                        ends[i][e] = hit[1]
+
+        network = unary_union([LineString(pair) for pair in ends])
+        polys = [pl for pl in polygonize(network)
+                 if pl.area >= MIN_ROOM_AREA]
+        # drop the outer/building face: any face that contains another face
+        polys = [pl for pl in polys
+                 if not any(q is not pl
+                            and pl.contains(q.representative_point())
+                            and pl.area > q.area
+                            for q in polys)]
+
+        rooms = []
+        for pl in polys:
+            pl = pl.simplify(ROOM_SIMPLIFY)
+            found = {fixture_room_kind(f["name"])
+                     for f in fixtures
+                     if pl.contains(Point(f["center"]))}
+            for kind in ("bath", "kitchen", "laundry"):
+                if kind in found:
+                    break
+            else:
+                kind = "room"
+            coords = list(pl.exterior.coords)[:-1]  # drop closing dup
+            rooms.append({
+                "polygon": [[round(x, 3), round(y, 3)] for x, y in coords],
+                "kind": kind,
+                "area": round(pl.area, 1),
+            })
+        return rooms
+    except Exception as exc:
+        warnings.append(f"room detection failed: {exc}")
+        return []
+
+
+# --------------------------------------------------------------------------
 # driver
 # --------------------------------------------------------------------------
 def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
@@ -644,6 +766,8 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         outside = len(fixtures) - len(kept)
         fixtures = kept
 
+    rooms = detect_rooms(walls, fixtures, warnings)
+
     for s in orphans:
         warnings.append(
             f"orphan line not paired into a wall: "
@@ -679,12 +803,16 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         ],
         "openings": openings,
         "fixtures": fixtures,
+        "rooms": rooms,
         "warnings": warnings,
     }
 
     kinds = {}
     for o in openings:
         kinds[o["type"]] = kinds.get(o["type"], 0) + 1
+    room_kinds = {}
+    for r in rooms:
+        room_kinds[r["kind"]] = room_kinds.get(r["kind"], 0) + 1
     report = {
         "input_segments": n_input,
         "drawing_units": unit_name,
@@ -692,6 +820,8 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
         "openings_matched": len(openings),
         "opening_kinds": kinds,
         "fixtures_found": len(fixtures),
+        "rooms_found": len(rooms),
+        "room_kinds": room_kinds,
         "orphan_lines": len(orphans),
         "short_pieces_dropped": len(short),
         "gaps_snapped": snapped,
@@ -768,6 +898,10 @@ def main():
           + f" from {report['opening_hints']} hints")
     if report["fixtures_found"]:
         print(f"  fixtures found      : {report['fixtures_found']}")
+    room_kinds = ", ".join(
+        f"{v} {k}" for k, v in sorted(report["room_kinds"].items()))
+    print(f"  rooms found         : {report['rooms_found']}"
+          + (f" ({room_kinds})" if room_kinds else ""))
     print(f"  gaps snapped        : {report['gaps_snapped']}")
     print(f"  gaps filled (breaks): {report['gaps_filled']}")
     print(f"  orphan lines skipped: {report['orphan_lines']}")
