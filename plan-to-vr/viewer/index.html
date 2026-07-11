@@ -148,6 +148,8 @@ const dolly = new THREE.Group();
 dolly.add(camera);
 scene.add(dolly);
 camera.position.set(0, EYE, 0);
+let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
+const spawnPose = { x: 0, z: 0, rot: 0 };
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
@@ -550,7 +552,28 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     }
   }
 
-  if (op.type === 'door') {
+  if (op.type === 'door' && w >= 54 * IN2M) {
+    // wide doors are sliders (patio or interior French): two glass panes
+    // in a thin frame, one per track, no swinging leaf
+    const FT = 1.2 * IN2M;
+    const midY = (sill + head) / 2, glassH = head - sill - 2 * FT;
+    boxOnWall(group, worldStart, dir, angle, mid, w, sill + FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, 2 * IN2M, midY, glassH, 0, 2.4 * IN2M, trimMat);
+    const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+    for (const [c, off] of [[mid - w / 4, 0.5 * IN2M], [mid + w / 4, -0.5 * IN2M]]) {
+      const pane = new THREE.Mesh(
+        new THREE.BoxGeometry(w / 2 - 2 * FT, glassH - 1 * IN2M, 0.25 * IN2M), glassMat);
+      pane.position.set(
+        worldStart.x + dir.x * c + nrm.x * off,
+        midY,
+        worldStart.z + dir.z * c + nrm.z * off);
+      pane.rotation.y = angle;
+      group.add(pane);
+    }
+  } else if (op.type === 'door') {
     // leaf parked open, flat against whichever side of the jamb has wall
     const LT = 1.75 * IN2M;
     const leafW = Math.min(w, 36 * IN2M);
@@ -808,6 +831,9 @@ function buildPlan(plan) {
   group.add(floor);
 
   const H0 = ((walls[0] && walls[0].height) || 96) * IN2M;
+  // ceilings live in one group: the footprint roof + any per-room ceiling
+  // planes at their measured heights (ZInD rooms carry real ceilings)
+  const ceilGroup = new THREE.Group();
   rooms.forEach((r, i) => {
     // ShapeGeometry point (sx, sy) lands at world (sx, 0, -sy) after
     // rotateX(-90), matching toWorld's recentred metres
@@ -823,13 +849,23 @@ function buildPlan(plan) {
     mesh.receiveShadow = true;
     group.add(mesh);
 
+    // measured per-room ceiling plane, when the plan provides one
+    const roomH = r.ceiling ? r.ceiling * IN2M : H0;
+    if (r.ceiling) {
+      const cgeo = new THREE.ShapeGeometry(new THREE.Shape(pts));
+      cgeo.rotateX(-Math.PI / 2);
+      const cmesh = new THREE.Mesh(cgeo, ceilMat);
+      cmesh.position.y = roomH;
+      ceilGroup.add(cmesh);
+    }
+
     // one recessed ceiling light per room at the centroid
     let ax = 0, ay = 0;
     for (const p of pts) { ax += p.x; ay += p.y; }
     ax /= pts.length; ay /= pts.length;
     const disk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.11, 0.11, 0.02, 20), lightDiskMat);
-    disk.position.set(ax, H0 - 0.012, -ay);
+    disk.position.set(ax, roomH - 0.012, -ay);
     group.add(disk);
   });
 
@@ -848,17 +884,20 @@ function buildPlan(plan) {
   // shadows, so sunlight still fills the interior - cheap fake skylighting.
   // With a footprint it follows the building outline instead of the bbox,
   // so it never cantilevers over open lawn.
-  const H = ((walls[0] && walls[0].height) || 96) * IN2M;
+  const H = walls.reduce((m, ww) => Math.max(m, (ww.height || 96) * IN2M), 0) || 2.44;
+  let roof;
   if (footShape) {
     const geo = new THREE.ExtrudeGeometry(footShape, { depth: 0.14, bevelEnabled: false });
     geo.rotateX(-Math.PI / 2);   // extrusion axis -> up
-    ceiling = new THREE.Mesh(geo, ceilMat);
-    ceiling.position.y = H;
+    roof = new THREE.Mesh(geo, ceilMat);
+    roof.position.y = H;
   } else {
-    ceiling = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
-    ceiling.position.y = H + 0.07;
+    roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
+    roof.position.y = H + 0.07;
   }
-  ceiling.receiveShadow = true;
+  roof.receiveShadow = true;
+  ceilGroup.add(roof);
+  ceiling = ceilGroup;           // C toggles roof + room ceilings together
   ceiling.visible = true;
   lamp.intensity = rooms.length ? 0 : 0.45;   // room light disks take over
   group.add(ceiling);
@@ -877,8 +916,15 @@ function buildPlan(plan) {
     dolly.position.set(0, 0, 0);
     dolly.rotation.y = 0;
   }
+  // measured camera/eye height when the tour provides one, so views match
+  // the real photos taken at these poses
+  spawnEyeY = (cam && cam.height) ? cam.height * IN2M
+    : (plan.eye_height ? plan.eye_height * IN2M : EYE);
+  spawnPose.x = dolly.position.x;
+  spawnPose.z = dolly.position.z;
+  spawnPose.rot = dolly.rotation.y;
   camera.rotation.set(0, 0, 0);
-  camera.position.set(0, EYE, 0);
+  camera.position.set(0, spawnEyeY, 0);
 
   // HUD
   const hud = document.getElementById('hud');
@@ -1000,10 +1046,10 @@ function toast(msg) {
 }
 
 function resetToStart() {
-  dolly.position.set(0, 0, 0);
-  dolly.rotation.set(0, 0, 0);
+  dolly.position.set(spawnPose.x, 0, spawnPose.z);
+  dolly.rotation.set(0, spawnPose.rot, 0);
   camera.rotation.set(0, 0, 0);
-  camera.position.set(0, EYE, 0);
+  camera.position.set(0, spawnEyeY, 0);
   gyro.yawOffset = 0;
   toast('Back at start');
 }

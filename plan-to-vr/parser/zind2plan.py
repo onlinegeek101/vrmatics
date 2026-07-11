@@ -475,6 +475,84 @@ def read_wdo_segments(data, floor_id, scale_in, rooms_source, warnings):
     return segments
 
 
+def collect_vertical_hints(data, floor_id, scale_in, warnings):
+    """Measured sill/head heights for every W/D/O annotation, in inches.
+
+    Merger layouts store each element as [left, right, (bottom, top)] where
+    the third entry is vertical extent normalized to camera height 1.0;
+    inches = (1 + v) * pano_scale * scale_in. Returns
+    [{"center": (x,y) inches, "kind": ..., "sill": in, "head": in}].
+    """
+    hints = []
+    for cr in sorted(((data.get("merger") or {}).get(floor_id) or {}).values(),
+                     key=str):
+        for pr in cr.values():
+            for pano in pr.values():
+                if not isinstance(pano, dict) or not pano.get("is_primary"):
+                    continue
+                layout = pano.get("layout_complete") or pano.get("layout_raw")
+                tr = pano.get("floor_plan_transformation")
+                if not layout or not tr:
+                    continue
+                vscale = tr.get("scale", 1.0) * scale_in
+                for key, kind in (("doors", "door"), ("windows", "window"),
+                                  ("openings", "opening")):
+                    flat = layout.get(key, [])
+                    if len(flat) % 3:
+                        continue
+                    for k in range(0, len(flat), 3):
+                        vert = flat[k + 2]
+                        if not (isinstance(vert, (list, tuple))
+                                and len(vert) >= 2):
+                            continue
+                        p0, p1 = to_global(flat[k:k + 2], tr)
+                        cx = (p0[0] + p1[0]) / 2.0 * scale_in
+                        cy = (p0[1] + p1[1]) / 2.0 * scale_in
+                        sill = (1.0 + vert[0]) * vscale
+                        head = (1.0 + vert[1]) * vscale
+                        if head <= sill:
+                            continue
+                        hints.append({"center": (cx, cy), "kind": kind,
+                                      "sill": max(0.0, sill), "head": head})
+    return hints
+
+
+def apply_vertical_hints(openings, walls, hints, warnings):
+    """Replace assumed sill/head values with measured ones.
+
+    Each opening takes the average of matching hints (same broad kind,
+    center within 24"). Door/opening sills snap to 0 when nearly there.
+    Falls back to the assumed values when no annotation is close.
+    """
+    unhinted = 0
+    for o in openings:
+        w = walls[o["wall_index"]]
+        axis = unit(sub(w["end"], w["start"]))
+        t = o["position"] * length(sub(w["end"], w["start"]))
+        c = (w["start"][0] + axis[0] * t, w["start"][1] + axis[1] * t)
+        sills, heads = [], []
+        for h in hints:
+            same = h["kind"] == o["type"] or \
+                "opening" in (h["kind"], o["type"])
+            if same and length(sub(h["center"], c)) <= 24.0:
+                sills.append(h["sill"])
+                heads.append(h["head"])
+        if not sills:
+            unhinted += 1
+            continue
+        sill = sum(sills) / len(sills)
+        head = sum(heads) / len(heads)
+        if o["type"] != "window" and sill < 2.0:
+            sill = 0.0
+        o["sill"] = round(sill, 1)
+        o["head"] = round(head, 1)
+    if unhinted:
+        warnings.append(
+            f"{unhinted} opening(s) had no measured vertical annotation; "
+            f"standard heights assumed")
+    return unhinted
+
+
 def map_openings(segments, walls, warnings):
     """Snap each W/D/O segment to the nearest wall as an opening.
 
@@ -563,20 +641,76 @@ def read_cameras(data, floor_id, scale_in, warnings):
                                     f"floor_plan_transformation skipped")
                     continue
                 tx, ty = tr["translation"]
-                cameras.append({
+                cam = {
                     "position": [round(tx * scale_in, 3),
                                  round(ty * scale_in, 3)],
                     "rotation": round(tr.get("rotation", 0.0), 2),
                     "pano": (pano.get("image_path") or "").split("/")[-1],
                     "is_primary": bool(pano.get("is_primary")),
                     "room": pano.get("label", ""),
-                })
+                    # camera height above floor: normalized 1.0 by definition
+                    "height": round(tr.get("scale", 1.0) * scale_in, 1),
+                }
                 ch = pano.get("ceiling_height")
                 if isinstance(ch, (int, float)) and ch > 0:
-                    heights.append(ch * tr.get("scale", 1.0) * scale_in)
+                    ceil_in = ch * tr.get("scale", 1.0) * scale_in
+                    heights.append(ceil_in)
+                    cam["_ceiling"] = ceil_in     # stripped before emit
+                cameras.append(cam)
     heights.sort()
     median_h = heights[len(heights) // 2] if heights else 0.0
     return cameras, median_h
+
+
+def point_in_polygon(p, poly):
+    x, y = p
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and \
+                x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def assign_measured_heights(rooms, walls, cameras, default_h):
+    """Per-room ceilings and per-wall heights from the pano measurements.
+
+    Each room's ceiling is the median measured ceiling of the panos shot
+    inside it. Each wall takes the tallest ceiling of the rooms it borders
+    (sampled just off both faces at the midpoint), so walls always reach
+    their rooms' ceilings. Everything falls back to default_h.
+    """
+    for room in rooms:
+        ceils = [c["_ceiling"] for c in cameras
+                 if "_ceiling" in c and
+                 point_in_polygon(c["position"], room["polygon"])]
+        if ceils:
+            ceils.sort()
+            m = ceils[len(ceils) // 2]
+            if 60.0 <= m <= 240.0:
+                room["ceiling"] = round(m, 1)
+
+    for w in walls:
+        axis = unit(sub(w["end"], w["start"]))
+        perp = (-axis[1], axis[0])
+        mid = ((w["start"][0] + w["end"][0]) / 2.0,
+               (w["start"][1] + w["end"][1]) / 2.0)
+        off = w["thickness"] / 2.0 + 3.0
+        borders = []
+        for side in (1.0, -1.0):
+            sp = (mid[0] + perp[0] * off * side, mid[1] + perp[1] * off * side)
+            for room in rooms:
+                if "ceiling" in room and point_in_polygon(sp, room["polygon"]):
+                    borders.append(room["ceiling"])
+                    break
+        w["height"] = round(max(borders), 1) if borders else default_h
+
+    for c in cameras:
+        c.pop("_ceiling", None)
 
 
 # --------------------------------------------------------------------------
@@ -715,6 +849,14 @@ def convert(path, floor_arg, exterior_thickness):
                                  warnings)
     openings, duplicates = map_openings(segments, walls, warnings)
 
+    # measured accuracy pass: real per-opening verticals, per-room ceilings,
+    # per-wall heights, true camera/eye heights - assumptions only as fallback
+    hints = collect_vertical_hints(data, floor_id, scale_in, warnings)
+    unhinted = apply_vertical_hints(openings, walls, hints, warnings)
+    assign_measured_heights(rooms_in, walls, cameras, wall_height)
+    cam_heights = sorted(c["height"] for c in cameras if c.get("height"))
+    eye_height = cam_heights[len(cam_heights) // 2] if cam_heights else None
+
     classify_garages(rooms_in, walls, openings, warnings)
     footprint = compute_footprint(walls, warnings)
 
@@ -733,7 +875,7 @@ def convert(path, floor_arg, exterior_thickness):
                 "start": [round(w["start"][0], 3), round(w["start"][1], 3)],
                 "end": [round(w["end"][0], 3), round(w["end"][1], 3)],
                 "thickness": round(w["thickness"], 2),
-                "height": wall_height,
+                "height": w.get("height", wall_height),
             }
             for w in walls
         ],
@@ -741,6 +883,7 @@ def convert(path, floor_arg, exterior_thickness):
         "rooms": rooms_in,
         "footprint": footprint,
         "cameras": cameras,
+        "eye_height": eye_height,
         "warnings": warnings,
     }
 
@@ -765,8 +908,33 @@ def convert(path, floor_arg, exterior_thickness):
         "wdo_duplicates_merged": duplicates,
         "cameras": len(cameras),
         "wall_height": wall_height,
+        "vertical_hints": len(hints),
+        "unhinted_openings": unhinted,
+        "eye_height": eye_height,
     }
+    flip_plan_y(plan)
     return plan, report
+
+
+def flip_plan_y(plan):
+    """ZInD global floor coordinates are y-DOWN (image convention). Blind
+    side-by-side comparison of our renders against the tour's own panoramas
+    showed every view mirrored left-right, and Zillow's rendered floor-plan
+    PNG confirmed it (patio north of the bonus room; our y-up read put it
+    south). Negate y everywhere and adjust camera headings (theta -> 180 -
+    theta) so the output is a true y-up plan matching the real house.
+    """
+    for w in plan["walls"]:
+        w["start"][1] = -w["start"][1]
+        w["end"][1] = -w["end"][1]
+    for r in plan.get("rooms", []):
+        for v in r["polygon"]:
+            v[1] = -v[1]
+    for p in plan.get("footprint", []):
+        p[1] = -p[1]
+    for c in plan.get("cameras", []):
+        c["position"][1] = -c["position"][1]
+        c["rotation"] = round((180.0 - c.get("rotation", 0.0)) % 360.0, 2)
 
 
 def main():
@@ -826,7 +994,11 @@ def main():
           + (f", {report['wdo_duplicates_merged']} double-annotated merged"
              if report["wdo_duplicates_merged"] else ""))
     print(f"  cameras (panos)     : {report['cameras']}")
-    print(f"  wall height         : {report['wall_height']}\"")
+    print(f"  wall height         : {report['wall_height']}\" (per-wall from room ceilings)")
+    print(f"  measured verticals  : {report['vertical_hints']} annotations, "
+          f"{report['unhinted_openings']} opening(s) fell back to defaults")
+    if report.get("eye_height"):
+        print(f"  eye height          : {report['eye_height']}\" (median camera)")
     if plan["warnings"]:
         print(f"  warnings            : {len(plan['warnings'])} "
               f"(see 'warnings' in {args.output})")
