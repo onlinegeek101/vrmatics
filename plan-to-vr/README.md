@@ -53,8 +53,12 @@ python -m http.server 8000
 
 Then open <http://localhost:8000> — click the page to grab the mouse, walk
 with **WASD**, look with the mouse, press **C** to toggle the ceiling and
-**F** to toggle furniture. You can also drag-and-drop any other `plan.json`
-onto the page.
+**F** to toggle furniture. **M** (or the ▦ plan button) switches to a
+top-down orthographic floor-plan view — ceilings off, the source plan's
+wall lines and opening spans drawn color-coded over the built geometry
+(doors red, windows blue, cased openings orange) so the model can be
+checked against the drawing at a glance; scroll to zoom, drag or WASD to
+pan. You can also drag-and-drop any other `plan.json` onto the page.
 
 Expected parser summary for the sample:
 

@@ -48,6 +48,13 @@
     position: fixed; bottom: 12px; left: 12px; z-index: 10;
     font: 11px ui-monospace, monospace; color: #6b7488;
   }
+  #map-btn {
+    position: fixed; top: 12px; right: 12px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #map-btn.on { background: #2b6cb0; border-color: #4a86c8; }
   #err {
     position: fixed; inset: 0; z-index: 30; display: none;
     align-items: center; justify-content: center; text-align: center;
@@ -72,11 +79,12 @@
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
 
+<button id="map-btn" title="top-down plan view (M)">▦ plan</button>
 <div id="overlay">
   <div class="card">
     <h2 id="overlay-title">Click to enter walkthrough</h2>
@@ -462,6 +470,8 @@ function buildFixture(f) {
 let planGroup = null;   // holds all generated geometry
 let ceiling = null;
 let fixtureGroup = null;
+let planOverlay = null;      // 2D plan linework, shown in map view
+let planSizeM = { w: 10, h: 10 };
 let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
 let footprintWorld = null; // building outline in world XZ, or null
@@ -774,6 +784,53 @@ function buildPlan(plan) {
     byWall.get(o.wall_index).push(o);
   });
 
+  // 2D plan linework for the top-down map view: wall faces plus opening
+  // spans with jamb ticks, colored by type, so the built geometry can be
+  // compared against the source drawing at a glance
+  planSizeM = { w: Math.max(1, (maxX - minX) * IN2M),
+                h: Math.max(1, (maxY - minY) * IN2M) };
+  {
+    const pos = [], col = [];
+    const C = { wall: [1, 0.15, 0.6], door: [1, 0.25, 0.25],
+                window: [0.3, 0.55, 1], opening: [1, 0.65, 0.1] };
+    const push = (ax, az, bx, bz, c) => {
+      pos.push(ax, 0.06, az, bx, 0.06, bz);
+      col.push(...c, ...c);
+    };
+    walls.forEach((w, wi) => {
+      const a = toWorld(w.start[0], w.start[1]);
+      const b = toWorld(w.end[0], w.end[1]);
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const L = Math.hypot(dx, dz) || 1;
+      const nx = -dz / L * w.thickness * IN2M / 2;
+      const nz = dx / L * w.thickness * IN2M / 2;
+      push(a.x + nx, a.z + nz, b.x + nx, b.z + nz, C.wall);
+      push(a.x - nx, a.z - nz, b.x - nx, b.z - nz, C.wall);
+      push(a.x + nx, a.z + nz, a.x - nx, a.z - nz, C.wall);
+      push(b.x + nx, b.z + nz, b.x - nx, b.z - nz, C.wall);
+      for (const o of (byWall.get(wi) || [])) {
+        const ux = dx / L, uz = dz / L;
+        const half = o.width * IN2M / 2;
+        const mx = a.x + dx * o.position, mz = a.z + dz * o.position;
+        const c = C[o.type] || C.opening;
+        push(mx - ux * half, mz - uz * half,
+             mx + ux * half, mz + uz * half, c);
+        for (const s of [-1, 1]) {          // jamb ticks across the wall
+          const jx = mx + ux * half * s, jz = mz + uz * half * s;
+          push(jx + nx * 1.8, jz + nz * 1.8, jx - nx * 1.8, jz - nz * 1.8, c);
+        }
+      }
+    });
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    planOverlay = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+      vertexColors: true, depthTest: false, transparent: true }));
+    planOverlay.renderOrder = 990;
+    planOverlay.visible = false;
+    group.add(planOverlay);
+  }
+
   // corner closure: a wall endpoint that meets another wall extends by half
   // its own thickness, so perpendicular boxes fully interpenetrate - no
   // notches at corners, no hairline seams at T-junctions
@@ -1022,7 +1079,9 @@ overlay.addEventListener('click', () => {
   } else controls.lock();
 });
 controls.addEventListener('lock', () => overlay.style.display = 'none');
-controls.addEventListener('unlock', () => { if (!renderer.xr.isPresenting) overlay.style.display = 'flex'; });
+controls.addEventListener('unlock', () => {
+  if (!renderer.xr.isPresenting && !mapMode) overlay.style.display = 'flex';
+});
 
 const keys = {};
 addEventListener('keydown', e => {
@@ -1032,10 +1091,88 @@ addEventListener('keydown', e => {
     lamp.intensity = ceiling.visible ? 0.45 : 0;
   }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
+  if (e.code === 'KeyM') toggleMap();
   if (e.code === 'KeyT') toggleTour();
   else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
 });
 addEventListener('keyup', e => keys[e.code] = false);
+
+// ------------------------------------------------------------- map view
+// Top-down orthographic "floor plan" mode (M / the ▦ button): ceilings
+// off, the 2D plan linework drawn over the built geometry, so the model
+// outline can be compared against the source drawing side by side.
+let mapMode = false;
+let mapCam = null;
+let mapSavedCeil = true;
+
+function fitMapCam() {
+  const aspect = innerWidth / innerHeight;
+  let hw = planSizeM.w / 2 * 1.12, hh = planSizeM.h / 2 * 1.12;
+  if (hw / hh > aspect) hh = hw / aspect; else hw = hh * aspect;
+  if (!mapCam) {
+    mapCam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 0.1, 200);
+    mapCam.position.set(0, 60, 0);
+    mapCam.up.set(0, 0, -1);            // plan north = screen up
+    mapCam.lookAt(0, 0, 0);
+  } else {
+    mapCam.left = -hw; mapCam.right = hw; mapCam.top = hh; mapCam.bottom = -hh;
+  }
+  mapCam.updateProjectionMatrix();
+}
+
+function toggleMap(on) {
+  const want = on !== undefined ? on : !mapMode;
+  if (want === mapMode) return;
+  mapMode = want;
+  if (mapMode) {
+    if (tour.active) stopTour();
+    fitMapCam();
+    mapCam.zoom = 1;
+    mapCam.position.x = 0; mapCam.position.z = 0;
+    mapCam.updateProjectionMatrix();
+    mapSavedCeil = ceiling ? ceiling.visible : true;
+    if (ceiling) ceiling.visible = false;
+    if (planOverlay) planOverlay.visible = true;
+    if (controls.isLocked) controls.unlock();
+    overlay.style.display = 'none';
+  } else {
+    if (ceiling) ceiling.visible = mapSavedCeil;
+    if (planOverlay) planOverlay.visible = false;
+    if (!renderer.xr.isPresenting && !IS_TOUCH) overlay.style.display = 'flex';
+  }
+  document.getElementById('map-btn').classList.toggle('on', mapMode);
+}
+document.getElementById('map-btn').addEventListener('click', () => toggleMap());
+
+addEventListener('wheel', e => {
+  if (!mapMode) return;
+  mapCam.zoom = Math.min(12, Math.max(0.4,
+    mapCam.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  mapCam.updateProjectionMatrix();
+}, { passive: true });
+
+let mapDrag = null;
+addEventListener('pointerdown', e => {
+  if (mapMode && e.target.id !== 'map-btn' && e.target.tagName !== 'SELECT')
+    mapDrag = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointermove', e => {
+  if (!mapMode || !mapDrag) return;
+  const sx = (mapCam.right - mapCam.left) / mapCam.zoom / innerWidth;
+  const sz = (mapCam.top - mapCam.bottom) / mapCam.zoom / innerHeight;
+  mapCam.position.x -= (e.clientX - mapDrag.x) * sx;
+  mapCam.position.z -= (e.clientY - mapDrag.y) * sz;
+  mapDrag = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointerup', () => mapDrag = null);
+
+function mapMove(dt) {                   // WASD pans the map too
+  const s = (mapCam.right - mapCam.left) / mapCam.zoom * dt * 0.6;
+  if (keys['KeyW']) mapCam.position.z -= s;
+  if (keys['KeyS']) mapCam.position.z += s;
+  if (keys['KeyA']) mapCam.position.x -= s;
+  if (keys['KeyD']) mapCam.position.x += s;
+}
 
 function desktopMove(dt) {
   if (!controls.isLocked) return;
@@ -1856,6 +1993,7 @@ function handleVRInput() {
 
 renderer.xr.addEventListener('sessionstart', () => {
   overlay.style.display = 'none';
+  toggleMap(false);            // map view is a flat-screen affair
   const session = renderer.xr.getSession();
   calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
   if (calib.ar && !calib.anchors.length && !calib.mode) {
@@ -1917,17 +2055,20 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   if (renderer.xr.isPresenting) handleVRInput();
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
+  else if (mapMode) mapMove(dt);
   else { desktopMove(dt); applyGyro(); }
   if (!tour.active && !(calib.mode || calib.aligned)) resolveCollision();
   if (calib.clearArmed > 0) calib.clearArmed -= dt;
   vrPanelTick(dt);
-  renderer.render(scene, camera);
+  renderer.render(scene,
+    mapMode && !renderer.xr.isPresenting ? mapCam : camera);
 });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (mapMode) fitMapCam();
 });
 
 // ---------------------------------------------------------------- load plan
@@ -1940,6 +2081,13 @@ function showError(msg) {
 function loadPlan(plan) {
   document.getElementById('err').style.display = 'none';
   buildPlan(plan);
+  if (mapMode) {               // keep map view across plan switches
+    if (ceiling) ceiling.visible = false;
+    if (planOverlay) planOverlay.visible = true;
+    fitMapCam();
+    mapCam.position.x = 0; mapCam.position.z = 0;
+    mapCam.zoom = 1; mapCam.updateProjectionMatrix();
+  }
   loadAnchors();               // per-plan persisted calibration anchors
   calib.aligned = false;
   if (calib.mode) { refreshAnchorMarkers(); vrMsg(calibStatusLines(), true); }
