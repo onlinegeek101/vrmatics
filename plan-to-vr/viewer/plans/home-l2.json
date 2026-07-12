@@ -1,0 +1,849 @@
+{
+ "units": "inches",
+ "drawing_units": "inches",
+ "walls": [
+  {
+   "start": [
+    692.64,
+    297.76
+   ],
+   "end": [
+    692.64,
+    821.92
+   ],
+   "thickness": 6.68,
+   "height": 96.0
+  },
+  {
+   "start": [
+    755.68,
+    399.92
+   ],
+   "end": [
+    841.12,
+    399.92
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1111.2,
+    821.92
+   ],
+   "end": [
+    1111.2,
+    666.4
+   ],
+   "thickness": 6.72,
+   "height": 96.0
+  },
+  {
+   "start": [
+    696.0,
+    825.28
+   ],
+   "end": [
+    1107.84,
+    825.28
+   ],
+   "thickness": 6.72,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1161.12,
+    659.68
+   ],
+   "end": [
+    1161.12,
+    297.76
+   ],
+   "thickness": 6.62,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1157.76,
+    294.4
+   ],
+   "end": [
+    696.0,
+    294.4
+   ],
+   "thickness": 6.72,
+   "height": 96.0
+  },
+  {
+   "start": [
+    841.12,
+    496.88
+   ],
+   "end": [
+    696.0,
+    496.88
+   ],
+   "thickness": 4.5,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1157.76,
+    661.88
+   ],
+   "end": [
+    924.32,
+    661.88
+   ],
+   "thickness": 5.56,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1157.746,
+    504.72
+   ],
+   "end": [
+    900.169,
+    503.171
+   ],
+   "thickness": 4.52,
+   "height": 96.0
+  },
+  {
+   "start": [
+    993.6,
+    659.68
+   ],
+   "end": [
+    993.6,
+    507.04
+   ],
+   "thickness": 4.8,
+   "height": 96.0
+  },
+  {
+   "start": [
+    753.36,
+    402.24
+   ],
+   "end": [
+    753.36,
+    422.56
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    841.158,
+    424.88
+   ],
+   "end": [
+    696.0,
+    424.88
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    843.36,
+    821.92
+   ],
+   "end": [
+    843.36,
+    402.24
+   ],
+   "thickness": 4.54,
+   "height": 96.0
+  },
+  {
+   "start": [
+    897.84,
+    297.76
+   ],
+   "end": [
+    897.84,
+    610.72
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    921.92,
+    703.68
+   ],
+   "end": [
+    921.92,
+    822.143
+   ],
+   "thickness": 3.94,
+   "height": 96.0
+  },
+  {
+   "start": [
+    880.48,
+    716.56
+   ],
+   "end": [
+    845.76,
+    716.56
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    763.04,
+    622.8
+   ],
+   "end": [
+    841.12,
+    622.8
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    805.52,
+    499.2
+   ],
+   "end": [
+    805.52,
+    528.0
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    807.84,
+    530.32
+   ],
+   "end": [
+    841.12,
+    530.32
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    882.8,
+    821.92
+   ],
+   "end": [
+    882.8,
+    718.88
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1032.56,
+    659.68
+   ],
+   "end": [
+    1032.56,
+    605.6
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1157.781,
+    572.601
+   ],
+   "end": [
+    1137.943,
+    572.794
+   ],
+   "thickness": 4.4,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1135.6,
+    570.4
+   ],
+   "end": [
+    1135.6,
+    507.04
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    760.72,
+    499.36
+   ],
+   "end": [
+    760.72,
+    620.48
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  }
+ ],
+ "openings": [
+  {
+   "wall_index": 0,
+   "position": 0.3112,
+   "width": 76.64,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 0,
+   "position": 0.6563,
+   "width": 42.56,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 0,
+   "position": 0.9154,
+   "width": 74.56,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 2,
+   "position": 0.4784,
+   "width": 111.36,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 3,
+   "position": 0.107,
+   "width": 75.04,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 3,
+   "position": 0.5662,
+   "width": 97.44,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 3,
+   "position": 0.9408,
+   "width": 38.56,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 4,
+   "position": 0.1466,
+   "width": 35.04,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 4,
+   "position": 0.5027,
+   "width": 58.56,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 4,
+   "position": 0.9171,
+   "width": 37.28,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 5,
+   "position": 0.0936,
+   "width": 62.4,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 5,
+   "position": 0.4669,
+   "width": 93.28,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 5,
+   "position": 0.6857,
+   "width": 62.4,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 5,
+   "position": 0.9336,
+   "width": 39.52,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 6,
+   "position": 0.4268,
+   "width": 57.31,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 6,
+   "position": 0.7844,
+   "width": 35.39,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 7,
+   "position": 0.4878,
+   "width": 141.36,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 8,
+   "position": 0.377,
+   "width": 138.88,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 8,
+   "position": 0.8239,
+   "width": 35.36,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 11,
+   "position": 0.295,
+   "width": 64.52,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 12,
+   "position": 0.1283,
+   "width": 64.48,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 12,
+   "position": 0.297,
+   "width": 42.87,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 12,
+   "position": 0.6167,
+   "width": 35.36,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 12,
+   "position": 0.8204,
+   "width": 110.08,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 13,
+   "position": 0.5915,
+   "width": 48.32,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 14,
+   "position": 0.5436,
+   "width": 64.46,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 18,
+   "position": 0.5168,
+   "width": 27.04,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 22,
+   "position": 0.5139,
+   "width": 52.0,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 23,
+   "position": 0.5264,
+   "width": 35.36,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  }
+ ],
+ "fixtures": [],
+ "rooms": [
+  {
+   "polygon": [
+    [
+     696.0,
+     294.4
+    ],
+    [
+     696.0,
+     424.88
+    ],
+    [
+     753.36,
+     424.88
+    ],
+    [
+     753.36,
+     402.24
+    ],
+    [
+     843.36,
+     402.24
+    ],
+    [
+     843.36,
+     716.56
+    ],
+    [
+     882.8,
+     718.88
+    ],
+    [
+     882.8,
+     825.28
+    ],
+    [
+     1107.84,
+     825.28
+    ],
+    [
+     1111.2,
+     661.88
+    ],
+    [
+     993.6,
+     661.88
+    ],
+    [
+     993.62,
+     503.742
+    ],
+    [
+     897.84,
+     503.171
+    ],
+    [
+     897.84,
+     294.4
+    ]
+   ],
+   "kind": "garage",
+   "area": 91630.8
+  },
+  {
+   "polygon": [
+    [
+     696.0,
+     424.88
+    ],
+    [
+     696.0,
+     496.88
+    ],
+    [
+     843.36,
+     496.88
+    ],
+    [
+     843.36,
+     424.88
+    ]
+   ],
+   "kind": "room",
+   "area": 10609.9
+  },
+  {
+   "polygon": [
+    [
+     696.0,
+     496.88
+    ],
+    [
+     696.0,
+     825.28
+    ],
+    [
+     843.36,
+     825.28
+    ],
+    [
+     843.36,
+     622.8
+    ],
+    [
+     760.72,
+     620.48
+    ],
+    [
+     760.72,
+     496.88
+    ]
+   ],
+   "kind": "room",
+   "area": 38082.9
+  },
+  {
+   "polygon": [
+    [
+     843.36,
+     825.28
+    ],
+    [
+     882.8,
+     825.28
+    ],
+    [
+     882.8,
+     718.88
+    ],
+    [
+     843.36,
+     716.56
+    ]
+   ],
+   "kind": "room",
+   "area": 4242.2
+  },
+  {
+   "polygon": [
+    [
+     1157.76,
+     661.88
+    ],
+    [
+     1157.76,
+     504.72
+    ],
+    [
+     993.62,
+     503.742
+    ],
+    [
+     993.6,
+     661.88
+    ]
+   ],
+   "kind": "room",
+   "area": 25878.1
+  },
+  {
+   "polygon": [
+    [
+     1157.76,
+     504.72
+    ],
+    [
+     1157.76,
+     294.4
+    ],
+    [
+     897.84,
+     294.4
+    ],
+    [
+     897.84,
+     503.171
+    ]
+   ],
+   "kind": "room",
+   "area": 54465.1
+  },
+  {
+   "polygon": [
+    [
+     805.52,
+     496.88
+    ],
+    [
+     760.72,
+     496.88
+    ],
+    [
+     760.72,
+     620.48
+    ],
+    [
+     843.36,
+     622.8
+    ],
+    [
+     843.36,
+     530.32
+    ],
+    [
+     807.84,
+     530.32
+    ]
+   ],
+   "kind": "room",
+   "area": 9083.6
+  }
+ ],
+ "footprint": [
+  [
+   689.3,
+   294.42
+  ],
+  [
+   689.3,
+   825.26
+  ],
+  [
+   692.64,
+   825.26
+  ],
+  [
+   692.64,
+   828.64
+  ],
+  [
+   1111.2,
+   828.64
+  ],
+  [
+   1111.2,
+   825.28
+  ],
+  [
+   1114.56,
+   825.28
+  ],
+  [
+   1114.56,
+   664.66
+  ],
+  [
+   1160.54,
+   664.66
+  ],
+  [
+   1160.54,
+   662.992
+  ],
+  [
+   1164.432,
+   662.992
+  ],
+  [
+   1164.432,
+   294.448
+  ],
+  [
+   1161.12,
+   294.448
+  ],
+  [
+   1161.12,
+   291.04
+  ],
+  [
+   692.64,
+   291.04
+  ],
+  [
+   692.64,
+   294.42
+  ]
+ ],
+ "warnings": [
+  "orphan line not paired into a wall: (841.6,426.4)->(845.6,426.9)",
+  "orphan line not paired into a wall: (766.1,422.6)->(766.1,427.2)",
+  "orphan line not paired into a wall: (830.6,422.6)->(830.6,427.2)",
+  "orphan line not paired into a wall: (696.0,444.6)->(689.4,444.6)",
+  "orphan line not paired into a wall: (696.0,484.2)->(689.4,484.2)",
+  "orphan line not paired into a wall: (885.1,821.9)->(919.8,821.9)",
+  "orphan line not paired into a wall: (926.4,297.8)->(900.2,297.8)",
+  "orphan line not paired into a wall: (803.2,499.2)->(763.0,499.2)",
+  "orphan line not paired into a wall: (696.0,625.1)->(696.0,627.8)",
+  "orphan line not paired into a wall: (924.3,822.2)->(939.4,821.9)",
+  "orphan line not paired into a wall: (1133.3,507.0)->(1130.1,507.0)",
+  "orphan line not paired into a wall: (1157.8,502.4)->(1157.8,485.8)",
+  "orphan line not paired into a wall: (919.8,664.3)->(895.5,664.3)",
+  "orphan line not paired into a wall: (1030.2,659.7)->(996.0,659.7)",
+  "orphan line not paired into a wall: (991.2,659.7)->(973.2,659.7)",
+  "orphan line not paired into a wall: (1157.8,507.0)->(1137.8,506.9)",
+  "orphan line not paired into a wall: (1133.3,507.0)->(1130.1,507.0)",
+  "orphan line not paired into a wall: (1094.7,507.0)->(996.0,507.0)",
+  "orphan line not paired into a wall: (841.1,528.0)->(841.1,499.2)",
+  "orphan line not paired into a wall: (900.2,494.1)->(900.2,502.4)",
+  "orphan line not paired into a wall: (895.5,610.7)->(895.5,664.3)",
+  "orphan line not paired into a wall: (924.3,664.1)->(924.6,668.3)",
+  "orphan line not paired into a wall: (924.6,703.7)->(924.6,718.9)",
+  "orphan line not paired into a wall: (919.8,718.9)->(885.1,718.9)",
+  "orphan line not paired into a wall: (696.0,620.5)->(758.4,620.5)",
+  "orphan line not paired into a wall: (845.8,711.2)->(845.8,714.2)",
+  "orphan line not paired into a wall: (696.0,427.2)->(696.0,444.6)",
+  "orphan line not paired into a wall: (696.0,484.2)->(696.0,494.6)",
+  "orphan line not paired into a wall: (1034.9,605.6)->(1030.2,605.6)",
+  "orphan line not paired into a wall: (845.3,671.5)->(695.5,675.5)",
+  "orphan line not paired into a wall: (695.5,675.5)->(841.6,671.5)",
+  "orphan line not paired into a wall: (689.4,444.6)->(689.4,484.2)",
+  "orphan line not paired into a wall: (845.5,800.3)->(845.5,735.8)",
+  "orphan line not paired into a wall: (689.3,814.9)->(689.3,828.6)",
+  "9 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+ ],
+ "source": {
+  "kind": "pdf",
+  "page": 1,
+  "inches_per_point": 1.3333
+ }
+}

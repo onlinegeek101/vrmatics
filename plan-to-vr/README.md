@@ -181,6 +181,42 @@ drone photos and point clouds alongside its IFC) converts the same way;
 its ground floor ships as a stress-test plan. Requires `pip install
 ifcopenshell shapely`.
 
+## CAD-plotted PDFs (no DXF needed)
+
+`parser/pdf2plan.py` reconstructs a plan from a vector PDF plotted out of
+CAD (DataCAD, AutoCAD) - the format architects actually email you. Text,
+layers and arcs don't survive plotting, so it works from what does:
+
+- **strokes by plot weight** - heavy lines are walls, light black lines
+  are symbols, light gray is the existing-conditions xref
+- **poche fills** - every kept wall is filled gray; demo walls, furniture
+  and dimension art are not, which makes fills the authoritative wall
+  mask (existing walls the strokes miss are recovered from fill edges)
+- **scale is measured, never trusted**: prints get made at half size
+  without anyone updating the title block, so wall-pair thickness and
+  refit door-swing radii vote among scale hypotheses (the same
+  geometry-first trick the DXF parser uses for units)
+- **door swings are refit** from the chord chains the plotter left
+  behind (trimmed Kasa circle fit in paper space)
+- the result is emitted as a real DXF (`A-WALL`/`A-DOOR`/`A-GLAZ`,
+  inches) and then run through the standard `extract.py` pipeline, and
+  the footprint arbitrates window-vs-cased-opening calls afterwards
+
+```bash
+python parser/pdf2plan.py binder.pdf --page 0 -o viewer/plans/home-l1.json
+python parser/audit_pavlu.py viewer/plans/home-l1.json viewer/plans/home-l2.json
+```
+
+On the bundled renovation binder (two floors, three wall states, plotted
+at half size) it reconstructs 32+24 walls, 16 doors, 28 windows and 13
+rooms; rooms that polygonize cleanly match the sheet's labeled dimensions
+within 3-6". The generated DXFs ship in `sample/home-l*.dxf` and the
+plans load in the viewer picker as "Home Reno". Known limits: rooms
+bounded by stair runs or closet clusters may not polygonize (their walls
+still render), all-glass sunroom walls without poche are missed, and
+hint-less exterior door gaps read as windows. Requires `pip install
+pymupdf ezdxf shapely`.
+
 ## Parser
 
 ```
