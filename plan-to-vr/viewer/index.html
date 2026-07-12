@@ -1018,7 +1018,7 @@ function desktopMove(dt) {
 // Double-tap (touch) or T (desktop) glides through every room: walk to a
 // waypoint facing the travel direction, dwell with a slow look-around,
 // move on. Any input stops it. Collision is skipped while touring.
-const tour = { active: false, i: 0, phase: 'move', dwell: 0, yaw0: 0 };
+const tour = { active: false, i: 0, phase: 'move', dwell: 0, yaw0: 0, yawBase: 0 };
 const TOUR_SPEED = 1.1;        // m/s
 const TOUR_DWELL = 3.2;        // s at each stop
 const TOUR_TURN = 1.6;         // rad/s max heading turn
@@ -1028,8 +1028,11 @@ function startTour() {
   tour.active = true;
   tour.i = 0;
   tour.phase = 'move';
+  tour.yawBase = dolly.rotation.y;   // head stays world-anchored to this
   camera.rotation.set(0, 0, 0);
-  toast('Auto walkthrough — tap to stop');
+  toast(gyro.enabled && gyro.seen
+    ? 'Auto walkthrough — move your phone to look, tap to stop'
+    : 'Auto walkthrough — tap to stop');
 }
 function stopTour(silent) {
   if (tour.active && !silent) toast('Walkthrough stopped');
@@ -1063,9 +1066,12 @@ function tourStep(dt) {
     dolly.position.z += (dz / dist) * step;
   } else {
     tour.dwell += dt;
-    // gentle 140-degree sweep and back while dwelling
-    const k = tour.dwell / TOUR_DWELL;
-    dolly.rotation.y = tour.yaw0 + Math.sin(k * Math.PI * 2) * 1.2;
+    // gentle sweep while dwelling - unless the phone is the head, in which
+    // case the user looks around themselves and the body holds still
+    if (!(gyro.enabled && gyro.seen)) {
+      const k = tour.dwell / TOUR_DWELL;
+      dolly.rotation.y = tour.yaw0 + Math.sin(k * Math.PI * 2) * 1.2;
+    }
     if (tour.dwell >= TOUR_DWELL) {
       tour.i += 1;
       if (tour.i >= tourStops.length) {
@@ -1120,10 +1126,24 @@ function enableGyro() {
 
 const _yawQuat = new THREE.Quaternion();
 const _yAxis = new THREE.Vector3(0, 1, 0);
+const _worldQuat = new THREE.Quaternion();
+const _dollyInv = new THREE.Quaternion();
 function applyGyro() {
   if (!gyro.enabled || !gyro.seen) return false;
   _yawQuat.setFromAxisAngle(_yAxis, gyro.yawOffset);
   camera.quaternion.copy(_yawQuat).multiply(gyro.quat);
+  return true;
+}
+
+// During the auto walkthrough the tour steers the body (dolly), so the
+// head is composed in WORLD frame and the dolly's turning is cancelled -
+// hold the phone still and the view holds still, even mid-turn.
+function applyGyroTour() {
+  if (!gyro.enabled || !gyro.seen) return false;
+  _yawQuat.setFromAxisAngle(_yAxis, tour.yawBase + gyro.yawOffset);
+  _worldQuat.copy(_yawQuat).multiply(gyro.quat);
+  _dollyInv.copy(dolly.quaternion).invert();
+  camera.quaternion.copy(_dollyInv).multiply(_worldQuat);
   return true;
 }
 
@@ -1381,7 +1401,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   if (renderer.xr.isPresenting) handleVRInput();
-  else if (tour.active) tourStep(dt);
+  else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else { desktopMove(dt); applyGyro(); }
   if (!tour.active) resolveCollision();
   renderer.render(scene, camera);
