@@ -75,9 +75,9 @@
 <div id="hud" hidden>
   <h1>Plan-to-VR</h1>
   <select id="plan-select">
-    <option value="plan.json">Bishop-Overland — imperial ranch house</option>
-    <option value="plans/home-l1.json">Home Reno — first floor (from PDF)</option>
+    <option value="plans/home-l1.json" selected>Home Reno — first floor (from PDF)</option>
     <option value="plans/home-l2.json">Home Reno — second floor (from PDF)</option>
+    <option value="plan.json">Bishop-Overland — imperial ranch house</option>
     <option value="plans/zind-000.json">ZInD 000 — real home (Zillow dataset)</option>
     <option value="plans/duplex-l1.json">Duplex Apartment — Level 1 (IFC/BIM)</option>
     <option value="plans/duplex-l2.json">Duplex Apartment — Level 2 (IFC/BIM)</option>
@@ -196,7 +196,7 @@ let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
 const spawnPose = { x: 0, z: 0, rot: 0 };
 let tourStops = [];    // world-space waypoints for the automated walkthrough
 let planOpeningsWorld = []; // door/window base segments in world XZ
-let currentPlanKey = 'plan.json';   // localStorage namespace for anchors
+let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
@@ -2274,7 +2274,7 @@ function fetchPlan(url) {
     });
 }
 
-fetchPlan('plan.json');
+fetchPlan('plans/home-l1.json');
 document.getElementById('plan-select').addEventListener('change', e => {
   fetchPlan(e.target.value);
 });

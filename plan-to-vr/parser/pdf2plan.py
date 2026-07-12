@@ -680,6 +680,50 @@ def recover_symbol_walls(symbol_segs, wall_segs):
     return lines, panels
 
 
+def default_camera(plan):
+    """Spawn the walkthrough just inside the main entry.
+
+    The main entry is taken as the widest exterior hinged door (footprint
+    probe: one side in, one side out). The camera stands two feet inside
+    it, facing into the house - the view a visitor gets stepping in.
+    """
+    fp = plan.get("footprint") or []
+    if len(fp) < 3:
+        return None
+    best = None
+    for o in plan["openings"]:
+        if o["type"] != "door":
+            continue
+        w = plan["walls"][o["wall_index"]]
+        dx = w["end"][0] - w["start"][0]
+        dy = w["end"][1] - w["start"][1]
+        L = math.hypot(dx, dy) or 1.0
+        gx = w["start"][0] + dx * o["position"]
+        gy = w["start"][1] + dy * o["position"]
+        off = w["thickness"] / 2 + 4.0
+        nx, ny = -dy / L * off, dx / L * off
+        in1 = point_in_poly(gx + nx, gy + ny, fp)
+        in2 = point_in_poly(gx - nx, gy - ny, fp)
+        if in1 == in2:
+            continue                       # interior door
+        sgn = 1.0 if in1 else -1.0         # inward normal
+        if best is None or o["width"] > best[0]:
+            ux, uy = -dy / L * sgn, dx / L * sgn
+            px = gx + ux * (w["thickness"] / 2 + 24.0)
+            py = gy + uy * (w["thickness"] / 2 + 24.0)
+            # viewer yaw: 0 faces plan north (+y); positive per
+            # dolly.rotation.y, forward = (-sin yaw, +cos yaw)
+            yaw = math.degrees(math.atan2(-ux, uy))
+            best = (o["width"], px, py, yaw)
+    if best is None:
+        return None
+    return {
+        "position": [round(best[1], 2), round(best[2], 2)],
+        "rotation": round(best[3], 2),
+        "is_primary": True,
+    }
+
+
 def point_in_poly(px, py, poly):
     hit = False
     for i in range(len(poly)):
@@ -1248,6 +1292,10 @@ def main():
     for c in chimneys:
         c["height"] = args.wall_height
     plan["fixtures"] = (plan.get("fixtures") or []) + chimneys
+
+    spawn = default_camera(plan)
+    if spawn:
+        plan["cameras"] = [spawn]
 
     n_dem, n_pro = fix_window_sides(plan, panels)
     if n_dem or n_pro:
