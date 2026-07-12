@@ -836,7 +836,7 @@ function buildPlan(plan) {
         type: op.type,
         ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
         bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
-        sill: op.sill, widthIn: (hi - lo) / IN2M, thick: depth,
+        sill: op.sill, head: Math.min(op.head, H), widthIn: (hi - lo) / IN2M, thick: depth,
       });
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
@@ -1473,20 +1473,48 @@ function applyAlignment() {
   return T;
 }
 
-// amber bar showing which plan feature will receive the next trace
-const calibTarget = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 0.04, 0.04),
-  new THREE.MeshBasicMaterial({ color: 0xffb020 }));
+// amber frame outline previewing where the plan currently believes the
+// target door/window sits - in passthrough you compare it against the
+// real frame, and it snaps onto reality as anchors improve the fit.
+// Drawn depth-test-off so it shows through ghosted walls.
+const calibTargetMat = new THREE.MeshBasicMaterial({
+  color: 0xffb020, depthTest: false, transparent: true, opacity: 0.95 });
+const calibTarget = new THREE.Group();
+{
+  const bar = () => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), calibTargetMat);
+    m.renderOrder = 998;
+    calibTarget.add(m);
+    return m;
+  };
+  calibTarget.userData.bottom = bar();
+  calibTarget.userData.top = bar();
+  calibTarget.userData.left = bar();
+  calibTarget.userData.right = bar();
+}
 calibTarget.visible = false;
 scene.add(calibTarget);
+
 function updateCalibTarget() {
   const cp = new THREE.Vector3();
   ctrlR.getWorldPosition(cp);
   const op = nearestOpening(cp, 2.5);
   if (!op) { calibTarget.visible = false; return; }
   const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
-  calibTarget.scale.x = len;
-  calibTarget.position.set((op.ax + op.bx) / 2, 0.02 + (op.sill || 0), (op.az + op.bz) / 2);
+  const sill = op.sill || 0;
+  const head = op.head || 2.03;
+  const hgt = Math.max(0.1, head - sill);
+  const T = 0.025;
+  const u = calibTarget.userData;
+  u.bottom.scale.set(len + T, T, T);
+  u.bottom.position.set(0, sill + T / 2, 0);
+  u.top.scale.set(len + T, T, T);
+  u.top.position.set(0, head - T / 2, 0);
+  u.left.scale.set(T, hgt, T);
+  u.left.position.set(-len / 2, sill + hgt / 2, 0);
+  u.right.scale.set(T, hgt, T);
+  u.right.position.set(len / 2, sill + hgt / 2, 0);
+  calibTarget.position.set((op.ax + op.bx) / 2, 0, (op.az + op.bz) / 2);
   calibTarget.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
   calibTarget.visible = true;
 }
@@ -1552,8 +1580,8 @@ function calibStatusLines() {
     ? 'add a 2nd anchor (a window works best) to lock orientation'
     : 'A: delete nearest anchor - X twice: clear all - B: exit';
   return [
-    'CALIBRATION - hold RIGHT trigger, trace through the OPEN doorway,',
-    'jamb to jamb on YOUR side (windows: along the sill) - amber = target',
+    'CALIBRATION - amber outline = where the plan thinks that door is.',
+    'RIGHT trigger: trace the OPEN doorway, jamb to jamb, on YOUR side',
     `${calib.anchors.length} anchor(s)` +
       (T ? ` - fit residual ${T.residIn.toFixed(1)}"` +
            ` - scale delta ${((T.scale - 1) * 100).toFixed(1)}%` : '') +
@@ -1627,6 +1655,7 @@ window.PLAN2VR_CALIB = {
   fitTraceSegment, solveAlignment, calib,
   applyAlignment, saveAnchors, loadAnchors,
   insideRoom: (x, z) => insideAnyRoom(x, z),
+  updateCalibTarget, calibTarget,
   get openings() { return planOpeningsWorld; },
   get dolly() { return dolly; },
 };
