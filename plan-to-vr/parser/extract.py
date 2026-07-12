@@ -763,6 +763,12 @@ def compute_footprint(walls, warnings):
                                                 cap_style="square")
                 for w in walls]
         merged = unary_union(bufs)
+        # morphological closing: interior slots the union leaves between
+        # near-parallel walls (stairwells, appliance niches) are building,
+        # not yard - a 16" closing seals slits under ~32" while leaving
+        # real reentrant corners alone
+        merged = merged.buffer(16.0, join_style="mitre") \
+                       .buffer(-16.0, join_style="mitre")
         polys = list(getattr(merged, "geoms", [merged]))
         polys = [p for p in polys if p.geom_type == "Polygon" and p.area > 0]
         if not polys:

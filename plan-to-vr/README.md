@@ -211,15 +211,35 @@ python parser/pdf2plan.py binder.pdf --page 0 -o viewer/plans/home-l1.json
 python parser/audit_pavlu.py viewer/plans/home-l1.json viewer/plans/home-l2.json
 ```
 
-On the bundled renovation binder (two floors, three wall states, plotted
-at half size) it reconstructs 32+24 walls, 16 doors, 28 windows and 13
-rooms; rooms that polygonize cleanly match the sheet's labeled dimensions
-within 3-6". The generated DXFs ship in `sample/home-l*.dxf` and the
-plans load in the viewer picker as "Home Reno". Known limits: rooms
-bounded by stair runs or closet clusters may not polygonize (their walls
-still render), all-glass sunroom walls without poche are missed, and
-hint-less exterior door gaps read as windows. Requires `pip install
-pymupdf ezdxf shapely`.
+Beyond the weight classes, walls drawn at symbol weight (sunroom window
+bands, glazed bays) are recovered by pairing merged line runs behind
+five guards (solidity, ladder, wall-overlap, hatch, connectivity); the
+gap-infill rejects double as door-panel evidence separating garage
+doors from window bands; mullioned bands classify by combining in-gap
+glazing pieces; footprint side-probes arbitrate window/opening/garage
+calls; and chimney masses (closed rect + coursing rungs, hollow,
+outside the footprint) become full-height fixtures.
+
+`parser/pdfoverlay.py` draws a generated plan back onto the source
+sheet through the exact extraction transform - every defect shows as a
+line floating off the drawing:
+
+```bash
+python parser/pdfoverlay.py binder.pdf plan.json --page 0 -o overlay.png
+```
+
+Audited to parity against the bundled renovation binder (two floors,
+three wall states, plotted at half size): every structural element on
+the sheets is traced - 61 walls, 17 doors, 30 windows, garage doors,
+two chimneys, 14 rooms. Blind checks against the sheets' own numbers:
+first-floor footprint within 0.2% of the 3,034 sqft gross schedule,
+garage within 8%, cleanly-polygonized rooms within 2.8-6.1" of their
+printed dimensions. The generated DXFs ship in `sample/home-l*.dxf` and
+the plans load in the viewer picker as "Home Reno". Documented
+exclusions: porch decks/columns, roof outlines, the unbuilt bonus attic
+(drawn dashed), stair runs, and open-plan spaces that do not polygonize
+into rooms (their walls still render; floors fall back to the slab).
+Requires `pip install pymupdf ezdxf shapely`.
 
 ## Parser
 
