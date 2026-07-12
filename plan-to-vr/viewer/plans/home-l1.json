@@ -11,7 +11,7 @@
     692.64,
     821.92
    ],
-   "thickness": 6.72,
+   "thickness": 6.92,
    "height": 96.0
   },
   {
@@ -124,7 +124,7 @@
   },
   {
    "start": [
-    1181.76,
+    1307.52,
     294.4
    ],
    "end": [
@@ -352,6 +352,18 @@
   },
   {
    "start": [
+    924.72,
+    657.6
+   ],
+   "end": [
+    924.72,
+    604.8
+   ],
+   "thickness": 2.72,
+   "height": 96.0
+  },
+  {
+   "start": [
     1161.12,
     659.68
    ],
@@ -368,10 +380,22 @@
     500.8
    ],
    "end": [
-    1222.72,
+    1307.52,
     500.8
    ],
-   "thickness": 6.72,
+   "thickness": 7.02,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1310.88,
+    497.44
+   ],
+   "end": [
+    1310.88,
+    297.76
+   ],
+   "thickness": 7.32,
    "height": 96.0
   },
   {
@@ -414,8 +438,16 @@
   },
   {
    "wall_index": 0,
-   "position": 0.8175,
-   "width": 168.16,
+   "position": 0.7401,
+   "width": 90.88,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 0,
+   "position": 0.9112,
+   "width": 74.56,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -432,8 +464,8 @@
    "wall_index": 6,
    "position": 0.4784,
    "width": 111.36,
-   "type": "opening",
-   "sill": 0.0,
+   "type": "window",
+   "sill": 30.0,
    "head": 80.0
   },
   {
@@ -504,8 +536,8 @@
    "wall_index": 9,
    "position": 0.3411,
    "width": 201.76,
-   "type": "opening",
-   "sill": 0.0,
+   "type": "window",
+   "sill": 30.0,
    "head": 80.0
   },
   {
@@ -518,7 +550,15 @@
   },
   {
    "wall_index": 10,
-   "position": 0.1552,
+   "position": 0.1407,
+   "width": 111.2,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 10,
+   "position": 0.3683,
    "width": 81.12,
    "type": "window",
    "sill": 30.0,
@@ -526,7 +566,7 @@
   },
   {
    "wall_index": 10,
-   "position": 0.6281,
+   "position": 0.7219,
    "width": 82.4,
    "type": "window",
    "sill": 30.0,
@@ -534,7 +574,7 @@
   },
   {
    "wall_index": 10,
-   "position": 0.8356,
+   "position": 0.8771,
    "width": 66.56,
    "type": "window",
    "sill": 30.0,
@@ -544,15 +584,15 @@
    "wall_index": 11,
    "position": 0.4969,
    "width": 101.92,
-   "type": "opening",
-   "sill": 0.0,
+   "type": "window",
+   "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 12,
    "position": 0.4628,
    "width": 35.36,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
@@ -560,8 +600,8 @@
    "wall_index": 13,
    "position": 0.1847,
    "width": 18.24,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -608,8 +648,8 @@
    "wall_index": 19,
    "position": 0.4674,
    "width": 121.76,
-   "type": "window",
-   "sill": 30.0,
+   "type": "door",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -664,7 +704,7 @@
    "wall_index": 25,
    "position": 0.8162,
    "width": 33.28,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
@@ -677,7 +717,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 29,
+   "wall_index": 30,
    "position": 0.2056,
    "width": 80.0,
    "type": "window",
@@ -685,23 +725,58 @@
    "head": 80.0
   },
   {
-   "wall_index": 29,
+   "wall_index": 30,
    "position": 0.5418,
    "width": 51.36,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
-   "wall_index": 30,
-   "position": 0.4821,
-   "width": 39.52,
+   "wall_index": 31,
+   "position": 0.195,
+   "width": 39.15,
    "type": "door",
    "sill": 0.0,
    "head": 80.0
+  },
+  {
+   "wall_index": 31,
+   "position": 0.6685,
+   "width": 74.99,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
   }
  ],
- "fixtures": [],
+ "fixtures": [
+  {
+   "name": "CHIMNEY",
+   "center": [
+    1193.6,
+    539.2
+   ],
+   "rotation": 0.0,
+   "size": [
+    49.92,
+    70.08
+   ],
+   "height": 96.0
+  },
+  {
+   "name": "CHIMNEY",
+   "center": [
+    896.48,
+    863.68
+   ],
+   "rotation": 0.0,
+   "size": [
+    49.92,
+    70.08
+   ],
+   "height": 96.0
+  }
+ ],
  "rooms": [
   {
    "polygon": [
@@ -840,12 +915,34 @@
   {
    "polygon": [
     [
-     1161.092,
-     294.585
+     1310.88,
+     297.76
     ],
     [
-     908.712,
-     296.846
+     1161.12,
+     297.76
+    ],
+    [
+     1161.12,
+     500.8
+    ],
+    [
+     1310.88,
+     497.44
+    ]
+   ],
+   "kind": "room",
+   "area": 30155.7
+  },
+  {
+   "polygon": [
+    [
+     1161.12,
+     297.76
+    ],
+    [
+     908.72,
+     297.76
     ],
     [
      908.98,
@@ -856,22 +953,54 @@
      486.96
     ],
     [
-     1161.107,
+     1161.12,
      486.96
     ]
    ],
-   "kind": "garage",
-   "area": 47329.2
+   "kind": "room",
+   "area": 46816.6
   }
  ],
  "footprint": [
   [
-   689.28,
-   825.28
+   692.64,
+   316.0
+  ],
+  [
+   118.56,
+   316.0
+  ],
+  [
+   118.56,
+   319.36
+  ],
+  [
+   115.2,
+   319.36
+  ],
+  [
+   115.2,
+   638.08
+  ],
+  [
+   118.56,
+   638.08
+  ],
+  [
+   118.56,
+   641.44
+  ],
+  [
+   689.182,
+   641.44
+  ],
+  [
+   689.182,
+   825.378
   ],
   [
    692.64,
-   825.28
+   825.378
   ],
   [
    692.64,
@@ -907,46 +1036,30 @@
   ],
   [
    1164.48,
-   504.16
+   504.31
   ],
   [
-   1226.08,
-   504.16
+   1311.03,
+   504.31
   ],
   [
-   1226.08,
-   497.44
+   1311.03,
+   501.1
   ],
   [
-   1164.48,
-   497.44
+   1314.54,
+   501.1
   ],
   [
-   1164.48,
-   419.84
+   1314.54,
+   294.1
   ],
   [
-   1177.28,
-   419.84
+   1310.88,
+   294.1
   ],
   [
-   1177.28,
-   375.04
-  ],
-  [
-   1164.48,
-   375.04
-  ],
-  [
-   1164.48,
-   297.76
-  ],
-  [
-   1185.12,
-   297.76
-  ],
-  [
-   1185.12,
+   1310.88,
    291.04
   ],
   [
@@ -1006,11 +1119,11 @@
    484.267
   ],
   [
-   696.0,
+   696.098,
    484.267
   ],
   [
-   696.0,
+   696.098,
    402.24
   ],
   [
@@ -1022,48 +1135,16 @@
    397.6
   ],
   [
-   696.0,
+   696.098,
    397.6
   ],
   [
-   696.0,
-   319.36
+   696.098,
+   319.262
   ],
   [
    692.64,
-   319.36
-  ],
-  [
-   692.64,
-   316.0
-  ],
-  [
-   118.56,
-   316.0
-  ],
-  [
-   118.56,
-   319.36
-  ],
-  [
-   115.2,
-   319.36
-  ],
-  [
-   115.2,
-   638.08
-  ],
-  [
-   118.56,
-   638.08
-  ],
-  [
-   118.56,
-   641.44
-  ],
-  [
-   689.28,
-   641.44
+   319.262
   ]
  ],
  "warnings": [
@@ -1074,7 +1155,6 @@
   "orphan line not paired into a wall: (743.8,821.9)->(866.4,821.9)",
   "orphan line not paired into a wall: (589.0,634.7)->(689.3,634.7)",
   "orphan line not paired into a wall: (804.3,297.8)->(696.0,297.8)",
-  "orphan line not paired into a wall: (696.0,680.0)->(696.0,740.3)",
   "orphan line not paired into a wall: (589.0,585.4)->(589.0,585.4)",
   "orphan line not paired into a wall: (582.1,578.1)->(582.1,586.6)",
   "orphan line not paired into a wall: (774.7,235.5)->(774.7,235.5)",
@@ -1160,6 +1240,7 @@
   "orphan line not paired into a wall: (1157.8,429.8)->(1128.5,429.8)",
   "orphan line not paired into a wall: (1128.5,429.8)->(1128.5,418.4)",
   "orphan line not paired into a wall: (1128.5,376.6)->(1128.5,365.3)",
+  "orphan line not paired into a wall: (1211.8,504.7)->(1222.7,504.2)",
   "orphan line not paired into a wall: (926.4,297.8)->(911.0,297.8)",
   "orphan line not paired into a wall: (918.7,235.5)->(918.7,235.5)",
   "orphan line not paired into a wall: (918.7,235.5)->(916.2,238.8)",
@@ -1189,7 +1270,7 @@
   "orphan line not paired into a wall: (1039.1,232.2)->(1039.1,232.2)",
   "orphan line not paired into a wall: (1039.1,232.2)->(1040.4,235.5)",
   "orphan line not paired into a wall: (1040.4,235.5)->(1040.4,235.5)",
-  "14 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "6 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "source": {
   "kind": "pdf",

@@ -57,6 +57,7 @@ ARC_SPAN_DEG = (40.0, 190.0)
 ARC_VOTE_IN = (22.0, 44.0)    # radii typical enough to vote on print scale
 GLAZ_LEN_IN = (16.0, 130.0)   # glazing runs the width of the window
 GLAZ_WALL_DIST_IN = 10.0
+GLAZ_EXTEND_IN = 140.0  # wall line extended for mid-band glazing
 GLAZ_PARALLEL_DEG = 4.0
 GRAY_MIN_LEN_IN = 12.0        # demo walls are dashed => short fragments
 GRAY_TOUCH_IN = 8.0           # recovered walls must join the new network
@@ -348,12 +349,16 @@ def scale_arcs(paper_arcs, ips):
     return out
 
 
-def find_glazing(symbol_segs, wall_segs):
+def find_glazing(symbol_segs, wall_segs, panels=()):
     """Light segments running along a wall line = window glazing.
 
-    Counter fronts and cabinet faces also run along walls and can't be
-    told from glass here; interior false windows are cleaned up after
-    extraction instead, where the footprint says which walls face out.
+    The wall line is extended past each segment's ends when testing
+    proximity - the glazing of a wide window band sits mid-gap, far from
+    any finite wall piece, but exactly on the interrupted wall's line.
+    Door panels (garage doors, sliders) also lie on that line, so any
+    piece inside a flagged panel span is excluded. Counter fronts and
+    cabinet faces along interior walls still slip through; the footprint
+    pass cleans those up after extraction.
     """
     near_wall = []
     for s in symbol_segs:
@@ -363,6 +368,10 @@ def find_glazing(symbol_segs, wall_segs):
             continue
         u = X.unit(v)
         mid = ((s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2)
+        if any(min(pa[0], pb[0]) - 4 <= mid[0] <= max(pa[0], pb[0]) + 4 and
+               min(pa[1], pb[1]) - 4 <= mid[1] <= max(pa[1], pb[1]) + 4
+               for pa, pb in panels):
+            continue
         for w in wall_segs:
             wv = X.sub(w.b, w.a)
             wl = X.length(wv)
@@ -373,7 +382,7 @@ def find_glazing(symbol_segs, wall_segs):
             if cosang < math.cos(math.radians(GLAZ_PARALLEL_DEG)):
                 continue
             t = ((mid[0] - w.a[0]) * wu[0] + (mid[1] - w.a[1]) * wu[1])
-            t = max(0.0, min(wl, t))
+            t = max(-GLAZ_EXTEND_IN, min(wl + GLAZ_EXTEND_IN, t))
             foot = (w.a[0] + wu[0] * t, w.a[1] + wu[1] * t)
             if math.dist(mid, foot) <= GLAZ_WALL_DIST_IN:
                 near_wall.append(s)
@@ -381,37 +390,266 @@ def find_glazing(symbol_segs, wall_segs):
     return near_wall
 
 
-GARAGE_DOOR_MIN = 96.0
+# symbol-weight wall recovery (sunroom window bands, porch knee walls)
+# the floor is high because pairing prefers the thinnest partner: shorter
+# runs (window pane sections ~30") would steal a band face at a smaller
+# spacing than the true opposite face and shred the band into confetti
+SYM_RUN_MIN_IN = 50.0        # merged run must be this long to be a wall
+SYM_RUN_GAP_IN = 6.0         # mullion breaks bridged when merging runs
+SYM_RUN_SOLID = 0.75         # solid fraction: dashed lines stay rejected
+SYM_TOUCH_IN = 8.0           # both run ends must reach the wall network
 
 
-def fix_window_sides(plan):
+def merge_runs(segs, gap=SYM_RUN_GAP_IN, lateral=0.75):
+    """Merge collinear segments into runs, bridging small gaps.
+
+    Returns [(a, b, solid_fraction)] where solid_fraction is how much of
+    the run's extent is actually inked - dashed lines merge into runs
+    too, but their fraction stays low and the caller drops them.
+    """
+    used = [False] * len(segs)
+    runs = []
+    for i, s in enumerate(segs):
+        if used[i]:
+            continue
+        u = X.unit(X.sub(s.b, s.a))
+        group = [s]
+        used[i] = True
+        changed = True
+        while changed:
+            changed = False
+            lo = min(min(q[0] * u[0] + q[1] * u[1] for q in (t.a, t.b))
+                     for t in group)
+            hi = max(max(q[0] * u[0] + q[1] * u[1] for q in (t.a, t.b))
+                     for t in group)
+            ref = group[0].a
+            for j, t in enumerate(segs):
+                if used[j]:
+                    continue
+                tu = X.unit(X.sub(t.b, t.a))
+                if abs(tu[0] * u[0] + tu[1] * u[1]) < 0.999:
+                    continue
+                mid = ((t.a[0] + t.b[0]) / 2, (t.a[1] + t.b[1]) / 2)
+                lat = abs((mid[0] - ref[0]) * -u[1] + (mid[1] - ref[1]) * u[0])
+                if lat > lateral:
+                    continue
+                t0 = min(t.a[0] * u[0] + t.a[1] * u[1],
+                         t.b[0] * u[0] + t.b[1] * u[1])
+                t1 = max(t.a[0] * u[0] + t.a[1] * u[1],
+                         t.b[0] * u[0] + t.b[1] * u[1])
+                if t0 > hi + gap or t1 < lo - gap:
+                    continue
+                group.append(t)
+                used[j] = True
+                changed = True
+        lo = min(min(q[0] * u[0] + q[1] * u[1] for q in (t.a, t.b))
+                 for t in group)
+        hi = max(max(q[0] * u[0] + q[1] * u[1] for q in (t.a, t.b))
+                 for t in group)
+        if hi - lo < 1.0:
+            continue
+        inked = sum(X.length(X.sub(t.b, t.a)) for t in group)
+        ref = group[0].a
+        base = ref[0] * u[0] + ref[1] * u[1]
+        a = (ref[0] + u[0] * (lo - base), ref[1] + u[1] * (lo - base))
+        b = (ref[0] + u[0] * (hi - base), ref[1] + u[1] * (hi - base))
+        runs.append((a, b, min(1.0, inked / (hi - lo))))
+    return runs
+
+
+def recover_symbol_walls(symbol_segs, wall_segs):
+    """Walls drawn at symbol weight: sunroom window bands, glazed porches.
+
+    These plot as thin double lines the wall classifier skips, in a layer
+    shared with furniture, stairs, appliances and section symbols. The
+    guards, in order:
+      - merged runs must be long and mostly inked (dashes fail solidity)
+      - runs must pair at wall thickness, like any wall
+      - ladder runs (a third parallel line at the same spacing: stair
+        treads, decking) are rejected
+      - pieces overlapping an already-detected wall are drawn detail
+        (backsplashes, cabinet faces), not structure
+      - hatched pieces are section symbols (the steel-beam callout)
+      - both piece ends must reach the wall network
+    Returns (wall edge lines, panel spans): the gap-infill rejects are
+    door panels drawn inside openings, and knowing where they are lets
+    the opening classifier tell a paneled garage door from a window band.
+    """
+    panels = []
+    cands = []
+    for a, b, solid in merge_runs(
+            [s for s in symbol_segs
+             if X.length(X.sub(s.b, s.a)) >= 2.0]):
+        if math.dist(a, b) >= SYM_RUN_MIN_IN and solid >= SYM_RUN_SOLID:
+            cands.append(X.Segment(a, b))
+    if not cands:
+        return [], panels
+    pieces, _ = X.pair_segments(list(cands), 14.0)
+
+    def perp(u):
+        return (-u[1], u[0])
+
+    def near_seg(pt, s, tol):
+        ax, ay = s.a
+        vx, vy = s.b[0] - ax, s.b[1] - ay
+        L2 = vx * vx + vy * vy
+        t = 0.0 if not L2 else max(0.0, min(1.0, ((pt[0] - ax) * vx +
+                                                  (pt[1] - ay) * vy) / L2))
+        return math.dist(pt, (ax + vx * t, ay + vy * t)) <= tol
+
+    # hatch density map: short diagonal strokes mark section symbols
+    diags = []
+    for s in symbol_segs:
+        L = X.length(X.sub(s.b, s.a))
+        if 0.5 <= L <= 8.0:
+            u = X.unit(X.sub(s.b, s.a))
+            if 0.25 <= abs(u[0]) <= 0.97:
+                diags.append(((s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2))
+
+    kept = []
+    for p in pieces:
+        u = X.unit(X.sub(p.c1, p.c0))
+        n = perp(u)
+        L = X.length(X.sub(p.c1, p.c0))
+        mid = ((p.c0[0] + p.c1[0]) / 2, (p.c0[1] + p.c1[1]) / 2)
+        # ladder: another candidate parallel at ~thickness beyond a face
+        ladder = False
+        for s in cands:
+            su = X.unit(X.sub(s.b, s.a))
+            if abs(su[0] * u[0] + su[1] * u[1]) < 0.985:
+                continue
+            smid = ((s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2)
+            d = abs((smid[0] - mid[0]) * n[0] + (smid[1] - mid[1]) * n[1])
+            along = abs((smid[0] - mid[0]) * u[0] + (smid[1] - mid[1]) * u[1])
+            if along > L / 2 + 6:
+                continue
+            if 0.6 * p.thickness <= d - p.thickness / 2 <= 1.6 * p.thickness \
+                    and X.length(X.sub(s.b, s.a)) >= 0.5 * L:
+                ladder = True
+                break
+        if ladder:
+            continue
+        # overlap with detected walls: drawn detail on the wall, not a
+        # wall. Even partial overlap disqualifies - a wall-weight run
+        # interrupted by garage doors still owns its line, and doubling
+        # it here shreds the pairing downstream
+        samples = [(p.c0[0] + (p.c1[0] - p.c0[0]) * t,
+                    p.c0[1] + (p.c1[1] - p.c0[1]) * t)
+                   for t in (0.1, 0.3, 0.5, 0.7, 0.9)]
+        hits = sum(1 for q in samples
+                   if any(near_seg(q, s, 4.0) for s in wall_segs))
+        if hits >= 2:
+            continue
+        # hatch: section symbol, not structure
+        n_hatch = sum(1 for hx, hy in diags
+                      if abs((hx - mid[0]) * u[0] + (hy - mid[1]) * u[1])
+                      <= L / 2 + 2
+                      and abs((hx - mid[0]) * n[0] + (hy - mid[1]) * n[1])
+                      <= p.thickness + 4)
+        if n_hatch >= 6:
+            continue
+        # gap infill: garage/entry door panels plot as thin double lines
+        # inside an opening, collinear with the interrupted wall run. If
+        # long wall strokes continue the piece's line on BOTH sides, the
+        # piece is a panel in that run's gap, not new structure (a
+        # sunroom band that extends the building only has wall on one
+        # side of it)
+        lo = min(X.dot(p.c0, u), X.dot(p.c1, u))
+        hi = max(X.dot(p.c0, u), X.dot(p.c1, u))
+        before = after = False
+        for s in wall_segs:
+            su = X.unit(X.sub(s.b, s.a))
+            if abs(su[0] * u[0] + su[1] * u[1]) < 0.999:
+                continue
+            if X.length(X.sub(s.b, s.a)) < 18.0:
+                continue
+            smid = ((s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2)
+            lat = abs((smid[0] - mid[0]) * n[0] + (smid[1] - mid[1]) * n[1])
+            if lat > 3.5:
+                continue
+            s0, s1 = X.dot(s.a, u), X.dot(s.b, u)
+            if max(s0, s1) <= lo + 6:
+                before = True
+            if min(s0, s1) >= hi - 6:
+                after = True
+        if before and after:
+            panels.append((p.c0, p.c1))
+            continue
+        kept.append(p)
+
+    # connectivity: both ends must reach the network (walls or other
+    # accepted pieces), which floating furniture outlines never do
+    def end_ok(pt, others):
+        for s in wall_segs:
+            if near_seg(pt, s, SYM_TOUCH_IN):
+                return True
+        for q in others:
+            if q is not None and near_seg(pt, X.Segment(q.c0, q.c1),
+                                          SYM_TOUCH_IN):
+                return True
+        return False
+
+    alive = list(kept)
+    changed = True
+    while changed:
+        changed = False
+        for i, p in enumerate(alive):
+            if p is None:
+                continue
+            others = [q for j, q in enumerate(alive) if j != i]
+            if not (end_ok(p.c0, others) and end_ok(p.c1, others)):
+                alive[i] = None
+                changed = True
+    final = [p for p in alive if p is not None]
+
+    lines = []
+    for p in final:
+        u = X.unit(X.sub(p.c1, p.c0))
+        n = perp(u)
+        t = p.thickness / 2
+        lines.append(X.Segment((p.c0[0] + n[0] * t, p.c0[1] + n[1] * t),
+                               (p.c1[0] + n[0] * t, p.c1[1] + n[1] * t)))
+        lines.append(X.Segment((p.c0[0] - n[0] * t, p.c0[1] - n[1] * t),
+                               (p.c1[0] - n[0] * t, p.c1[1] - n[1] * t)))
+    return lines, panels
+
+
+def point_in_poly(px, py, poly):
+    hit = False
+    for i in range(len(poly)):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % len(poly)]
+        if (ay > py) != (by > py):
+            x = ax + (py - ay) * (bx - ax) / (by - ay)
+            if x > px:
+                hit = not hit
+    return hit
+
+
+def fix_window_sides(plan, panels=()):
     """Swap misread opening types using the footprint as the arbiter.
 
     Glazing evidence from a plot is noisy in both directions: counter
     fronts along interior walls read as glass, while some real windows
-    plot only jamb ticks and match nothing. The footprint disambiguates:
-      - interior 'windows' become the cased openings they are
-      - exterior hint-less gaps become windows (an outside wall never
-        has an open hole), unless they are garage-door wide
-    Rare true interior windows and hint-less exterior doors lose out;
-    both beat glass in a hallway or a hole in the facade.
+    plot only jamb ticks and match nothing. The footprint decides which
+    is which topologically - probe a point on each side of the gap:
+      - one side in, one side out  -> a facade gap: windows stay, and
+        hint-less holes become windows (an outside wall never has an
+        open hole) - EXCEPT gaps holding a door panel (the thin double
+        line drawn inside garage doors and sliders), which stay open
+      - both sides inside          -> an interior gap: 'windows' here
+        are counter lines, so they become the cased openings they are
+    Distance to the boundary is NOT a substitute: walls flanking an
+    interior notch (garage/house junction) sit near the outline yet
+    face inside on both sides. Width is not a substitute for the panel
+    test either: window bands run wider than single garage doors.
     """
     fp = plan.get("footprint") or []
     if len(fp) < 3:
         return 0, 0
 
-    def fp_dist(gx, gy):
-        best = 1e9
-        for i in range(len(fp)):
-            ax, ay = fp[i]
-            bx, by = fp[(i + 1) % len(fp)]
-            vx, vy = bx - ax, by - ay
-            L2 = vx * vx + vy * vy
-            t = 0.0 if not L2 else max(0.0, min(1.0, (
-                (gx - ax) * vx + (gy - ay) * vy) / L2))
-            best = min(best, math.hypot(gx - (ax + vx * t),
-                                        gy - (ay + vy * t)))
-        return best
+    def inside(px, py):
+        return point_in_poly(px, py, fp)
 
     demoted = promoted = 0
     for o in plan["openings"]:
@@ -420,13 +658,21 @@ def fix_window_sides(plan):
         w = plan["walls"][o["wall_index"]]
         gx = w["start"][0] + (w["end"][0] - w["start"][0]) * o["position"]
         gy = w["start"][1] + (w["end"][1] - w["start"][1]) * o["position"]
-        exterior = fp_dist(gx, gy) <= w["thickness"] + 6.0
-        if o["type"] == "window" and not exterior:
+        dx = w["end"][0] - w["start"][0]
+        dy = w["end"][1] - w["start"][1]
+        L = math.hypot(dx, dy) or 1.0
+        off = w["thickness"] / 2 + 4.0
+        nx, ny = -dy / L * off, dx / L * off
+        sides = inside(gx + nx, gy + ny) + inside(gx - nx, gy - ny)
+        paneled = any(
+            min(pa[0], pb[0]) - 8 <= gx <= max(pa[0], pb[0]) + 8 and
+            min(pa[1], pb[1]) - 8 <= gy <= max(pa[1], pb[1]) + 8
+            for pa, pb in panels)
+        if o["type"] == "window" and sides == 2:
             o["type"] = "opening"
             o["sill"] = 0.0
             demoted += 1
-        elif o["type"] == "opening" and exterior \
-                and o["width"] < GARAGE_DOOR_MIN:
+        elif o["type"] == "opening" and sides == 1 and not paneled:
             o["type"] = "window"
             o["sill"] = X.WINDOW_SILL
             o["head"] = X.WINDOW_HEAD
@@ -472,6 +718,112 @@ def poche_wall_edges(poche_polys, ips, black_segs):
             if math.dist(a, b) >= GRAY_MIN_LEN_IN and not covered(a, b):
                 lines.append(X.Segment(a, b))
     return lines
+
+
+CHIMNEY_SIDE_IN = (24.0, 96.0)
+
+
+def find_chimneys(symbol_segs, wall_segs):
+    """Masonry masses: a closed symbol-weight rect with coursing rungs.
+
+    The chimney plots as a rectangle bumped out from an exterior wall,
+    capped at the far end and striped with full-width ledger lines. Too
+    thick to pair as a wall, it would otherwise vanish from the model.
+    The full-width requirement on the rungs is what rejects lookalikes:
+    roof/eave tick pairs also stand off the wall at chimney-ish spacing,
+    but the only horizontals crossing them are the wall lines themselves,
+    which run far past the pair.
+    """
+    runs = merge_runs([s for s in symbol_segs
+                       if X.length(X.sub(s.b, s.a)) >= 2.0])
+    def vert(r):
+        return abs(r[0][0] - r[1][0]) < 1.0
+    def horz(r):
+        return abs(r[0][1] - r[1][1]) < 1.0
+    vs = [r for r in runs if vert(r)
+          and CHIMNEY_SIDE_IN[0] <= abs(r[0][1] - r[1][1]) <= CHIMNEY_SIDE_IN[1]]
+    hs = [r for r in runs if horz(r)]
+
+    fixtures = []
+    for i, v1 in enumerate(vs):
+        for v2 in vs[i + 1:]:
+            wdt = abs(v1[0][0] - v2[0][0])
+            if not CHIMNEY_SIDE_IN[0] <= wdt <= CHIMNEY_SIDE_IN[1]:
+                continue
+            y1 = sorted((v1[0][1], v1[1][1]))
+            y2 = sorted((v2[0][1], v2[1][1]))
+            if abs(y1[0] - y2[0]) > 6 or abs(y1[1] - y2[1]) > 6:
+                continue
+            x0, x1_ = sorted((v1[0][0], v2[0][0]))
+            # caps and rungs must span the rect and not run past it
+            spans = []
+            for h in hs:
+                hx = sorted((h[0][0], h[1][0]))
+                if abs(hx[0] - x0) <= 4 and abs(hx[1] - x1_) <= 4 \
+                        and y1[0] - 4 <= h[0][1] <= y1[1] + 4:
+                    spans.append(h[0][1])
+            if not 3 <= len(spans) <= 7:
+                # cap plus a few coursing rungs; a stair run inside a
+                # footprint notch mimics the pattern but has a tread
+                # every foot, far more lines than masonry coursing
+                continue
+            # masonry is drawn hollow except for coursing: appliance
+            # stacks (washer/dryer/sink) mimic the rect+rungs pattern
+            # but carry their own interior vertical edges
+            hollow = True
+            for r in runs:
+                if not vert(r) or math.dist(r[0], r[1]) < 12:
+                    continue
+                rx = r[0][0]
+                ry = sorted((r[0][1], r[1][1]))
+                if x0 + 3 < rx < x1_ - 3 and \
+                        min(ry[1], y1[1]) - max(ry[0], y1[0]) >= \
+                        0.3 * (y1[1] - y1[0]):
+                    hollow = False
+                    break
+            if not hollow:
+                continue
+            if max(spans) < y1[1] - 6 and min(spans) > y1[0] + 6:
+                continue            # no cap at either end
+            # slots between two parallel walls are stairwells or chases,
+            # never chimneys - masonry abuts a wall on one end at most
+            flank = [False, False]
+            for s in wall_segs:
+                if abs(s.a[0] - s.b[0]) > 1.0:
+                    continue          # want walls parallel to the sides
+                sy = sorted((s.a[1], s.b[1]))
+                if min(sy[1], y1[1]) - max(sy[0], y1[0]) < \
+                        0.5 * (y1[1] - y1[0]):
+                    continue
+                if -14 <= s.a[0] - x0 <= 2:
+                    flank[0] = True
+                if -2 <= s.a[0] - x1_ <= 14:
+                    flank[1] = True
+            if flank[0] and flank[1]:
+                continue
+            # must abut the wall network
+            corners = [(x0, y1[0]), (x1_, y1[0]), (x0, y1[1]), (x1_, y1[1])]
+            def near_wall(pt):
+                for s in wall_segs:
+                    ax, ay = s.a
+                    vx, vy = s.b[0] - ax, s.b[1] - ay
+                    L2 = vx * vx + vy * vy
+                    t = 0.0 if not L2 else max(0.0, min(1.0, (
+                        (pt[0] - ax) * vx + (pt[1] - ay) * vy) / L2))
+                    if math.dist(pt, (ax + vx * t, ay + vy * t)) <= 10.0:
+                        return True
+                return False
+            if not any(near_wall(c) for c in corners):
+                continue
+            fixtures.append({
+                "name": "CHIMNEY",
+                "center": [round((x0 + x1_) / 2, 2),
+                           round((y1[0] + y1[1]) / 2, 2)],
+                "rotation": 0.0,
+                "size": [round(wdt, 2), round(y1[1] - y1[0], 2)],
+                "height": 0.0,   # filled in with the wall height later
+            })
+    return fixtures
 
 
 def write_dxf(path, wall_segs, arcs, glaz_segs):
@@ -539,13 +891,22 @@ def main():
     poche = poche_wall_edges(raw["poche"], ips, stroke_walls)
     print(f"wall edges from poche fills: {len(poche)} uncovered "
           f"({len(raw['poche'])} filled wall polygons)")
-    wall_segs, dropped = main_cluster(stroke_walls + poche)
+
+    # recover symbol-weight walls against the UNclustered stroke set: the
+    # posts a sunroom band ends on are themselves tiny clusters that only
+    # survive the cluster filter once the band has extended the main bbox
+    # over them - so recovery runs first, clustering last
+    symbol_segs = to_segs(raw["symbol"], ips)
+    sym_walls, panels = recover_symbol_walls(symbol_segs, stroke_walls + poche)
+    print(f"symbol-weight walls recovered: {len(sym_walls) // 2}; "
+          f"door panels flagged: {len(panels)}")
+
+    wall_segs, dropped = main_cluster(stroke_walls + poche + sym_walls)
     print(f"wall segs kept {len(wall_segs)}, dropped {dropped} "
           f"(legend/title-block clusters)")
 
-    symbol_segs = to_segs(raw["symbol"], ips)
     arcs = scale_arcs(paper_arcs, ips)
-    glaz = find_glazing(symbol_segs, wall_segs)
+    glaz = find_glazing(symbol_segs, wall_segs, panels)
     print(f"door swing arcs refit: {len(arcs)}; glazing lines: {len(glaz)}")
 
     dxf_path = args.dxf or (os.path.splitext(args.output)[0] + ".dxf")
@@ -561,10 +922,42 @@ def main():
         tol=2.0, max_wall=14.0, units="inches")
     for w in plan["walls"]:
         w["height"] = args.wall_height
-    n_dem, n_pro = fix_window_sides(plan)
+    chimneys = find_chimneys(symbol_segs, wall_segs)
+    fp = plan.get("footprint") or []
+    if len(fp) >= 3:
+        # a chimney bumps out of the building; appliance stacks and
+        # window symbols that mimic its rect+rungs pattern sit inside
+        chimneys = [c for c in chimneys
+                    if not point_in_poly(c["center"][0], c["center"][1], fp)]
+    else:
+        chimneys = []
+    if chimneys:
+        print(f"chimney masses kept (outside footprint): {len(chimneys)}")
+    for c in chimneys:
+        c["height"] = args.wall_height
+    plan["fixtures"] = (plan.get("fixtures") or []) + chimneys
+
+    n_dem, n_pro = fix_window_sides(plan, panels)
     if n_dem or n_pro:
         print(f"window/opening fixes: {n_dem} interior windows demoted, "
               f"{n_pro} exterior gaps promoted to windows")
+        # garage classification ran inside extract(), before these type
+        # fixes - a slider that just became a window may have qualified a
+        # room as a garage. Reclassify against the corrected openings.
+        class _W:
+            pass
+        adapters = []
+        for w in plan["walls"]:
+            a = _W()
+            a.c0 = tuple(w["start"])
+            a.c1 = tuple(w["end"])
+            a.thickness = w["thickness"]
+            adapters.append(a)
+        for r in plan["rooms"]:
+            if r["kind"] == "garage":
+                r["kind"] = "room"
+        X.classify_garages(plan["rooms"], adapters, plan["openings"],
+                           plan["warnings"], plan["footprint"])
     plan["source"] = {
         "kind": "pdf", "page": args.page,
         "inches_per_point": round(ips, 4),

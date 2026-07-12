@@ -47,7 +47,7 @@
     1107.84,
     825.28
    ],
-   "thickness": 6.72,
+   "thickness": 7.12,
    "height": 96.0
   },
   {
@@ -249,7 +249,7 @@
    ],
    "end": [
     1032.56,
-    605.6
+    605.76
    ],
    "thickness": 4.64,
    "height": 96.0
@@ -289,6 +289,42 @@
    ],
    "thickness": 4.64,
    "height": 96.0
+  },
+  {
+   "start": [
+    1084.945,
+    608.4
+   ],
+   "end": [
+    1034.705,
+    608.08
+   ],
+   "thickness": 4.64,
+   "height": 96.0
+  },
+  {
+   "start": [
+    750.272,
+    408.439
+   ],
+   "end": [
+    696.735,
+    398.457
+   ],
+   "thickness": 8.02,
+   "height": 96.0
+  },
+  {
+   "start": [
+    1087.28,
+    606.08
+   ],
+   "end": [
+    1087.28,
+    659.68
+   ],
+   "thickness": 4.64,
+   "height": 96.0
   }
  ],
  "openings": [
@@ -320,14 +356,6 @@
    "wall_index": 2,
    "position": 0.4784,
    "width": 111.36,
-   "type": "opening",
-   "sill": 0.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 3,
-   "position": 0.107,
-   "width": 75.04,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -408,7 +436,7 @@
    "wall_index": 6,
    "position": 0.4268,
    "width": 57.31,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
    "head": 80.0
   },
@@ -432,7 +460,7 @@
    "wall_index": 8,
    "position": 0.377,
    "width": 138.88,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
    "head": 80.0
   },
@@ -440,7 +468,7 @@
    "wall_index": 8,
    "position": 0.8239,
    "width": 35.36,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
@@ -480,7 +508,7 @@
    "wall_index": 12,
    "position": 0.8204,
    "width": 110.08,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
    "head": 80.0
   },
@@ -488,7 +516,7 @@
    "wall_index": 13,
    "position": 0.5915,
    "width": 48.32,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
@@ -535,11 +563,11 @@
     ],
     [
      696.0,
-     424.88
+     398.457
     ],
     [
      753.36,
-     424.88
+     408.439
     ],
     [
      753.36,
@@ -586,8 +614,8 @@
      294.4
     ]
    ],
-   "kind": "garage",
-   "area": 91630.8
+   "kind": "room",
+   "area": 90401.5
   },
   {
    "polygon": [
@@ -748,19 +776,19 @@
    825.26
   ],
   [
-   692.64,
+   692.44,
    825.26
   ],
   [
-   692.64,
-   828.64
+   692.44,
+   828.84
   ],
   [
-   1111.2,
-   828.64
+   1111.4,
+   828.84
   ],
   [
-   1111.2,
+   1111.4,
    825.28
   ],
   [
@@ -833,13 +861,13 @@
   "orphan line not paired into a wall: (845.8,711.2)->(845.8,714.2)",
   "orphan line not paired into a wall: (696.0,427.2)->(696.0,444.6)",
   "orphan line not paired into a wall: (696.0,484.2)->(696.0,494.6)",
-  "orphan line not paired into a wall: (1034.9,605.6)->(1030.2,605.6)",
+  "orphan line not paired into a wall: (1034.7,605.8)->(1030.2,605.6)",
+  "orphan line not paired into a wall: (689.3,814.9)->(689.3,828.6)",
   "orphan line not paired into a wall: (845.3,671.5)->(695.5,675.5)",
   "orphan line not paired into a wall: (695.5,675.5)->(841.6,671.5)",
   "orphan line not paired into a wall: (689.4,444.6)->(689.4,484.2)",
   "orphan line not paired into a wall: (845.5,800.3)->(845.5,735.8)",
-  "orphan line not paired into a wall: (689.3,814.9)->(689.3,828.6)",
-  "9 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "1 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "source": {
   "kind": "pdf",

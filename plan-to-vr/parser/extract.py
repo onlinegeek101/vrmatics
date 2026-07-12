@@ -554,7 +554,9 @@ def classify_openings(walls, hints, tol):
                 if d > radius:
                     continue
                 if h["prio"] == 0:  # swing arc: radius ~ door leaf ~ gap width
-                    if not (0.45 * width <= h["r"] <= 1.3 * width):
+                    # the lower bound admits double doors (leaf = half the
+                    # gap) and doors flanked by sidelights in one gap
+                    if not (0.3 * width <= h["r"] <= 1.3 * width):
                         continue
                 if h["prio"] == 2:  # glazing line: parallel + sized to gap
                     if not parallel(h["dir"], axis):
@@ -566,8 +568,30 @@ def classify_openings(walls, hints, tol):
                     best = (key, k, h["kind"])
 
             if best is None:
-                kind = "opening"              # cased opening / pass-through
-                pass_through += 1
+                # wide mullioned bands defeat the single-hint gate: each
+                # pane's glazing line is a fraction of the gap. Combine
+                # parallel in-gap glazing pieces; three or more summing
+                # to the gap width is a window band (a door panel's two
+                # long lines never split that many ways)
+                ingap = []
+                for k, h in enumerate(hints):
+                    if used[k] or h["prio"] != 2:
+                        continue
+                    if not parallel(h["dir"], axis):
+                        continue
+                    rel = sub(h["pt"], gp)
+                    along = abs(dot(rel, axis))
+                    lateral = abs(cross(rel, axis))
+                    if along <= width / 2 + 2 and lateral <= 8.0:
+                        ingap.append(k)
+                total = sum(hints[k]["len"] for k in ingap)
+                if len(ingap) >= 3 and 0.45 * width <= total <= 2.6 * width:
+                    kind = "window"
+                    for k in ingap:
+                        used[k] = True
+                else:
+                    kind = "opening"          # cased opening / pass-through
+                    pass_through += 1
             else:
                 _, k, kind = best
                 used[k] = True
@@ -771,8 +795,10 @@ def classify_garages(rooms, walls, openings, warnings, footprint=None):
         warnings.append("shapely not installed; garage classification skipped")
         return
     try:
-        boundary = LinearRing(footprint) if footprint and len(footprint) >= 4 \
+        fp_poly = Polygon(footprint) if footprint and len(footprint) >= 4 \
             else None
+        if fp_poly is not None and not fp_poly.is_valid:
+            fp_poly = fp_poly.buffer(0)
         centers = []
         for o in openings:
             # garage doors surface as bare cased "opening"s; wide windows
@@ -783,9 +809,17 @@ def classify_garages(rooms, walls, openings, warnings, footprint=None):
             axis = unit(sub(w.c1, w.c0))
             t = o["position"] * length(sub(w.c1, w.c0))
             c = (w.c0[0] + axis[0] * t, w.c0[1] + axis[1] * t)
-            if boundary is not None and \
-                    boundary.distance(Point(c)) > GARAGE_EDGE_TOL:
-                continue  # interior pass-through, not a garage door
+            if fp_poly is not None:
+                # a garage door faces outside: probe both sides of the
+                # gap. Near-boundary distance is not enough - reentrant
+                # footprint corners put wide interior pass-throughs
+                # within tolerance of the outline
+                off = w.thickness / 2 + 4.0
+                probes = [Point(c[0] - axis[1] * off, c[1] + axis[0] * off),
+                          Point(c[0] + axis[1] * off, c[1] - axis[0] * off)]
+                inside = sum(1 for q in probes if fp_poly.contains(q))
+                if inside != 1:
+                    continue  # interior pass-through, not a garage door
             centers.append(c)
         if not centers:
             return
