@@ -906,7 +906,8 @@ function buildPlan(plan) {
     const base = currentPlanKey.includes('/')
       ? currentPlanKey.slice(0, currentPlanKey.lastIndexOf('/') + 1) : '';
     const u = plan.underlay;
-    new THREE.TextureLoader().load(base + u.file, tex => {
+    new THREE.TextureLoader().load(
+        base + u.file + '?v=' + Date.now(), tex => {
       tex.colorSpace = THREE.SRGBColorSpace;
       const wpx = tex.image.width, hpx = tex.image.height;
       const wM = wpx * u.in_per_px * IN2M, hM = hpx * u.in_per_px * IN2M;
@@ -2217,7 +2218,9 @@ function loadPlan(plan) {
 }
 
 function fetchPlan(url) {
-  fetch(url)
+  // no-store: GitHub Pages (and browsers) otherwise keep serving a stale
+  // plan.json under a freshly deployed page - the model looks "old"
+  fetch(url, { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(plan => { currentPlanKey = url; loadPlan(plan); })
     .catch(() => {
