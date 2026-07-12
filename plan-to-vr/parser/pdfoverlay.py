@@ -94,6 +94,19 @@ def main():
         ax.add_collection(LineCollection(
             [[to_px(*t[0]), to_px(*t[1])] for t in st["treads"]],
             colors=[(0, 0.75, 0.85)], linewidths=0.8, alpha=0.8))
+        if st.get("direction"):
+            xs = [q[0] for q in st["polygon"]]
+            ys = [q[1] for q in st["polygon"]]
+            mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+            dx, dy = st["direction"]
+            L2 = max(max(xs) - min(xs), max(ys) - min(ys)) / 2
+            tip = (mx + dx * L2, my + dy * L2)
+            ax.plot(*zip(to_px(mx - dx * L2, my - dy * L2), to_px(*tip)),
+                    color=(0, 0.6, 0.7), linewidth=1.6)
+            for sgn in (1, -1):
+                hx, hz = (-dy * sgn - dx) * 8, (dx * sgn - dy) * 8
+                ax.plot(*zip(to_px(*tip), to_px(tip[0] + hx, tip[1] + hz)),
+                        color=(0, 0.6, 0.7), linewidth=1.6)
 
     # door swings: hinge-anchored quarter arc + open leaf
     import numpy as np

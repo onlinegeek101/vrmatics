@@ -235,9 +235,14 @@ python parser/pdfoverlay.py binder.pdf plan.json --page 0 -o overlay.png
 The extraction also strips dashed historical linework first (demo walls,
 roof/overhead lines - short collinear pieces with low inked fraction, so
 real lines sharing the line never qualify), detects stair runs (evenly
-spaced tread ladders hugging a wall) into `plan.json`'s `stairs` and an
-`A-STRS` DXF layer, and derives each door's hinge end, swing side and
-leaf length from its refit arc.
+spaced tread ladders vouched for by an adjacent wall or by their own
+walk-line arrow, with break-split runs merged) into `plan.json`'s
+`stairs` and an `A-STRS` DXF layer - each run carries its treads and,
+when the plot has one, the walk-line arrow's direction - and derives
+each door's hinge end, swing side and leaf length from its refit arc.
+The viewer builds stairs as ascending stepped flights (capped at hip
+height, since up-vs-down lives only in the unreadable plotted text) and
+draws the tread pattern plus direction arrow in the plan views.
 
 Audited to parity against the bundled renovation binder (two floors,
 three wall states, plotted at half size): every structural element on

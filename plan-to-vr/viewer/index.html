@@ -866,6 +866,19 @@ function buildPlan(plan) {
         const b2 = toWorld(t[1][0], t[1][1]);
         push(a2.x, a2.z, b2.x, b2.z, S);
       }
+      if (st.direction) {               // walk-line arrow
+        let mx = 0, mz = 0;
+        for (const q of pw) { mx += q.x / pw.length; mz += q.z / pw.length; }
+        const dx = st.direction[0], dz = -st.direction[1];
+        const L2 = Math.max(
+          Math.abs(pw[2].x - pw[0].x), Math.abs(pw[2].z - pw[0].z)) / 2;
+        const tx = mx + dx * L2, tz = mz + dz * L2;
+        push(mx - dx * L2, mz - dz * L2, tx, tz, S);
+        for (const sgn of [1, -1]) {
+          const hx = -dz * sgn - dx, hz = dx * sgn - dz;
+          push(tx, tz, tx + hx * 0.18, tz + hz * 0.18, S);
+        }
+      }
     }
     const lg = new THREE.BufferGeometry();
     lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -877,24 +890,51 @@ function buildPlan(plan) {
     group.add(planOverlay);
   }
 
-  // stair treads as thin raised strips so runs read from above without
-  // blocking the walkthrough (up/down is not knowable from the plot)
+  // stairs as ascending stepped geometry: each tread becomes a riser
+  // box climbing along the run (toward the walk-line arrow when the plot
+  // has one). Height caps at hip height - a flight to nowhere reads as
+  // stairs without piercing the ceiling, and the eye passes over it.
   if (plan.stairs && plan.stairs.length) {
-    const stMat = std({ color: 0xb9a988, roughness: 0.9,
+    const stMat = std({ color: 0xb9a988, roughness: 0.85,
                         envMapIntensity: ENV_INTENSITY });
+    const riserM = 0.17, capM = 1.1;
     for (const st of plan.stairs) {
-      for (const t of st.treads) {
+      const treads = st.treads.map(t => {
         const a2 = toWorld(t[0][0], t[0][1]);
         const b2 = toWorld(t[1][0], t[1][1]);
-        const len = Math.hypot(b2.x - a2.x, b2.z - a2.z);
-        if (len < 0.2) continue;
-        const m = new THREE.Mesh(
-          new THREE.BoxGeometry(len, 0.03, 0.06), stMat);
-        m.position.set((a2.x + b2.x) / 2, 0.015, (a2.z + b2.z) / 2);
-        m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
-        m.receiveShadow = true;
-        group.add(m);
+        return { a: a2, b: b2,
+                 mx: (a2.x + b2.x) / 2, mz: (a2.z + b2.z) / 2 };
+      }).filter(t => Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z) > 0.2);
+      if (!treads.length) continue;
+      // climb axis: plan direction if present, else first-to-last tread
+      let cx, cz;
+      if (st.direction) {
+        cx = st.direction[0]; cz = -st.direction[1];
+      } else {
+        cx = treads[treads.length - 1].mx - treads[0].mx;
+        cz = treads[treads.length - 1].mz - treads[0].mz;
+        const n = Math.hypot(cx, cz) || 1; cx /= n; cz /= n;
       }
+      treads.sort((p1, p2) =>
+        (p1.mx * cx + p1.mz * cz) - (p2.mx * cx + p2.mz * cz));
+      // step depth from median tread spacing
+      const gaps = [];
+      for (let i = 1; i < treads.length; i++) {
+        const d = (treads[i].mx - treads[i - 1].mx) * cx +
+                  (treads[i].mz - treads[i - 1].mz) * cz;
+        if (d > 0.05) gaps.push(d);
+      }
+      gaps.sort((x, y) => x - y);
+      const depth = gaps.length ? gaps[gaps.length >> 1] : 0.26;
+      treads.forEach((t, i) => {
+        const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
+        const h = Math.min((i + 1) * riserM, capM);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(len, h, depth), stMat);
+        m.position.set(t.mx + cx * depth / 2, h / 2, t.mz + cz * depth / 2);
+        m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
+        m.castShadow = m.receiveShadow = true;
+        group.add(m);
+      });
     }
   }
 

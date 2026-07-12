@@ -77,10 +77,17 @@ def page_segments(page):
         q = fitz.Point(p.x, p.y) * rot
         return (q.x, H - q.y)   # display space is y-down; plans are y-up
 
-    out = {"wall": [], "symbol": [], "gray": [], "poche": []}
+    out = {"wall": [], "symbol": [], "gray": [], "poche": [], "arrow": []}
     for path in page.get_drawings():
         if "f" in path["type"]:
             f = path.get("fill")
+            # small solid-black fills are arrowheads (dimension ends and
+            # stair walk-line tips); keep their centroids
+            if f and max(f) < 0.05:
+                r = path["rect"]
+                if max(r.width, r.height) <= 8.0:
+                    c = xf(fitz.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2))
+                    out["arrow"].append(c)
             # wall poche plots as a neutral gray fill; arrowheads are
             # black, the sheet logo is tinted, paper knockouts are white
             if f and abs(f[0] - f[1]) < 0.02 and abs(f[1] - f[2]) < 0.02 \
@@ -784,16 +791,19 @@ STAIR_SPACING = (8.0, 14.0)      # tread-to-tread spacing in plan
 STAIR_MIN_TREADS = 4
 
 
-def find_stairs(symbol_segs, gray_segs, wall_segs):
+def find_stairs(symbol_segs, gray_segs, wall_segs, arrows=()):
     """Stair runs: evenly spaced parallel tread lines (the ladder pattern
     every wall-recovery guard rejects, captured on purpose this time).
 
-    Returns [{polygon, treads}] with the run rectangle and each tread as
-    a segment, both in inches. Handles horizontal and vertical runs;
-    break-symbol gaps inside a run are bridged by allowing one missing
-    tread. A run must hug a wall along at least one side - sofa cushion
-    seams and other furniture striping float in open floor instead.
-    Deliberately ignores direction (up/down needs the text).
+    Returns [{polygon, treads, direction?}] with the run rectangle and
+    each tread as a segment, in inches. Handles horizontal and vertical
+    runs; break-symbol gaps inside a run are bridged by allowing one
+    missing tread, and runs split by a break symbol or landing are merged
+    when they continue each other. A run must hug a wall along at least
+    one side - sofa cushion seams and other furniture striping float in
+    open floor instead. The walk-line arrow, when present, gives the
+    run's pointing direction (which end the arrow aims at - up vs down
+    still lives only in the unreadable plotted text).
     """
     def wall_beside(poly):
         (x0, y0), (x2, y2) = poly[0], poly[2]
@@ -874,12 +884,90 @@ def find_stairs(symbol_segs, gray_segs, wall_segs):
                 "polygon": [[round(x, 2), round(y, 2)] for x, y in poly],
                 "treads": [[[round(v, 2) for v in q] for q in t]
                            for t in tl],
+                "_horiz": horiz,     # treads horizontal => run climbs in y
             })
         return runs
 
     cands = symbol_segs + gray_segs
-    return [r for r in collect(cands, True) + collect(cands, False)
-            if wall_beside(r["polygon"])]
+    runs = collect(cands, True) + collect(cands, False)
+
+    def bbox(r):
+        xs = [q[0] for q in r["polygon"]]
+        ys = [q[1] for q in r["polygon"]]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    # merge runs the break symbol split: same cross extent, small gap
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(runs)):
+            for j in range(i + 1, len(runs)):
+                a, b = bbox(runs[i]), bbox(runs[j])
+                same_x = abs(a[0] - b[0]) <= 8 and abs(a[2] - b[2]) <= 8
+                same_y = abs(a[1] - b[1]) <= 8 and abs(a[3] - b[3]) <= 8
+                gap_y = max(a[1], b[1]) - min(a[3], b[3])
+                gap_x = max(a[0], b[0]) - min(a[2], b[2])
+                if (same_x and gap_y <= 3 * STAIR_SPACING[1]) or \
+                        (same_y and gap_x <= 3 * STAIR_SPACING[1]):
+                    x0 = min(a[0], b[0]); y0 = min(a[1], b[1])
+                    x1 = max(a[2], b[2]); y1 = max(a[3], b[3])
+                    runs[i] = {
+                        "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                        "treads": runs[i]["treads"] + runs[j]["treads"],
+                        "_horiz": runs[i]["_horiz"],
+                    }
+                    runs.pop(j)
+                    merged = True
+                    break
+            if merged:
+                break
+
+    # the walk line: a long line along the run's centerline whose tip
+    # carries an arrowhead. It both points the run and vouches for runs
+    # whose flanks are stringers rather than modeled walls (dimension
+    # arrows elsewhere never sit on a run's centerline)
+    def walk_line(r):
+        x0, y0, x1, y1 = bbox(r)
+        w_, h_ = x1 - x0, y1 - y0
+        horiz_run = r["_horiz"]       # treads horizontal => climbs in y
+        best = None
+        for sg in symbol_segs:
+            mx = (sg.a[0] + sg.b[0]) / 2
+            my = (sg.a[1] + sg.b[1]) / 2
+            if not (x0 - 4 <= mx <= x1 + 4 and y0 - 4 <= my <= y1 + 4):
+                continue
+            dxs = abs(sg.b[0] - sg.a[0])
+            dys = abs(sg.b[1] - sg.a[1])
+            L = math.hypot(dxs, dys)
+            if horiz_run:
+                if dxs > dys * 0.35 or L < 0.45 * h_:
+                    continue
+                lat = abs(mx - (x0 + x1) / 2)
+                if lat > 0.3 * w_:
+                    continue
+            else:
+                if dys > dxs * 0.35 or L < 0.45 * w_:
+                    continue
+                lat = abs(my - (y0 + y1) / 2)
+                if lat > 0.3 * h_:
+                    continue
+            for tip, tail in ((sg.a, sg.b), (sg.b, sg.a)):
+                near = min(math.dist(tip, ah) for ah in arrows) \
+                    if arrows else 1e9
+                if near <= 12.0 and (best is None or L > best[0]):
+                    best = (L, X.unit(X.sub(tip, tail)))
+        return best
+
+    kept = []
+    for r in runs:
+        wl = walk_line(r)
+        if not (wall_beside(r["polygon"]) or wl):
+            continue
+        if wl:
+            r["direction"] = [round(wl[1][0], 4), round(wl[1][1], 4)]
+        r.pop("_horiz", None)
+        kept.append(r)
+    return kept
 
 
 CHIMNEY_SIDE_IN = (24.0, 96.0)
@@ -1128,7 +1216,8 @@ def main():
     print(f"door swing arcs refit: {len(arcs)}; glazing lines: {len(glaz)}")
 
     gray_in = to_segs(raw["gray"], ips)
-    stairs = find_stairs(symbol_segs, gray_in, wall_segs)
+    arrows_in = [(a[0] * ips, a[1] * ips) for a in raw["arrow"]]
+    stairs = find_stairs(symbol_segs, gray_in, wall_segs, arrows_in)
     print(f"stair runs detected: {len(stairs)}")
 
     dxf_path = args.dxf or (os.path.splitext(args.output)[0] + ".dxf")
