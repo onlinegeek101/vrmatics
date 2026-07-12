@@ -400,6 +400,75 @@ def pair_segments(segs, max_wall, min_thick=MIN_WALL_THICK):
               base[1] + ui[1] * ov_hi + mid_off[1])
         pieces.append(WallPiece(c0, c1, d))
 
+    # second chance: one stroke often serves two collinear walls (a facade
+    # line running past a corner). The greedy pass above prefers the
+    # thinnest partner, which can strand the longer-overlap line as an
+    # orphan and leave a hole in the building shell. Let orphans pair with
+    # already-used lines when the shared length is substantial.
+    for i in range(n):
+        if used[i]:
+            continue
+        si = segs[i]
+        ui = si.dir()
+        li = si.length()
+        best = None
+        for j in range(n):
+            if j == i or not used[j]:
+                continue
+            sj = segs[j]
+            if not parallel(ui, sj.dir()):
+                continue
+            perp = (-ui[1], ui[0])
+            d = abs(dot(sub(sj.a, si.a), perp))
+            if d < min_thick or d > max_wall:
+                continue
+            lo_i, hi_i = project_interval(si, si.a, ui)
+            lo_j, hi_j = project_interval(sj, si.a, ui)
+            ov_lo, ov_hi = max(lo_i, lo_j), min(hi_i, hi_j)
+            overlap = ov_hi - ov_lo
+            if overlap < max(12.0 * (min_thick / MIN_WALL_THICK), 0.5 * li):
+                continue
+            score = (-overlap, d)
+            if best is None or score < best[0]:
+                best = (score, d, ov_lo, ov_hi, perp, j)
+        if best is None:
+            continue
+        _, d, ov_lo, ov_hi, perp, j = best
+        side = dot(sub(segs[j].a, si.a), perp)
+        mid_off = perp[0] * (side / 2.0), perp[1] * (side / 2.0)
+        c0 = (si.a[0] + ui[0] * ov_lo + mid_off[0],
+              si.a[1] + ui[1] * ov_lo + mid_off[1])
+        c1 = (si.a[0] + ui[0] * ov_hi + mid_off[0],
+              si.a[1] + ui[1] * ov_hi + mid_off[1])
+        # the rescue must extend the network, not fill its gaps: casing
+        # and header lines drawn inside a door gap also pair with the
+        # opposite face, and accepting them would brick every opening on
+        # the wall. A filler is recognizable by same-line pieces on BOTH
+        # sides of it (it plugs a gap in an existing run); a genuine hole
+        # in the shell continues a run past its end - one side only.
+        mid_c = ((c0[0] + c1[0]) / 2, (c0[1] + c1[1]) / 2)
+        covered = 0.0
+        seen_before = seen_after = False
+        for pc in pieces:
+            lat = abs(dot(sub(pc.c0, mid_c), perp))
+            lat2 = abs(dot(sub(pc.c1, mid_c), perp))
+            if min(lat, lat2) > d / 2 + 2.0:
+                continue
+            p_lo = dot(sub(pc.c0, si.a), ui)
+            p_hi = dot(sub(pc.c1, si.a), ui)
+            p_lo, p_hi = min(p_lo, p_hi), max(p_lo, p_hi)
+            covered += max(0.0, min(p_hi, ov_hi) - max(p_lo, ov_lo))
+            if p_hi <= ov_lo + 2.0:
+                seen_before = True
+            if p_lo >= ov_hi - 2.0:
+                seen_after = True
+        if covered > 0.1 * (ov_hi - ov_lo):
+            continue
+        if seen_before and seen_after:
+            continue
+        used[i] = True
+        pieces.append(WallPiece(c0, c1, d))
+
     orphans = [segs[i] for i in range(n) if not used[i]]
     return pieces, orphans
 

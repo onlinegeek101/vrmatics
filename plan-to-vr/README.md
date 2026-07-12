@@ -71,7 +71,7 @@ Parsed sample/floorplan.dxf -> viewer/plan.json
   drawing units       : inches (auto-detected)
   input wall segments : 195
   walls found         : 25
-  openings matched    : 36 (11 door, 8 opening, 17 window) from 97 hints
+  openings matched    : 36 (11 door, 9 opening, 16 window) from 97 hints
   fixtures found      : 6
   gaps snapped        : 0
   gaps filled (breaks): 10

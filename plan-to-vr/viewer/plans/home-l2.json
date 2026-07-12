@@ -165,7 +165,7 @@
    ],
    "end": [
     897.84,
-    610.72
+    659.68
    ],
    "thickness": 4.64,
    "height": 96.0
@@ -532,7 +532,7 @@
   },
   {
    "wall_index": 13,
-   "position": 0.5915,
+   "position": 0.5115,
    "width": 48.32,
    "type": "opening",
    "sill": 0.0,
@@ -874,7 +874,6 @@
   "orphan line not paired into a wall: (1094.7,507.0)->(996.0,507.0)",
   "orphan line not paired into a wall: (841.1,528.0)->(841.1,499.2)",
   "orphan line not paired into a wall: (900.2,494.1)->(900.2,502.4)",
-  "orphan line not paired into a wall: (895.5,610.7)->(895.5,664.3)",
   "orphan line not paired into a wall: (924.3,664.1)->(924.6,668.3)",
   "orphan line not paired into a wall: (924.6,703.7)->(924.6,718.9)",
   "orphan line not paired into a wall: (919.8,718.9)->(885.1,718.9)",
