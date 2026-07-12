@@ -1340,6 +1340,22 @@ function ghostOff() {
   ghosted.clear();
 }
 
+// In an AR session, opaque rendering covers the camera feed entirely, so
+// "VR" and "passthrough" are just render states of one session - which is
+// how B can flip between them instantly (WebXR can't switch session modes).
+function passthroughOn() {
+  sky.visible = false;
+  ground.visible = false;
+  if (scene.fog) { savedFog = scene.fog; scene.fog = null; }
+  ghostOn();
+}
+function passthroughOff() {
+  sky.visible = true;
+  ground.visible = true;
+  if (savedFog) scene.fog = savedFog;
+  ghostOff();
+}
+
 // fit a straight segment to trace samples via 2D PCA; returns endpoints
 // at the 2nd/98th percentile projections plus the mean height
 function fitTraceSegment(samples) {
@@ -1655,7 +1671,9 @@ window.PLAN2VR_CALIB = {
   fitTraceSegment, solveAlignment, calib,
   applyAlignment, saveAnchors, loadAnchors,
   insideRoom: (x, z) => insideAnyRoom(x, z),
-  updateCalibTarget, calibTarget,
+  updateCalibTarget, calibTarget, toggleCalib,
+  probes: { get sky() { return sky; }, get ground() { return ground; },
+            get fog() { return scene.fog; }, get wallOpacity() { return wallMat.opacity; } },
   get openings() { return planOpeningsWorld; },
   get dolly() { return dolly; },
 };
@@ -1667,10 +1685,12 @@ function toggleCalib() {
   calib.clearArmed = 0;
   anchorMarkers.visible = calib.mode;
   if (calib.mode) {
+    if (calib.ar) passthroughOn();   // see the real house while tracing
     refreshAnchorMarkers();
     applyAlignment();
     vrMsg(calibStatusLines(), true);
   } else {
+    if (calib.ar) passthroughOff();  // back to the immersive virtual house
     calibTarget.visible = false;
     vrPanel.visible = false;
     vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
@@ -1836,28 +1856,19 @@ renderer.xr.addEventListener('sessionstart', () => {
   overlay.style.display = 'none';
   const session = renderer.xr.getSession();
   calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
-  if (calib.ar) {
-    // passthrough: hide the synthetic outdoors, ghost the model over reality
-    sky.visible = false;
-    ground.visible = false;
-    savedFog = scene.fog;
-    scene.fog = null;
-    ghostOn();
-    if (!calib.mode) toggleCalib();   // AR is the calibration/overlay mode
+  if (calib.ar && !calib.anchors.length && !calib.mode) {
+    toggleCalib();   // first AR entry with no anchors: straight to calibration
   }
   if (calib.anchors.length) {
     const T = applyAlignment();
     if (T && !calib.mode) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
-                  `fit residual ${T.residIn.toFixed(1)}" - B for calibration`]);
+                  `fit residual ${T.residIn.toFixed(1)}" - B: calibrate (passthrough)`]);
   }
 });
 renderer.xr.addEventListener('sessionend', () => {
   arc.visible = false; marker.visible = false;
   if (calib.ar) {
-    sky.visible = true;
-    ground.visible = true;
-    scene.fog = savedFog;
-    ghostOff();
+    passthroughOff();
     calib.ar = false;
   }
   calib.mode = false; calib.aligned = false;

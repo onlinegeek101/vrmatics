@@ -289,12 +289,16 @@ importmap from a CDN, no build step. It:
   re-aims the heading, **long-press** returns to the start position
 - a plan picker in the HUD switches between the bundled sample plans
 - VR: standard `VRButton`; left-stick arc teleport, right-stick 45° snap turn
-- **Passthrough calibration to your real house**: tap **START AR** (Quest
-  passthrough - the model ghosts over reality so you can see what you're
-  tracing; calibration mode opens automatically). Walk to a real door that
-  exists in the plan, hold the **right trigger**, and trace the floor
-  through the OPEN doorway, jamb to jamb, along the edge on YOUR side
-  (windows: along the sill). The near-side offset is corrected to the wall
+- **Passthrough calibration to your real house**: on Quest, enter with
+  **START AR** (one session does both worlds - opaque rendering covers the
+  camera feed, so it looks exactly like VR). Press **B** and the house
+  ghosts into passthrough for calibration; press **B** again and you're
+  back inside the fully immersive model. While calibrating, walk to a real
+  door that exists in the plan, hold the **right trigger**, and trace the
+  floor through the OPEN doorway, jamb to jamb, along the edge on YOUR
+  side (windows: along the sill). An amber outline previews where the
+  plan currently believes the target feature is - the gap against the
+  real frame is your misalignment, live. The near-side offset is corrected to the wall
   centerline automatically; an amber bar marks which plan feature will
   receive the trace. Each trace becomes
   an anchor; all anchors solve one rigid alignment (2D Kabsch) that
