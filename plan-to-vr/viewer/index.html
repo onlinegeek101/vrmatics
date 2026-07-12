@@ -145,9 +145,7 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -166,22 +164,51 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;   // filmic response like a 
 renderer.toneMappingExposure = 0.9;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
-
-// passthrough AR session for calibration + remodel overlay: the model is
-// ghosted over the real house so you can trace real doorways and compare
-// plan vs reality (Quest Browser supports immersive-ar with passthrough)
-if (navigator.xr && navigator.xr.isSessionSupported) {
-  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
-    if (!ok) return;
-    const arBtn = ARButton.createButton(renderer, {
-      requiredFeatures: [],
-      optionalFeatures: ['local-floor'],
-    });
-    arBtn.style.bottom = '70px';
-    document.body.appendChild(arBtn);
-  }).catch(() => {});
+// One entry button. On headsets with passthrough (Quest) it starts an
+// immersive-AR session rendered fully opaque - identical to VR - so the
+// B button can flip passthrough on and off instantly (WebXR cannot switch
+// session modes mid-flight, which is why a plain VR session can't do it).
+async function setupXRButton() {
+  const btn = document.createElement('button');
+  Object.assign(btn.style, {
+    position: 'absolute', bottom: '20px', left: '50%',
+    transform: 'translateX(-50%)', padding: '12px 24px',
+    border: '1px solid #fff', borderRadius: '4px',
+    background: 'rgba(0,0,0,0.55)', color: '#fff', font: '13px sans-serif',
+    cursor: 'pointer', zIndex: 999, opacity: 0.85,
+  });
+  document.body.appendChild(btn);
+  let mode = null;
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    try { if (await navigator.xr.isSessionSupported('immersive-ar')) mode = 'immersive-ar'; } catch {}
+    if (!mode) {
+      try { if (await navigator.xr.isSessionSupported('immersive-vr')) mode = 'immersive-vr'; } catch {}
+    }
+  }
+  if (!mode) {
+    btn.textContent = 'VR NOT SUPPORTED';
+    btn.style.opacity = 0.4;
+    return;
+  }
+  btn.textContent = 'ENTER VR';
+  let session = null;
+  btn.onclick = async () => {
+    if (session) { session.end(); return; }
+    try {
+      session = await navigator.xr.requestSession(mode, {
+        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+      });
+      session.addEventListener('end', () => { session = null; btn.textContent = 'ENTER VR'; });
+      await renderer.xr.setSession(session);
+      btn.textContent = 'EXIT VR';
+    } catch (e) {
+      console.warn('XR session failed', e);
+      btn.textContent = 'VR FAILED - TAP TO RETRY';
+      session = null;
+    }
+  };
 }
+setupXRButton();
 
 const scene = new THREE.Scene();
 
@@ -508,7 +535,9 @@ let underlayMesh = null;     // raster of the source sheet under the model
 let planSizeM = { w: 10, h: 10 };
 let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
 const layerState = { geom: true, lines: false, sheet: false };
-let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
+let collisionSegs = []; // {ax, az, bx, bz, hw, top} solid wall spans, world XZ
+let fixtureSegs = [];   // fixture capsules; collide only while fixtures shown
+let stairSteps = [];    // walkable riser tops: {cx,cz,ux,uz,kx,kz,hl,hd,top}
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
 let footprintWorld = null; // building outline in world XZ, or null
 
@@ -786,6 +815,8 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
 function buildPlan(plan) {
   clearPlan();
   collisionSegs = [];
+  fixtureSegs = [];
+  stairSteps = [];
   const group = new THREE.Group();
   const walls = plan.walls || [];
   const openings = plan.openings || [];
@@ -972,6 +1003,11 @@ function buildPlan(plan) {
           p2.position.set(x + Math.cos(rotY) * len / 2, railH / 2,
                           z - Math.sin(rotY) * len / 2);
           group.add(p2);
+          collisionSegs.push({    // guard rails stop the player too
+            ax: x - Math.cos(rotY) * len / 2, az: z + Math.sin(rotY) * len / 2,
+            bx: x + Math.cos(rotY) * len / 2, bz: z - Math.sin(rotY) * len / 2,
+            hw: 0.06, top: railH,
+          });
         };
         if (wellW >= wellD) {           // run along x: rails on z sides
           mkRail((cx0 + cx1) / 2, cz0 + 0.03, wellW, 0);
@@ -1017,6 +1053,12 @@ function buildPlan(plan) {
         m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
         m.castShadow = m.receiveShadow = true;
         group.add(m);
+        // walkable: the riser top is ground under the player's feet
+        stairSteps.push({
+          cx: t.mx + cx * depth / 2, cz: t.mz + cz * depth / 2,
+          ux: (t.b.x - t.a.x) / len, uz: (t.b.z - t.a.z) / len,
+          kx: cx, kz: cz, hl: len / 2, hd: depth / 2, top: h,
+        });
       });
     }
   }
@@ -1094,7 +1136,7 @@ function buildPlan(plan) {
       collisionSegs.push({
         ax: worldStart.x + dir.x * a, az: worldStart.z + dir.z * a,
         bx: worldStart.x + dir.x * b, bz: worldStart.z + dir.z * b,
-        hw: depth / 2 + 0.03,
+        hw: depth / 2 + 0.03, top: H,
       });
     };
     let cursor = 0;
@@ -1190,6 +1232,19 @@ function buildPlan(plan) {
     g.position.set(pos.x, 0, pos.z);
     g.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
     fixtureGroup.add(g);
+    // collision capsule along the long axis (rotation.y maps local +x to
+    // (cos, -sin) and local +z to (sin, cos) in world XZ)
+    const wM = (f.size[0] || 12) * IN2M, dM = (f.size[1] || 12) * IN2M;
+    const rot = (f.rotation || 0) * Math.PI / 180;
+    const half = Math.max(wM, dM) / 2, hw = Math.min(wM, dM) / 2;
+    const u = wM >= dM ? [Math.cos(rot), -Math.sin(rot)]
+                       : [Math.sin(rot), Math.cos(rot)];
+    const ex = half - hw;
+    fixtureSegs.push({
+      ax: pos.x - u[0] * ex, az: pos.z - u[1] * ex,
+      bx: pos.x + u[0] * ex, bz: pos.z + u[1] * ex,
+      hw, top: 1.0,
+    });
   }
   group.add(fixtureGroup);
 
@@ -1236,6 +1291,9 @@ function buildPlan(plan) {
   spawnPose.x = dolly.position.x;
   spawnPose.z = dolly.position.z;
   spawnPose.rot = dolly.rotation.y;
+  groundY = 0; fallV = 0;
+  lastSafe.x = spawnPose.x; lastSafe.z = spawnPose.z;
+  dolly.position.y = groundY + heightOffset;
 
   // waypoints for the automated tour: real camera poses when the plan has
   // them, room centroids otherwise, chained nearest-neighbor from spawn
@@ -1767,7 +1825,9 @@ function toast(msg) {
 }
 
 function resetToStart() {
-  dolly.position.set(spawnPose.x, 0, spawnPose.z);
+  groundY = 0; fallV = 0;
+  lastSafe.x = spawnPose.x; lastSafe.z = spawnPose.z;
+  dolly.position.set(spawnPose.x, groundY + heightOffset, spawnPose.z);
   dolly.rotation.set(0, spawnPose.rot, 0);
   camera.rotation.set(0, 0, 0);
   camera.position.set(0, spawnEyeY, 0);
@@ -2363,10 +2423,32 @@ function computeArc(controller) {
     const t = i * 0.06;
     const y = origin.y + v.y * t + 0.5 * g * t * t;
     const p = new THREE.Vector3(origin.x + v.x * t, y, origin.z + v.z * t);
+    if (i > 0) {                          // walls stop the beam (midpoint
+      const q = pts[pts.length - 1];      // too: samples are ~0.36m apart)
+      const mid = q.clone().add(p).multiplyScalar(0.5);
+      if (arcBlocked(mid) || arcBlocked(p)) break;
+    }
     pts.push(p);
-    if (y <= 0 && i > 0) { p.y = 0; hit = p.clone(); break; }
+    const gnd = groundHeightAt(p.x, p.z);
+    if (y <= gnd && i > 0) { p.y = gnd; hit = p.clone(); break; }
   }
   return { pts, hit };
+}
+
+// a teleport beam sample inside a wall span (below its top) is blocked,
+// so you can't teleport through walls or closed windows
+function arcBlocked(p) {
+  for (const s of collisionSegs) {
+    if (p.y >= s.top) continue;
+    const dx = s.bx - s.ax, dz = s.bz - s.az;
+    const len2 = dx * dx + dz * dz;
+    const t = len2
+      ? Math.max(0, Math.min(1, ((p.x - s.ax) * dx + (p.z - s.az) * dz) / len2))
+      : 0;
+    const ox = p.x - (s.ax + t * dx), oz = p.z - (s.az + t * dz);
+    if (ox * ox + oz * oz < (s.hw + 0.05) * (s.hw + 0.05)) return true;
+  }
+  return false;
 }
 
 function teleportTo(target) {
@@ -2374,6 +2456,10 @@ function teleportTo(target) {
   camera.getWorldPosition(cam);
   dolly.position.x += target.x - cam.x;
   dolly.position.z += target.z - cam.z;
+  groundY = groundHeightAt(target.x, target.z);   // land on stair tops too
+  fallV = 0;
+  lastSafe.x = target.x; lastSafe.z = target.z;
+  dolly.position.y = groundY + heightOffset;
 }
 
 function rotatePlayer(angle) {
@@ -2478,8 +2564,9 @@ function showVRHelp() {
 // standing height; the right-stick click redoes it any time.
 function resetHeight() {
   const y = camera.position.y;      // XR local space eye height
-  dolly.position.y = spawnEyeY - y;
-  vrMsg([`Height reset (eye ${(y + dolly.position.y).toFixed(2)}m)`], 3);
+  heightOffset = spawnEyeY - y;     // kept apart from terrain height, so
+  dolly.position.y = groundY + heightOffset;   // stairs still work seated
+  vrMsg([`Height reset (eye ${(y + heightOffset).toFixed(2)}m)`], 3);
 }
 
 renderer.xr.addEventListener('sessionstart', () => {
@@ -2491,10 +2578,9 @@ renderer.xr.addEventListener('sessionstart', () => {
     if (renderer.xr.isPresenting && camera.position.y < 0.95) resetHeight();
   }, 1600);
   const session = renderer.xr.getSession();
+  // AR-capable session: starts rendered as full VR; B flips passthrough
   calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
-  if (calib.ar && !calib.anchors.length && !calib.mode) {
-    toggleCalib();   // first AR entry with no anchors: straight to calibration
-  }
+  passthroughOff();
   if (calib.anchors.length) {
     const T = applyAlignment();
     if (T && !calib.mode) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
@@ -2502,6 +2588,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   }
 });
 renderer.xr.addEventListener('sessionend', () => {
+  heightOffset = 0; groundY = 0; fallV = 0;
   dolly.position.y = 0;
   arc.visible = false; marker.visible = false;
   if (calib.ar) {
@@ -2523,28 +2610,91 @@ renderer.xr.addEventListener('sessionend', () => {
 // player can pass through doorways but not through walls or windows
 const PLAYER_R = 0.22;
 const _cpos = new THREE.Vector3();
-function resolveCollision() {
-  if (!collisionSegs.length) return;
-  camera.getWorldPosition(_cpos);
-  for (let iter = 0; iter < 2; iter++) {
-    for (const s of collisionSegs) {
-      const dx = s.bx - s.ax, dz = s.bz - s.az;
-      const len2 = dx * dx + dz * dz;
-      if (!len2) continue;
-      let t = ((_cpos.x - s.ax) * dx + (_cpos.z - s.az) * dz) / len2;
-      t = Math.max(0, Math.min(1, t));
-      const ox = _cpos.x - (s.ax + t * dx), oz = _cpos.z - (s.az + t * dz);
-      const d = Math.hypot(ox, oz);
-      const min = s.hw + PLAYER_R;
-      if (d < min && d > 1e-6) {
-        const push = (min - d) / d;
-        _cpos.x += ox * push; _cpos.z += oz * push;
-        dolly.position.x += ox * push;
-        dolly.position.z += oz * push;
+function pushOut(segs) {
+  for (const s of segs) {
+    const dx = s.bx - s.ax, dz = s.bz - s.az;
+    const len2 = dx * dx + dz * dz;
+    const t = len2
+      ? Math.max(0, Math.min(1,
+          ((_cpos.x - s.ax) * dx + (_cpos.z - s.az) * dz) / len2))
+      : 0;                       // zero-length capsule = circle
+    const ox = _cpos.x - (s.ax + t * dx), oz = _cpos.z - (s.az + t * dz);
+    const d = Math.hypot(ox, oz);
+    const min = s.hw + PLAYER_R;
+    if (d < min) {
+      let px, pz;
+      if (d > 1e-6) { px = ox / d; pz = oz / d; }
+      else {                       // dead centre: eject along the normal
+        const L = Math.sqrt(len2) || 1;
+        px = -dz / L; pz = dx / L;
       }
+      const push = min - d;
+      _cpos.x += px * push; _cpos.z += pz * push;
+      dolly.position.x += px * push;
+      dolly.position.z += pz * push;
     }
   }
 }
+function resolveCollision() {
+  const fixOn = fixtureGroup && fixtureGroup.visible && fixtureSegs.length;
+  if (!collisionSegs.length && !fixOn) return;
+  camera.getWorldPosition(_cpos);
+  for (let iter = 0; iter < 2; iter++) {
+    pushOut(collisionSegs);
+    if (fixOn) pushOut(fixtureSegs);
+  }
+}
+
+// ---------------------------------------------------------------- terrain
+// stairs are walkable ground: the floor height under the player follows
+// the riser tops, gravity pulls the rig down when the ground drops away
+// (walk off the open end of a flight and you land back on the slab), and
+// a ledge too tall to step up behaves like a wall.
+let heightOffset = 0;   // seated-play eye-height calibration
+let groundY = 0;        // terrain height under the player's feet
+let fallV = 0;          // downward speed while airborne
+const STEP_MAX = 0.35;  // tallest ledge the player steps up (m)
+const lastSafe = { x: 0, z: 0 };
+
+function groundHeightAt(x, z) {
+  let g = 0;
+  for (const s of stairSteps) {
+    const lx = (x - s.cx) * s.ux + (z - s.cz) * s.uz;   // along the tread
+    const lz = (x - s.cx) * s.kx + (z - s.cz) * s.kz;   // along the climb
+    if (Math.abs(lx) <= s.hl + 0.06 && Math.abs(lz) <= s.hd + 0.06 &&
+        s.top > g) g = s.top;
+  }
+  return g;
+}
+
+function applyTerrain(dt) {
+  camera.getWorldPosition(_cpos);
+  let target = groundHeightAt(_cpos.x, _cpos.z);
+  if (target - groundY > STEP_MAX) {
+    // too tall to climb: shove the player back where they came from
+    dolly.position.x += lastSafe.x - _cpos.x;
+    dolly.position.z += lastSafe.z - _cpos.z;
+    target = groundHeightAt(lastSafe.x, lastSafe.z);
+  } else {
+    lastSafe.x = _cpos.x; lastSafe.z = _cpos.z;
+  }
+  if (target >= groundY) {         // stepping up: glide onto the tread
+    fallV = 0;
+    groundY += (target - groundY) * Math.min(1, dt * 10);
+    if (target - groundY < 0.004) groundY = target;
+  } else {                         // ground fell away: fall
+    fallV += 9.8 * dt;
+    groundY = Math.max(target, groundY - fallV * dt);
+    if (groundY === target) fallV = 0;
+  }
+  dolly.position.y = groundY + heightOffset;
+}
+window.PLAN2VR_PHYS = {
+  groundHeightAt, applyTerrain, dolly, camera, teleportTo,
+  steps: () => stairSteps, segs: () => collisionSegs,
+  state: () => ({ groundY, heightOffset, fallV, steps: stairSteps.length,
+                  segs: collisionSegs.length, fix: fixtureSegs.length }),
+};
 
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
@@ -2554,7 +2704,10 @@ renderer.setAnimationLoop(() => {
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else if (mapMode) mapMove(dt);
   else { desktopMove(dt); applyGyro(); }
-  if (!tour.active && !(calib.mode || calib.aligned)) resolveCollision();
+  if (!tour.active && !(calib.mode || calib.aligned)) {
+    resolveCollision();
+    applyTerrain(dt);
+  }
   if (calib.clearArmed > 0) calib.clearArmed -= dt;
   drawTick(dt);
   vrPanelTick(dt);

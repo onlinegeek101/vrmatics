@@ -366,20 +366,27 @@ importmap from a CDN, no build step. It:
   lighting from the three.js `RoomEnvironment` — no HDR assets
 - flat roof slab on by default (toggle **C**); it doesn't cast shadows, so
   sunlight still fills the rooms; furniture toggles with **F**
-- **wall collision**: circle-vs-segment push-out against solid wall spans,
-  so you walk through doorways but not through walls or windows
+- **collision + gravity everywhere**: circle-vs-segment push-out against
+  solid wall spans, closed windows, stair guard rails and furniture, so
+  you walk through doorways but never through walls; the teleport beam is
+  blocked by walls too. Stairs are **walkable terrain** - the rig steps up
+  each riser as you walk (or teleport) onto it, and gravity drops you back
+  to the slab when you walk off the open end of a flight. A ledge too tall
+  to step up (over 35 cm) behaves like a wall.
 - desktop: PointerLockControls, WASD + mouse look
 - mobile/touch: **magic-window motion look** — physically turn/tilt the
   phone to look around (device orientation; iOS asks permission on entry);
   **2-finger pan** to move, **pinch** to walk forward/back, 1-finger drag
   re-aims the heading, **long-press** returns to the start position
 - a plan picker in the HUD switches between the bundled sample plans
-- VR: standard `VRButton`; left-stick arc teleport, right-stick 45° snap turn
-- **Passthrough calibration to your real house**: on Quest, enter with
-  **START AR** (one session does both worlds - opaque rendering covers the
-  camera feed, so it looks exactly like VR). Press **B** and the house
-  ghosts into passthrough for calibration; press **B** again and you're
-  back inside the fully immersive model. While calibrating, walk to a real
+- VR: one **ENTER VR** button; left-stick smooth walk, right-stick smooth
+  turn, push the right stick forward for the teleport arc
+- **Passthrough calibration to your real house**: on Quest the single
+  ENTER VR button starts an AR-capable session rendered fully opaque, so
+  it looks exactly like VR (one session does both worlds - WebXR cannot
+  switch modes mid-flight). Press **B** and the house ghosts into
+  passthrough for calibration; press **B** again and you're back inside
+  the fully immersive model. While calibrating, walk to a real
   door that exists in the plan, hold the **right trigger**, and trace the
   floor through the OPEN doorway, jamb to jamb, along the edge on YOUR
   side (windows: along the sill). An amber outline previews where the
