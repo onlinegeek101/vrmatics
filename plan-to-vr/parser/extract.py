@@ -628,6 +628,15 @@ def classify_openings(walls, hints, tol):
                     # gap) and doors flanked by sidelights in one gap
                     if not (0.3 * width <= h["r"] <= 1.3 * width):
                         continue
+                    # the hinge sits ON the wall at a jamb: near the wall
+                    # line laterally, within half the gap along it. A bare
+                    # center-distance gate let arcs from doors on OTHER
+                    # walls claim a wide gap 5 feet away
+                    rel = sub(h["pt"], gp)
+                    if abs(cross(rel, axis)) > wall.thickness / 2 + 6.0:
+                        continue
+                    if abs(dot(rel, axis)) > width / 2 + 8.0:
+                        continue
                 if h["prio"] == 2:  # glazing line: parallel + sized to gap
                     if not parallel(h["dir"], axis):
                         continue

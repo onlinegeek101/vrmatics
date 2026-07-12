@@ -440,12 +440,9 @@
    "wall_index": 0,
    "position": 0.7401,
    "width": 90.88,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": -1,
-   "leaf": 42.1
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
   },
   {
    "wall_index": 0,
@@ -459,12 +456,9 @@
    "wall_index": 2,
    "position": 0.7227,
    "width": 71.36,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": 1,
-   "leaf": 42.3
+   "head": 80.0
   },
   {
    "wall_index": 6,
@@ -580,20 +574,20 @@
    "wall_index": 10,
    "position": 0.5886,
    "width": 82.4,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": -1,
-   "leaf": 37.5
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
   },
   {
    "wall_index": 10,
    "position": 0.7151,
    "width": 66.56,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": -1,
+   "leaf": 37.5
   },
   {
    "wall_index": 11,
@@ -607,9 +601,12 @@
    "wall_index": 12,
    "position": 0.4628,
    "width": 35.36,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
-   "head": 80.0
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 42.1
   },
   {
    "wall_index": 13,
@@ -631,9 +628,12 @@
    "wall_index": 14,
    "position": 0.839,
    "width": 35.36,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
-   "head": 80.0
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 42.3
   },
   {
    "wall_index": 16,
@@ -663,12 +663,9 @@
    "wall_index": 19,
    "position": 0.4674,
    "width": 121.76,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": -1,
-   "leaf": 40.2
+   "head": 80.0
   },
   {
    "wall_index": 19,
@@ -723,9 +720,12 @@
    "wall_index": 24,
    "position": 0.8162,
    "width": 33.28,
-   "type": "opening",
+   "type": "door",
    "sill": 0.0,
-   "head": 80.0
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 40.2
   },
   {
    "wall_index": 25,
@@ -1236,7 +1236,7 @@
   "orphan line not paired into a wall: (1039.1,232.2)->(1039.1,232.2)",
   "orphan line not paired into a wall: (1039.1,232.2)->(1040.4,235.5)",
   "orphan line not paired into a wall: (1040.4,235.5)->(1040.4,235.5)",
-  "6 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
   {
