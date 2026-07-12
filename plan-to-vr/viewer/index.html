@@ -104,6 +104,7 @@
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -113,7 +114,7 @@ const EYE = 1.6;                     // standing eye height (m)
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 // ---------------------------------------------------------------- renderer
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // cap for mobile GPUs
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -123,6 +124,21 @@ renderer.toneMappingExposure = 0.9;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+
+// passthrough AR session for calibration + remodel overlay: the model is
+// ghosted over the real house so you can trace real doorways and compare
+// plan vs reality (Quest Browser supports immersive-ar with passthrough)
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+    if (!ok) return;
+    const arBtn = ARButton.createButton(renderer, {
+      requiredFeatures: [],
+      optionalFeatures: ['local-floor'],
+    });
+    arBtn.style.bottom = '70px';
+    document.body.appendChild(arBtn);
+  }).catch(() => {});
+}
 
 const scene = new THREE.Scene();
 
@@ -217,8 +233,11 @@ function makeWoodTexture() {
   return tex;
 }
 
+const allMats = [];   // every material, for AR ghost mode
 function std(params) {
-  return new THREE.MeshStandardMaterial({ envMapIntensity: ENV_INTENSITY, ...params });
+  const m = new THREE.MeshStandardMaterial({ envMapIntensity: ENV_INTENSITY, ...params });
+  allMats.push(m);
+  return m;
 }
 
 function makeGrassTexture() {
@@ -817,7 +836,7 @@ function buildPlan(plan) {
         type: op.type,
         ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
         bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
-        sill: op.sill, widthIn: (hi - lo) / IN2M,
+        sill: op.sill, widthIn: (hi - lo) / IN2M, thick: depth,
       });
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
@@ -1298,7 +1317,28 @@ const calib = {
   samples: [],
   clearArmed: 0,
   aligned: false,
+  ar: false,             // passthrough session active
 };
+
+// ghost the whole model over passthrough so the real house shows through
+const ghosted = new Map();
+let savedFog = null;
+function ghostOn() {
+  for (const m of allMats) {
+    if (!ghosted.has(m)) ghosted.set(m, { t: m.transparent, o: m.opacity });
+    m.transparent = true;
+    m.opacity = Math.min(0.4, m.opacity);
+    m.needsUpdate = true;
+  }
+}
+function ghostOff() {
+  for (const [m, s] of ghosted) {
+    m.transparent = s.t;
+    m.opacity = s.o;
+    m.needsUpdate = true;
+  }
+  ghosted.clear();
+}
 
 // fit a straight segment to trace samples via 2D PCA; returns endpoints
 // at the 2nd/98th percentile projections plus the mean height
@@ -1433,6 +1473,24 @@ function applyAlignment() {
   return T;
 }
 
+// amber bar showing which plan feature will receive the next trace
+const calibTarget = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 0.04, 0.04),
+  new THREE.MeshBasicMaterial({ color: 0xffb020 }));
+calibTarget.visible = false;
+scene.add(calibTarget);
+function updateCalibTarget() {
+  const cp = new THREE.Vector3();
+  ctrlR.getWorldPosition(cp);
+  const op = nearestOpening(cp, 2.5);
+  if (!op) { calibTarget.visible = false; return; }
+  const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
+  calibTarget.scale.x = len;
+  calibTarget.position.set((op.ax + op.bx) / 2, 0.02 + (op.sill || 0), (op.az + op.bz) / 2);
+  calibTarget.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
+  calibTarget.visible = true;
+}
+
 // cyan markers on anchored features, visible in calibration mode
 const anchorMarkers = new THREE.Group();
 anchorMarkers.visible = false;
@@ -1494,11 +1552,12 @@ function calibStatusLines() {
     ? 'add a 2nd anchor (a window works best) to lock orientation'
     : 'A: delete nearest anchor - X twice: clear all - B: exit';
   return [
-    'CALIBRATION - trace a door/window base with RIGHT trigger',
+    'CALIBRATION - hold RIGHT trigger, trace through the OPEN doorway,',
+    'jamb to jamb on YOUR side (windows: along the sill) - amber = target',
     `${calib.anchors.length} anchor(s)` +
       (T ? ` - fit residual ${T.residIn.toFixed(1)}"` +
-           ` - scale delta ${((T.scale - 1) * 100).toFixed(1)}%` : ''),
-    hint,
+           ` - scale delta ${((T.scale - 1) * 100).toFixed(1)}%` : '') +
+      ' - ' + hint,
   ];
 }
 
@@ -1524,11 +1583,27 @@ function finishTrace() {
   const midWorld = midRef.clone().applyMatrix4(dolly.matrixWorld);
   const op = nearestOpening(midWorld, 2.5);
   if (!op) { vrMsg(['No door/window near you in the plan -', 'walk up to one and trace again']); return; }
+
+  // the canonical gesture traces the threshold on YOUR side of the wall,
+  // which sits half a wall-thickness off the centerline our anchors use -
+  // shift the fitted segment away from your head to the centerline
+  const head = [camera.position.x, camera.position.z];
+  {
+    const dx = seg.b[0] - seg.a[0], dz = seg.b[1] - seg.a[1];
+    const L = Math.hypot(dx, dz) || 1;
+    let nx = -dz / L, nz = dx / L;                    // trace normal
+    const mx = (seg.a[0] + seg.b[0]) / 2, mz = (seg.a[1] + seg.b[1]) / 2;
+    if ((head[0] - mx) * nx + (head[1] - mz) * nz > 0) { nx = -nx; nz = -nz; }
+    const off = (op.thick || 0.11) / 2;               // toward far side
+    seg.a = [seg.a[0] + nx * off, seg.a[1] + nz * off];
+    seg.b = [seg.b[0] + nx * off, seg.b[1] + nz * off];
+  }
+
   const an = {
     key: op.key,
     planA: [op.ax, op.az], planB: [op.bx, op.bz],
     realA: seg.a, realB: seg.b,
-    headReal: [camera.position.x, camera.position.z],  // breaks 180deg ambiguity
+    headReal: head,                                    // breaks 180deg ambiguity
     widthRealIn: seg.len / IN2M,
     widthPlanIn: op.widthIn,
     sillRealIn: seg.y / IN2M,
@@ -1567,6 +1642,7 @@ function toggleCalib() {
     applyAlignment();
     vrMsg(calibStatusLines(), true);
   } else {
+    calibTarget.visible = false;
     vrPanel.visible = false;
     vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
   }
@@ -1684,6 +1760,7 @@ function handleVRInput() {
     if (src.handedness === 'right') {
       if (btnEdge('right', gp, 5)) toggleCalib();
       if (calib.mode) {
+        updateCalibTarget();
         if (btnEdge('right', gp, 4)) deleteNearestAnchor();
         const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
         if (trig) {
@@ -1728,16 +1805,35 @@ function handleVRInput() {
 
 renderer.xr.addEventListener('sessionstart', () => {
   overlay.style.display = 'none';
+  const session = renderer.xr.getSession();
+  calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
+  if (calib.ar) {
+    // passthrough: hide the synthetic outdoors, ghost the model over reality
+    sky.visible = false;
+    ground.visible = false;
+    savedFog = scene.fog;
+    scene.fog = null;
+    ghostOn();
+    if (!calib.mode) toggleCalib();   // AR is the calibration/overlay mode
+  }
   if (calib.anchors.length) {
     const T = applyAlignment();
-    if (T) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
+    if (T && !calib.mode) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
                   `fit residual ${T.residIn.toFixed(1)}" - B for calibration`]);
   }
 });
 renderer.xr.addEventListener('sessionend', () => {
   arc.visible = false; marker.visible = false;
+  if (calib.ar) {
+    sky.visible = true;
+    ground.visible = true;
+    scene.fog = savedFog;
+    ghostOff();
+    calib.ar = false;
+  }
   calib.mode = false; calib.aligned = false;
   anchorMarkers.visible = false;
+  calibTarget.visible = false;
   vrPanel.visible = false;
   dolly.position.set(spawnPose.x, 0, spawnPose.z);
   dolly.rotation.set(0, spawnPose.rot, 0);
