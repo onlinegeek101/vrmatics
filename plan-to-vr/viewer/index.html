@@ -154,6 +154,8 @@ camera.position.set(0, EYE, 0);
 let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
 const spawnPose = { x: 0, z: 0, rot: 0 };
 let tourStops = [];    // world-space waypoints for the automated walkthrough
+let planOpeningsWorld = []; // door/window base segments in world XZ
+let currentPlanKey = 'plan.json';   // localStorage namespace for anchors
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
@@ -472,6 +474,7 @@ function clearPlan() {
   planGroup = null; ceiling = null; fixtureGroup = null;
   roomPolysWorld = [];
   footprintWorld = null;
+  planOpeningsWorld = [];
 }
 
 // Axis-aligned box placed in wall-local terms: centered at `along` on the
@@ -808,6 +811,14 @@ function buildPlan(plan) {
       // a closed garage door is solid too
       if (op.type === 'opening' && hi - lo >= 90 * IN2M &&
           openingIsExterior(worldStart, dir, angle, lo, hi, depth)) solid(lo, hi);
+      // base segment for VR calibration anchoring
+      planOpeningsWorld.push({
+        key: wi + ':' + Math.round(lo / IN2M),
+        type: op.type,
+        ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
+        bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
+        sill: op.sill, widthIn: (hi - lo) / IN2M,
+      });
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
     }
@@ -1271,6 +1282,329 @@ function touchEnd(e) {
 el.addEventListener('pointerup', touchEnd);
 el.addEventListener('pointercancel', touchEnd);
 
+// ---------------------------------------------------------------- VR calibration
+// Walk up to a real door/window that exists in the plan, enter calibration
+// mode (B), hold the RIGHT trigger and trace its base edge with the
+// controller. Each trace becomes an anchor pairing the real edge (XR
+// reference space) with the plan feature (world space). All anchors solve
+// one rigid alignment (2D Kabsch) that places the whole model in your real
+// house; more anchors = longer baselines = better accuracy. Anchors persist
+// in localStorage per plan. A deletes the nearest anchor; X (left) pressed
+// twice clears all.
+const calib = {
+  mode: false,
+  anchors: [],           // {key, planA:[x,z], planB:[x,z], realA, realB, widthRealIn, widthPlanIn, sillRealIn}
+  tracing: false,
+  samples: [],
+  clearArmed: 0,
+  aligned: false,
+};
+
+// fit a straight segment to trace samples via 2D PCA; returns endpoints
+// at the 2nd/98th percentile projections plus the mean height
+function fitTraceSegment(samples) {
+  const n = samples.length;
+  let mx = 0, mz = 0, my = 0;
+  for (const s of samples) { mx += s.x; mz += s.z; my += s.y; }
+  mx /= n; mz /= n; my /= n;
+  let sxx = 0, sxz = 0, szz = 0;
+  for (const s of samples) {
+    const dx = s.x - mx, dz = s.z - mz;
+    sxx += dx * dx; sxz += dx * dz; szz += dz * dz;
+  }
+  const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);   // principal axis
+  const ux = Math.cos(ang), uz = Math.sin(ang);
+  const ts = samples.map(s => (s.x - mx) * ux + (s.z - mz) * uz).sort((a, b) => a - b);
+  const lo = ts[Math.floor(0.02 * (n - 1))], hi = ts[Math.ceil(0.98 * (n - 1))];
+  return {
+    a: [mx + ux * lo, mz + uz * lo],
+    b: [mx + ux * hi, mz + uz * hi],
+    y: my,
+    len: hi - lo,
+  };
+}
+
+// 2D Kabsch over anchor endpoint pairs -> rigid transform phys->plan.
+// Endpoint order per anchor is ambiguous, so seed both orderings of the
+// first anchor and let each anchor pick its best order under the current
+// estimate, twice. Returns {theta(dolly yaw), tx, tz, scale, residIn}.
+function solveAlignment(anchors) {
+  if (!anchors.length) return null;
+  const fitPairs = (pairs) => {
+    let pcx = 0, pcz = 0, qcx = 0, qcz = 0;
+    for (const [p, q] of pairs) { pcx += p[0]; pcz += p[1]; qcx += q[0]; qcz += q[1]; }
+    const n = pairs.length;
+    pcx /= n; pcz /= n; qcx /= n; qcz /= n;
+    let a = 0, b = 0, pp = 0, qq = 0;
+    for (const [p, q] of pairs) {
+      const px = p[0] - pcx, pz = p[1] - pcz, qx = q[0] - qcx, qz = q[1] - qcz;
+      a += px * qx + pz * qz;
+      b += px * qz - pz * qx;
+      pp += px * px + pz * pz;
+      qq += qx * qx + qz * qz;
+    }
+    const phi = Math.atan2(b, a);            // standard CCW in (x,z)
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const T = {
+      phi,
+      tx: qcx - (c * pcx - s * pcz),
+      tz: qcz - (s * pcx + c * pcz),
+      scale: pp > 0 ? Math.sqrt(a * a + b * b) / pp : 1,
+    };
+    let resid = 0;
+    for (const [p, q] of pairs) {
+      const rx = c * p[0] - s * p[1] + T.tx - q[0];
+      const rz = s * p[0] + c * p[1] + T.tz - q[1];
+      resid += rx * rx + rz * rz;
+    }
+    T.resid = Math.sqrt(resid / n);
+    return T;
+  };
+  const apply = (T, p) => {
+    const c = Math.cos(T.phi), s = Math.sin(T.phi);
+    return [c * p[0] - s * p[1] + T.tx, s * p[0] + c * p[1] + T.tz];
+  };
+  const orderedPairs = (an, flip) => flip
+    ? [[an.realA, an.planB], [an.realB, an.planA]]
+    : [[an.realA, an.planA], [an.realB, an.planB]];
+
+  // a single anchor is 180-degree ambiguous (endpoint order); the player's
+  // head position at trace time breaks the tie - the correct alignment
+  // puts the tracer inside a room, the flipped one outside/next door
+  const headPenalty = (T) => {
+    let pen = 0;
+    for (const an of anchors) {
+      if (!an.headReal) continue;
+      const h = apply(T, an.headReal);
+      if (!insideAnyRoom(h[0], h[1])) pen += 1;
+    }
+    return pen;
+  };
+  let best = null, bestPen = Infinity;
+  for (const seedFlip of [false, true]) {
+    let T = fitPairs(orderedPairs(anchors[0], seedFlip));
+    for (let iter = 0; iter < 2; iter++) {
+      const pairs = [];
+      for (const an of anchors) {
+        let bestFlip = false, bestD = Infinity;
+        for (const flip of [false, true]) {
+          let d = 0;
+          for (const [p, q] of orderedPairs(an, flip)) {
+            const w = apply(T, p);
+            d += (w[0] - q[0]) ** 2 + (w[1] - q[1]) ** 2;
+          }
+          if (d < bestD) { bestD = d; bestFlip = flip; }
+        }
+        pairs.push(...orderedPairs(an, bestFlip));
+      }
+      T = fitPairs(pairs);
+    }
+    const pen = headPenalty(T);
+    if (!best || pen < bestPen || (pen === bestPen && T.resid < best.resid)) {
+      best = T;
+      bestPen = pen;
+    }
+  }
+  return {
+    theta: -best.phi,          // three.js R_y(theta) == standard CCW by -theta
+    tx: best.tx, tz: best.tz,
+    scale: best.scale,
+    residIn: best.resid / IN2M,
+  };
+}
+
+function anchorStorageKey() { return 'plan2vr-anchors:' + currentPlanKey; }
+
+function saveAnchors() {
+  try { localStorage.setItem(anchorStorageKey(), JSON.stringify(calib.anchors)); }
+  catch (e) { /* private mode etc. */ }
+}
+function loadAnchors() {
+  try { calib.anchors = JSON.parse(localStorage.getItem(anchorStorageKey())) || []; }
+  catch (e) { calib.anchors = []; }
+}
+
+function applyAlignment() {
+  const T = solveAlignment(calib.anchors);
+  if (!T) { calib.aligned = false; return null; }
+  dolly.position.set(T.tx, 0, T.tz);
+  dolly.rotation.set(0, T.theta, 0);
+  calib.aligned = true;
+  return T;
+}
+
+// cyan markers on anchored features, visible in calibration mode
+const anchorMarkers = new THREE.Group();
+anchorMarkers.visible = false;
+scene.add(anchorMarkers);
+const anchorMat = new THREE.MeshBasicMaterial({ color: 0x2ee6d6 });
+function refreshAnchorMarkers() {
+  while (anchorMarkers.children.length) {
+    const m = anchorMarkers.children.pop();
+    if (m.geometry) m.geometry.dispose();
+  }
+  for (const an of calib.anchors) {
+    const op = planOpeningsWorld.find(o => o.key === an.key);
+    if (!op) continue;
+    const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, 0.03), anchorMat);
+    bar.position.set((op.ax + op.bx) / 2, 0.05 + (op.sill || 0), (op.az + op.bz) / 2);
+    bar.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
+    anchorMarkers.add(bar);
+  }
+}
+
+// in-headset text panel (DOM toasts are invisible in VR)
+const vrPanelCanvas = document.createElement('canvas');
+vrPanelCanvas.width = 1024; vrPanelCanvas.height = 256;
+const vrPanelTex = new THREE.CanvasTexture(vrPanelCanvas);
+const vrPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.9, 0.225),
+  new THREE.MeshBasicMaterial({ map: vrPanelTex, transparent: true, depthTest: false }));
+vrPanel.position.set(0, -0.32, -1.1);
+vrPanel.renderOrder = 999;
+vrPanel.visible = false;
+camera.add(vrPanel);
+let vrPanelTimer = 0;
+function vrMsg(lines, sticky) {
+  const g = vrPanelCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 256);
+  g.fillStyle = 'rgba(14,17,26,0.82)';
+  g.fillRect(0, 0, 1024, 256);
+  g.strokeStyle = 'rgba(46,230,214,0.8)';
+  g.lineWidth = 4;
+  g.strokeRect(4, 4, 1016, 248);
+  g.fillStyle = '#eaf2ff';
+  g.font = '44px system-ui, sans-serif';
+  lines.slice(0, 4).forEach((ln, i) => g.fillText(ln, 28, 66 + i * 56));
+  vrPanelTex.needsUpdate = true;
+  vrPanel.visible = true;
+  vrPanelTimer = sticky ? Infinity : 4;
+}
+function vrPanelTick(dt) {
+  if (vrPanel.visible && vrPanelTimer !== Infinity) {
+    vrPanelTimer -= dt;
+    if (vrPanelTimer <= 0) vrPanel.visible = false;
+  }
+}
+
+function calibStatusLines() {
+  const T = calib.anchors.length ? solveAlignment(calib.anchors) : null;
+  const hint = calib.anchors.length === 1
+    ? 'add a 2nd anchor (a window works best) to lock orientation'
+    : 'A: delete nearest anchor - X twice: clear all - B: exit';
+  return [
+    'CALIBRATION - trace a door/window base with RIGHT trigger',
+    `${calib.anchors.length} anchor(s)` +
+      (T ? ` - fit residual ${T.residIn.toFixed(1)}"` +
+           ` - scale delta ${((T.scale - 1) * 100).toFixed(1)}%` : ''),
+    hint,
+  ];
+}
+
+function nearestOpening(worldPos, maxDist) {
+  let best = null, bd = maxDist;
+  for (const op of planOpeningsWorld) {
+    const mx = (op.ax + op.bx) / 2, mz = (op.az + op.bz) / 2;
+    const d = Math.hypot(worldPos.x - mx, worldPos.z - mz);
+    if (d < bd) { bd = d; best = op; }
+  }
+  return best;
+}
+
+function finishTrace() {
+  calib.tracing = false;
+  const s = calib.samples;
+  calib.samples = [];
+  if (s.length < 12) { vrMsg(['Trace too short - hold trigger and', 'slide along the full base edge']); return; }
+  const seg = fitTraceSegment(s);
+  if (seg.len < 0.25) { vrMsg(['Trace too short - cover the whole edge']); return; }
+  // pick the plan feature nearest the trace midpoint (in world space)
+  const midRef = new THREE.Vector3((seg.a[0] + seg.b[0]) / 2, 0, (seg.a[1] + seg.b[1]) / 2);
+  const midWorld = midRef.clone().applyMatrix4(dolly.matrixWorld);
+  const op = nearestOpening(midWorld, 2.5);
+  if (!op) { vrMsg(['No door/window near you in the plan -', 'walk up to one and trace again']); return; }
+  const an = {
+    key: op.key,
+    planA: [op.ax, op.az], planB: [op.bx, op.bz],
+    realA: seg.a, realB: seg.b,
+    headReal: [camera.position.x, camera.position.z],  // breaks 180deg ambiguity
+    widthRealIn: seg.len / IN2M,
+    widthPlanIn: op.widthIn,
+    sillRealIn: seg.y / IN2M,
+  };
+  // retracing the same feature replaces its anchor
+  calib.anchors = calib.anchors.filter(x => x.key !== an.key);
+  calib.anchors.push(an);
+  saveAnchors();
+  const T = applyAlignment();
+  refreshAnchorMarkers();
+  const dW = an.widthRealIn - an.widthPlanIn;
+  vrMsg([
+    `Anchor saved: measured ${an.widthRealIn.toFixed(1)}"` +
+      ` (plan ${an.widthPlanIn.toFixed(1)}", ${dW >= 0 ? '+' : ''}${dW.toFixed(1)}")`,
+    ...calibStatusLines().slice(1),
+  ], calib.mode);
+}
+
+// exposed for automated testing of the solver + anchor lifecycle
+window.PLAN2VR_CALIB = {
+  fitTraceSegment, solveAlignment, calib,
+  applyAlignment, saveAnchors, loadAnchors,
+  insideRoom: (x, z) => insideAnyRoom(x, z),
+  get openings() { return planOpeningsWorld; },
+  get dolly() { return dolly; },
+};
+
+function toggleCalib() {
+  calib.mode = !calib.mode;
+  calib.tracing = false;
+  calib.samples = [];
+  calib.clearArmed = 0;
+  anchorMarkers.visible = calib.mode;
+  if (calib.mode) {
+    refreshAnchorMarkers();
+    applyAlignment();
+    vrMsg(calibStatusLines(), true);
+  } else {
+    vrPanel.visible = false;
+    vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
+  }
+}
+
+function deleteNearestAnchor() {
+  if (!calib.anchors.length) { vrMsg(['No anchors to delete', ...calibStatusLines().slice(2)], true); return; }
+  const cp = new THREE.Vector3();
+  ctrlR.getWorldPosition(cp);
+  let bi = -1, bd = Infinity;
+  calib.anchors.forEach((an, i) => {
+    const op = planOpeningsWorld.find(o => o.key === an.key);
+    if (!op) return;
+    const d = Math.hypot(cp.x - (op.ax + op.bx) / 2, cp.z - (op.az + op.bz) / 2);
+    if (d < bd) { bd = d; bi = i; }
+  });
+  if (bi < 0) bi = calib.anchors.length - 1;
+  calib.anchors.splice(bi, 1);
+  saveAnchors();
+  applyAlignment();
+  refreshAnchorMarkers();
+  vrMsg(['Anchor deleted', ...calibStatusLines().slice(1)], true);
+}
+
+function clearAllAnchors() {
+  if (calib.clearArmed > 0) {
+    calib.anchors = [];
+    saveAnchors();
+    calib.aligned = false;
+    calib.clearArmed = 0;
+    refreshAnchorMarkers();
+    vrMsg(['All anchors cleared', ...calibStatusLines().slice(2)], true);
+  } else {
+    calib.clearArmed = 3;
+    vrMsg(['Press X again to clear ALL anchors'], true);
+  }
+}
+
 // ---------------------------------------------------------------- VR locomotion
 // left thumbstick: arc-teleport   ·   right thumbstick: 45deg snap turn
 const marker = new THREE.Mesh(
@@ -1285,11 +1619,20 @@ const arc = new THREE.Line(new THREE.BufferGeometry(), arcMat);
 arc.visible = false;
 scene.add(arc);
 
+// controllers ride the dolly: XR poses are in reference space, so their
+// world pose must include the rig's transform (teleports, calibration)
 const ctrlL = renderer.xr.getController(0);
 const ctrlR = renderer.xr.getController(1);
-scene.add(ctrlL, ctrlR);
+dolly.add(ctrlL, ctrlR);
 
 let teleAiming = false, teleTarget = null, snapReady = true;
+const prevBtns = { left: [], right: [] };
+function btnEdge(hand, gp, idx) {
+  const now = !!(gp.buttons[idx] && gp.buttons[idx].pressed);
+  const was = !!prevBtns[hand][idx];
+  prevBtns[hand][idx] = now;
+  return now && !was;
+}
 
 function computeArc(controller) {
   // parabola from controller along its forward (-z), gravity down
@@ -1337,6 +1680,28 @@ function handleVRInput() {
     const stickX = ax.length >= 4 ? ax[2] : ax[0];
     const stickY = ax.length >= 4 ? ax[3] : ax[1];
 
+    // calibration controls (B toggles; see the VR calibration section)
+    if (src.handedness === 'right') {
+      if (btnEdge('right', gp, 5)) toggleCalib();
+      if (calib.mode) {
+        if (btnEdge('right', gp, 4)) deleteNearestAnchor();
+        const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
+        if (trig) {
+          calib.tracing = true;
+          const p = ctrlR.position;   // XR reference space (dolly-local)
+          const last = calib.samples[calib.samples.length - 1];
+          if (!last || Math.hypot(p.x - last.x, p.y - last.y, p.z - last.z) > 0.004)
+            calib.samples.push({ x: p.x, y: p.y, z: p.z });
+        } else if (calib.tracing) {
+          finishTrace();
+        }
+      }
+    }
+    if (src.handedness === 'left' && calib.mode) {
+      if (btnEdge('left', gp, 4)) clearAllAnchors();
+    }
+    if (calib.mode) continue;   // no teleport/snap while calibrating
+
     if (src.handedness === 'left') {
       if (stickY < -0.6) {                 // push forward -> aim
         teleAiming = true;
@@ -1361,10 +1726,22 @@ function handleVRInput() {
   }
 }
 
-renderer.xr.addEventListener('sessionstart', () => { overlay.style.display = 'none'; });
+renderer.xr.addEventListener('sessionstart', () => {
+  overlay.style.display = 'none';
+  if (calib.anchors.length) {
+    const T = applyAlignment();
+    if (T) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
+                  `fit residual ${T.residIn.toFixed(1)}" - B for calibration`]);
+  }
+});
 renderer.xr.addEventListener('sessionend', () => {
   arc.visible = false; marker.visible = false;
-  camera.position.set(0, EYE, 0);
+  calib.mode = false; calib.aligned = false;
+  anchorMarkers.visible = false;
+  vrPanel.visible = false;
+  dolly.position.set(spawnPose.x, 0, spawnPose.z);
+  dolly.rotation.set(0, spawnPose.rot, 0);
+  camera.position.set(0, spawnEyeY, 0);
   if (!controls.isLocked) overlay.style.display = 'flex';
 });
 
@@ -1403,7 +1780,9 @@ renderer.setAnimationLoop(() => {
   if (renderer.xr.isPresenting) handleVRInput();
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else { desktopMove(dt); applyGyro(); }
-  if (!tour.active) resolveCollision();
+  if (!tour.active && !(calib.mode || calib.aligned)) resolveCollision();
+  if (calib.clearArmed > 0) calib.clearArmed -= dt;
+  vrPanelTick(dt);
   renderer.render(scene, camera);
 });
 
@@ -1423,12 +1802,16 @@ function showError(msg) {
 function loadPlan(plan) {
   document.getElementById('err').style.display = 'none';
   buildPlan(plan);
+  loadAnchors();               // per-plan persisted calibration anchors
+  calib.aligned = false;
+  if (calib.mode) { refreshAnchorMarkers(); vrMsg(calibStatusLines(), true); }
+  if (renderer.xr.isPresenting && calib.anchors.length) applyAlignment();
 }
 
 function fetchPlan(url) {
   fetch(url)
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(loadPlan)
+    .then(plan => { currentPlanKey = url; loadPlan(plan); })
     .catch(() => {
       // file:// or missing plan.json - fall back to the embedded copy
       if (window.PLAN_TO_VR_EMBEDDED) loadPlan(window.PLAN_TO_VR_EMBEDDED);
@@ -1453,7 +1836,10 @@ addEventListener('drop', e => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try { loadPlan(JSON.parse(reader.result)); }
+    try {
+      currentPlanKey = 'dropped:' + file.name;
+      loadPlan(JSON.parse(reader.result));
+    }
     catch (err) { showError('Invalid JSON: ' + err.message); }
   };
   reader.readAsText(file);

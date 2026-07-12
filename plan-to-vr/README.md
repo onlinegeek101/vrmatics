@@ -289,6 +289,16 @@ importmap from a CDN, no build step. It:
   re-aims the heading, **long-press** returns to the start position
 - a plan picker in the HUD switches between the bundled sample plans
 - VR: standard `VRButton`; left-stick arc teleport, right-stick 45° snap turn
+- **VR calibration to your real house**: press **B** for calibration mode,
+  walk to a real door/window that exists in the plan, hold the **right
+  trigger** and trace its base edge with the controller. Each trace becomes
+  an anchor; all anchors solve one rigid alignment (2D Kabsch) that
+  registers the whole model to your physical space — more anchors, longer
+  baselines, better accuracy (a single exterior anchor lands ~0.2";
+  interior-door-only single anchors are 180° ambiguous, so add a second).
+  Each anchor also reports measured vs plan width — an as-built check.
+  Anchors persist in localStorage per plan; in calibration mode **A**
+  deletes the nearest anchor and **X** twice clears all.
 - desktop HUD with wall/opening counts and parser warnings
 
 ## Swapping in your own drawings (e.g. DataCAD exports)
