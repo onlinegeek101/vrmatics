@@ -111,7 +111,14 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    teleport arc and release to jump. **Y** shows the controls help panel,
    **B** toggles passthrough calibration, and **holding the left trigger
    records a voice note** pinned to where you stand - review, play and
-   download notes later from the 🎤 button (desktop: hold **V**).
+   download notes later from the 🎤 button (desktop: hold **V**). Hold the
+   **right trigger to draw in the air**; strokes fade out a few seconds
+   after release, and anything drawn during (or just before) a voice note
+   is saved with it in plan coordinates - the note's "data" download is a
+   JSON of position, heading and strokes that maps straight onto the
+   sheet. Playing seated? A stationary guardian can sink the camera to
+   the floor - the rig auto-corrects on entry, and **clicking the right
+   stick resets your eye height** any time.
 
 > WebXR normally requires HTTPS, but plain-HTTP works for LAN addresses in
 > the Quest Browser. If Enter VR is greyed out, tunnel through

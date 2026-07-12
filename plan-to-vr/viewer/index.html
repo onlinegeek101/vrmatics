@@ -506,6 +506,7 @@ let fixtureGroup = null;
 let planOverlay = null;      // 2D plan linework, shown in map view
 let underlayMesh = null;     // raster of the source sheet under the model
 let planSizeM = { w: 10, h: 10 };
+let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
 const layerState = { geom: true, lines: false, sheet: false };
 let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
@@ -802,6 +803,7 @@ function buildPlan(plan) {
 
   // plan (x,y) inches -> world (x, -y) metres, recentred
   const toWorld = (px, py) => new THREE.Vector3((px - cx) * IN2M, 0, -(py - cy) * IN2M);
+  planOffset = { cx, cy };
 
   // room polygons (from the parser) drive interior-only trim, per-room
   // floors, and ceiling lights; everything degrades gracefully without them
@@ -1322,12 +1324,75 @@ addEventListener('keyup', e => {
   if (e.code === 'KeyV') stopVoiceNote();
 });
 
+// ------------------------------------------------------------- VR drawing
+// Hold the RIGHT trigger (outside calibration) to draw in the air; the
+// stroke fades out slowly after release. Points are captured in plan
+// coordinates, and any strokes drawn during (or just before) a voice
+// note are saved with it - so a spoken comment plus a scribble pins
+// exactly what it refers to.
+const draw = {
+  active: false, pts: [], line: null, fading: [], recent: [],
+};
+const drawMat = () => new THREE.LineBasicMaterial({
+  color: 0xff3d6e, transparent: true, opacity: 0.95, depthTest: false });
+
+function drawSample() {
+  const v = new THREE.Vector3();
+  ctrlR.getWorldPosition(v);
+  const last = draw.pts[draw.pts.length - 1];
+  if (last && v.distanceTo(last) < 0.006) return;
+  draw.pts.push(v.clone());
+  if (!draw.line) {
+    draw.line = new THREE.Line(new THREE.BufferGeometry(), drawMat());
+    draw.line.renderOrder = 997;
+    scene.add(draw.line);
+  }
+  if (draw.pts.length > 1)
+    draw.line.geometry.setFromPoints(draw.pts);
+}
+
+function drawFinish() {
+  draw.active = false;
+  if (draw.line && draw.pts.length > 1) {
+    draw.fading.push({ line: draw.line, life: 8.0 });
+    const stroke = {
+      t: Date.now(),
+      // plan inches (+ height in metres): maps straight onto the sheet
+      pts: draw.pts.map(v => [
+        +(planOffset.cx + v.x / IN2M).toFixed(1),
+        +(planOffset.cy - v.z / IN2M).toFixed(1),
+        +v.y.toFixed(3)]),
+    };
+    draw.recent.push(stroke);
+    if (draw.recent.length > 24) draw.recent.shift();
+    if (noteRec.active) noteRec.strokes.push(stroke);
+  } else if (draw.line) {
+    scene.remove(draw.line);
+  }
+  draw.line = null;
+  draw.pts = [];
+}
+
+function drawTick(dt) {
+  for (let i = draw.fading.length - 1; i >= 0; i--) {
+    const f = draw.fading[i];
+    f.life -= dt;
+    if (f.life <= 0) {
+      scene.remove(f.line);
+      f.line.geometry.dispose();
+      draw.fading.splice(i, 1);
+    } else {
+      f.line.material.opacity = 0.95 * Math.min(1, f.life / 8.0);
+    }
+  }
+}
+
 // ---------------------------------------------------------- voice notes
 // Hold the left trigger in VR (or V on the desktop) to record a voice
 // memo pinned to where you stand; notes persist in IndexedDB and are
 // playable/downloadable from the mic button, so walkthrough feedback
 // can be captured in place and shared afterwards.
-const noteRec = { active: false, media: null, rec: null, chunks: [] };
+const noteRec = { active: false, media: null, rec: null, chunks: [], strokes: [] };
 
 function notesDB() {
   return new Promise((res, rej) => {
@@ -1363,6 +1428,9 @@ function startVoiceNote() {
   if (noteRec.active) return;
   if (!noteRec.media) { initVoiceNotes(); return; }
   noteRec.chunks = [];
+  // adopt strokes drawn in the 6s before recording started
+  const t0 = Date.now() - 6000;
+  noteRec.strokes = draw.recent.filter(st => st.t >= t0);
   try {
     noteRec.rec = new MediaRecorder(noteRec.media);
   } catch (e) { return; }
@@ -1374,9 +1442,12 @@ function startVoiceNote() {
     const db = await notesDB();
     db.transaction('notes', 'readwrite').objectStore('notes').add({
       t: Date.now(), plan: currentPlanKey,
-      x: +cam.x.toFixed(2), z: +cam.z.toFixed(2),
+      x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
+      y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
       yaw: +dolly.rotation.y.toFixed(2), blob,
+      strokes: noteRec.strokes.slice(),
     });
+    noteRec.strokes = [];
     setTimeout(refreshNotesBadge, 200);
     if (renderer.xr.isPresenting) vrMsg(['Voice note saved'], 3);
   };
@@ -1401,7 +1472,9 @@ async function renderNotesPanel() {
     const div = document.createElement('div');
     div.className = 'note';
     const when = new Date(n.t).toLocaleString();
-    div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ (${n.x}, ${n.z})</div>`;
+    const nStrokes = (n.strokes || []).length;
+    div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ plan-in (${n.x}, ${n.y ?? n.z})` +
+      (nStrokes ? ` · ✏ ${nStrokes} stroke${nStrokes > 1 ? 's' : ''}` : '') + `</div>`;
     const audio = document.createElement('audio');
     audio.controls = true;
     audio.src = URL.createObjectURL(n.blob);
@@ -1411,6 +1484,13 @@ async function renderNotesPanel() {
     dl.href = audio.src;
     dl.download = `note-${n.id}-${n.plan.split('/').pop().replace('.json','')}.webm`;
     dl.textContent = 'download';
+    const dj = document.createElement('a');
+    const meta = { t: n.t, plan: n.plan, x: n.x, y: n.y ?? n.z,
+                   yaw: n.yaw, strokes: n.strokes || [] };
+    dj.href = URL.createObjectURL(new Blob(
+      [JSON.stringify(meta, null, 1)], { type: 'application/json' }));
+    dj.download = `note-${n.id}-data.json`;
+    dj.textContent = 'data';
     const del = document.createElement('a');
     del.href = '#';
     del.textContent = 'delete';
@@ -1420,7 +1500,7 @@ async function renderNotesPanel() {
       db.transaction('notes', 'readwrite').objectStore('notes').delete(n.id);
       setTimeout(() => { renderNotesPanel(); refreshNotesBadge(); }, 150);
     };
-    row.appendChild(dl); row.appendChild(del);
+    row.appendChild(dl); row.appendChild(dj); row.appendChild(del);
     div.appendChild(row);
     panel.appendChild(div);
   }
@@ -2175,6 +2255,8 @@ function finishTrace() {
 }
 
 // exposed for automated testing of the solver + anchor lifecycle
+window.PLAN2VR_DRAW = { draw, drawSample, drawFinish, drawTick, resetHeight, noteRec,
+  get planOffset() { return planOffset; }, get ctrlR() { return ctrlR; } };
 window.PLAN2VR_CALIB = {
   fitTraceSegment, solveAlignment, calib,
   applyAlignment, saveAnchors, loadAnchors,
@@ -2357,6 +2439,10 @@ function handleVRInput() {
         dolly.position.addScaledVector(side, dx * sp);
       }
     } else if (src.handedness === 'right') {
+      const trigR = gp.buttons[0] && gp.buttons[0].value > 0.55;
+      if (trigR) { draw.active = true; drawSample(); }
+      else if (draw.active) drawFinish();
+      if (btnEdge('right', gp, 3)) resetHeight();   // stick click
       if (stickY < -0.6) {                 // push forward -> teleport aim
         teleAiming = true;
         const { pts, hit } = computeArc(ctrlR);
@@ -2380,11 +2466,20 @@ function handleVRInput() {
 let vrDt = 0.016;
 function showVRHelp() {
   vrMsg([
-    'Left stick: walk · Right stick: turn',
-    'Right stick push fwd: teleport arc',
+    'L stick: walk · R stick: turn / push: teleport',
+    'R trigger: draw · hold L trigger: voice note',
     'B: passthrough calibrate · Y: this help',
-    'Hold left trigger: voice note',
+    'Click R stick: reset height (seated)',
   ], 14);
+}
+
+// Seated play: a stationary guardian puts the floor origin at head
+// height, sinking the camera to y~0. Lift the rig so the eye lands at
+// standing height; the right-stick click redoes it any time.
+function resetHeight() {
+  const y = camera.position.y;      // XR local space eye height
+  dolly.position.y = spawnEyeY - y;
+  vrMsg([`Height reset (eye ${(y + dolly.position.y).toFixed(2)}m)`], 3);
 }
 
 renderer.xr.addEventListener('sessionstart', () => {
@@ -2392,6 +2487,9 @@ renderer.xr.addEventListener('sessionstart', () => {
   toggleMap(false);            // map view is a flat-screen affair
   setTimeout(showVRHelp, 800);
   initVoiceNotes();
+  setTimeout(() => {
+    if (renderer.xr.isPresenting && camera.position.y < 0.95) resetHeight();
+  }, 1600);
   const session = renderer.xr.getSession();
   calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
   if (calib.ar && !calib.anchors.length && !calib.mode) {
@@ -2404,6 +2502,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   }
 });
 renderer.xr.addEventListener('sessionend', () => {
+  dolly.position.y = 0;
   arc.visible = false; marker.visible = false;
   if (calib.ar) {
     passthroughOff();
@@ -2457,6 +2556,7 @@ renderer.setAnimationLoop(() => {
   else { desktopMove(dt); applyGyro(); }
   if (!tour.active && !(calib.mode || calib.aligned)) resolveCollision();
   if (calib.clearArmed > 0) calib.clearArmed -= dt;
+  drawTick(dt);
   vrPanelTick(dt);
   renderer.render(scene,
     mapMode && !renderer.xr.isPresenting ? mapCam : camera);
