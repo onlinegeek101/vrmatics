@@ -241,6 +241,7 @@ let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
 const spawnPose = { x: 0, z: 0, rot: 0 };
 let tourStops = [];    // world-space waypoints for the automated walkthrough
 let planOpeningsWorld = []; // door/window base segments in world XZ
+let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
 let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
 
 // ---------------------------------------------------------------- lights
@@ -817,6 +818,7 @@ function buildPlan(plan) {
   collisionSegs = [];
   fixtureSegs = [];
   stairSteps = [];
+  planWallsWorld = [];
   const group = new THREE.Group();
   const walls = plan.walls || [];
   const openings = plan.openings || [];
@@ -1131,6 +1133,11 @@ function buildPlan(plan) {
     }).sort((a, b) => a.lo - b.lo);
 
     const L = Lin * IN2M + extS + extE;
+    planWallsWorld[wi] = {
+      ax: worldStart.x, az: worldStart.z,
+      bx: worldStart.x + dir.x * L, bz: worldStart.z + dir.z * L,
+      h: H, thick: depth,
+    };
     const solid = (a, b) => {   // blocked span -> collision segment (world XZ)
       if (b - a < 0.01) return;
       collisionSegs.push({
@@ -1383,22 +1390,72 @@ addEventListener('keyup', e => {
 });
 
 // ------------------------------------------------------------- VR drawing
-// Hold the RIGHT trigger (outside calibration) to draw in the air; the
-// stroke fades out slowly after release. Points are captured in plan
-// coordinates, and any strokes drawn during (or just before) a voice
-// note are saved with it - so a spoken comment plus a scribble pins
-// exactly what it refers to.
+// The RIGHT trigger is a LASER POINTER: touch it lightly to aim (red
+// beam + a dot on whatever surface it hits), squeeze to ink a stroke
+// onto that surface at the dot. Strokes fade out slowly after release
+// and several can fade at once. Points are captured in plan coordinates,
+// and any strokes drawn during (or just before) a voice note are saved
+// with it - so a spoken comment plus a scribble pins exactly what it
+// refers to.
 const draw = {
   active: false, pts: [], line: null, fading: [], recent: [],
 };
 const drawMat = () => new THREE.LineBasicMaterial({
   color: 0xff3d6e, transparent: true, opacity: 0.95, depthTest: false });
 
+const laserBeam = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineBasicMaterial({ color: 0xff3d6e, transparent: true,
+                                opacity: 0.7 }));
+laserBeam.visible = false;
+laserBeam.frustumCulled = false;
+scene.add(laserBeam);
+const laserDot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.014, 12, 8),
+  new THREE.MeshBasicMaterial({ color: 0xff3d6e, depthTest: false }));
+laserDot.renderOrder = 998;
+laserDot.visible = false;
+scene.add(laserDot);
+
+const _ray = new THREE.Raycaster();
+_ray.far = 12;
+const _visUp = ob => {   // raycaster ignores the visible flag; we don't
+  for (let o = ob; o; o = o.parent) if (o.visible === false) return false;
+  return true;
+};
+// cast the pointer from the right controller, update the beam + dot
+// visuals, and return what it hit (walls, floors, stairs, lawn ...)
+function laserCast() {
+  const o = new THREE.Vector3(), q = new THREE.Quaternion();
+  ctrlR.getWorldPosition(o);
+  ctrlR.getWorldQuaternion(q);
+  const d = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+  _ray.set(o, d);
+  const targets = [];
+  if (planGroup && planGroup.visible) targets.push(planGroup);
+  targets.push(ground);
+  const hit = _ray.intersectObjects(targets, true)
+    .find(h => h.object.isMesh && _visUp(h.object)) || null;
+  laserBeam.geometry.setFromPoints(
+    [o, hit ? hit.point : o.clone().addScaledVector(d, 6)]);
+  laserBeam.visible = true;
+  laserDot.visible = !!hit;
+  if (hit) laserDot.position.copy(hit.point);
+  return { hit, origin: o, dir: d };
+}
+function laserOff() { laserBeam.visible = false; laserDot.visible = false; }
+
 function drawSample() {
-  const v = new THREE.Vector3();
-  ctrlR.getWorldPosition(v);
+  const { hit, dir } = laserCast();
+  if (!hit) return;
+  // ink floats a touch off the surface so it never z-fights the wall
+  const v = hit.point.clone().addScaledVector(dir, -0.012);
   const last = draw.pts[draw.pts.length - 1];
-  if (last && v.distanceTo(last) < 0.006) return;
+  if (last && v.distanceTo(last) < 0.008) return;
+  // a large jump means the laser slid onto another surface: break the
+  // stroke there rather than streaking a line across the room
+  if (last && v.distanceTo(last) > 0.6) { drawFinish(); draw.active = true; }
   draw.pts.push(v.clone());
   if (!draw.line) {
     draw.line = new THREE.Line(new THREE.BufferGeometry(), drawMat());
@@ -1451,6 +1508,7 @@ function drawTick(dt) {
 // playable/downloadable from the mic button, so walkthrough feedback
 // can be captured in place and shared afterwards.
 const noteRec = { active: false, media: null, rec: null, chunks: [], strokes: [] };
+const NOTES_SESSION = Date.now();   // one id per page load = one "session"
 
 function notesDB() {
   return new Promise((res, rej) => {
@@ -1499,7 +1557,7 @@ function startVoiceNote() {
     camera.getWorldPosition(cam);
     const db = await notesDB();
     db.transaction('notes', 'readwrite').objectStore('notes').add({
-      t: Date.now(), plan: currentPlanKey,
+      t: Date.now(), plan: currentPlanKey, sess: NOTES_SESSION,
       x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
       y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
       yaw: +dolly.rotation.y.toFixed(2), blob,
@@ -1521,11 +1579,105 @@ function stopVoiceNote() {
   try { noteRec.rec.stop(); } catch (e) {}
   if (renderer.xr.isPresenting) vrPanelTimer = 0.1;
 }
+// minimal store-only ZIP writer, so one click bundles every note (audio
+// + a notes.json of positions/headings/strokes) into a single download
+const _crcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++)
+    c = _crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function makeZip(files) {   // files: [{name, data: Uint8Array}]
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0x0800, true);        // UTF-8 names
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, f.data.length, true);
+    lh.setUint32(22, f.data.length, true);
+    lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true);
+    ch.setUint16(4, 20, true);
+    ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0x0800, true);
+    ch.setUint32(16, crc, true);
+    ch.setUint32(20, f.data.length, true);
+    ch.setUint32(24, f.data.length, true);
+    ch.setUint16(28, name.length, true);
+    ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + f.data.length;
+  }
+  const cdSize = central.reduce((s, a) => s + a.length, 0);
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0, 0x06054b50, true);
+  eo.setUint16(8, files.length, true);
+  eo.setUint16(10, files.length, true);
+  eo.setUint32(12, cdSize, true);
+  eo.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(eo.buffer)],
+                  { type: 'application/zip' });
+}
+async function downloadNotesZip(notes, label) {
+  if (!notes.length) return;
+  const files = [];
+  const meta = [];
+  for (const n of notes) {
+    const file = `note-${n.id}.webm`;
+    meta.push({ id: n.id, t: n.t, when: new Date(n.t).toISOString(),
+                plan: n.plan, x: n.x, y: n.y ?? n.z, yaw: n.yaw,
+                strokes: n.strokes || [], file });
+    files.push({ name: file, data: new Uint8Array(await n.blob.arrayBuffer()) });
+  }
+  files.unshift({ name: 'notes.json', data: new TextEncoder().encode(
+    JSON.stringify({ exported: new Date().toISOString(),
+                     coordinate_system: 'plan inches; strokes [x,y,heightM]',
+                     notes: meta }, null, 1)) });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(makeZip(files));
+  a.download = `plan2vr-notes-${label}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
 async function renderNotesPanel() {
   const panel = document.getElementById('notes-panel');
   const notes = await notesAll();
   panel.innerHTML = notes.length ? '' :
     '<div>No notes yet. Hold <b>V</b> (or the left trigger in VR) to record.</div>';
+  if (notes.length) {
+    const sess = notes.filter(n => n.sess === NOTES_SESSION);
+    const head = document.createElement('div');
+    head.className = 'note';
+    const mk = (label, list, tag) => {
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = label;
+      a.onclick = e => { e.preventDefault(); downloadNotesZip(list, tag); };
+      head.appendChild(a);
+    };
+    mk(`⬇ this session (${sess.length})`, sess,
+       'session-' + new Date(NOTES_SESSION).toISOString().slice(0, 19).replace(/[T:]/g, '-'));
+    mk(`⬇ everything (${notes.length})`, notes, 'all');
+    panel.appendChild(head);
+  }
   for (const n of notes.reverse()) {
     const div = document.createElement('div');
     div.className = 'note';
@@ -1563,6 +1715,7 @@ async function renderNotesPanel() {
     panel.appendChild(div);
   }
 }
+window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION };
 document.getElementById('notes-btn').addEventListener('click', () => {
   const panel = document.getElementById('notes-panel');
   panel.hidden = !panel.hidden;
@@ -1949,6 +2102,9 @@ el.addEventListener('pointercancel', touchEnd);
 // twice clears all.
 const calib = {
   mode: false,
+  stage: 'off',          // 'off' | 'select' (B held, laser aims) | 'trace'
+  target: null,          // the opening chosen in the select stage
+  bPrev: false,          // B button state, for press/release edges
   anchors: [],           // {key, planA:[x,z], planB:[x,z], realA, realB, widthRealIn, widthPlanIn, sillRealIn}
   tracing: false,
   samples: [],
@@ -1957,50 +2113,15 @@ const calib = {
   ar: false,             // passthrough session active
 };
 
-// ghost the whole model over passthrough so the real house shows through
-const ghosted = new Map();
-let savedFog = null;
-function ghostOn() {
-  // 0.4 proved far too opaque on the Quest 2's dim grayscale feed - at
-  // 0.15 the real room reads first and the model floats over it
-  for (const m of allMats) {
-    if (!ghosted.has(m)) ghosted.set(m, { t: m.transparent, o: m.opacity });
-    m.transparent = true;
-    m.opacity = Math.min(0.15, m.opacity);
-    m.depthWrite = false;
-    m.needsUpdate = true;
-  }
-}
-function ghostOff() {
-  for (const [m, s] of ghosted) {
-    m.transparent = s.t;
-    m.opacity = s.o;
-    m.depthWrite = true;
-    m.needsUpdate = true;
-  }
-  ghosted.clear();
-}
-
 // In an AR session, opaque rendering covers the camera feed entirely, so
 // "VR" and "passthrough" are just render states of one session - which is
 // how B can flip between them instantly (WebXR can't switch session modes).
-let ptSavedCeil = true;
-function passthroughOn() {
-  sky.visible = false;
-  ground.visible = false;
-  if (scene.fog) { savedFog = scene.fog; scene.fog = null; }
-  if (ceiling) { ptSavedCeil = ceiling.visible; ceiling.visible = false; }
-  if (underlayMesh) underlayMesh.visible = false;
-  renderer.setClearColor(0x000000, 0);   // let the camera feed through
-  ghostOn();
-}
+let savedFog = null;
 function passthroughOff() {
   sky.visible = true;
   ground.visible = true;
   if (savedFog) scene.fog = savedFog;
-  if (ceiling) ceiling.visible = ptSavedCeil;
   renderer.setClearColor(0x000000, 1);
-  ghostOff();
   applyLayers();
 }
 
@@ -2140,9 +2261,25 @@ function applyAlignment() {
 // amber frame outline previewing where the plan currently believes the
 // target door/window sits - in passthrough you compare it against the
 // real frame, and it snaps onto reality as anchors improve the fit.
-// Drawn depth-test-off so it shows through ghosted walls.
+// Drawn depth-test-off so it shows through ghosted walls. Fragments near
+// the tracing hand are discarded (a circular cutout follows the
+// controller) so the outline never hides the edge being traced.
 const calibTargetMat = new THREE.MeshBasicMaterial({
   color: 0xffb020, depthTest: false, transparent: true, opacity: 0.95 });
+calibTargetMat.onBeforeCompile = sh => {
+  sh.uniforms.uHand = { value: new THREE.Vector3(1e9, 1e9, 1e9) };
+  sh.uniforms.uHandR = { value: 0.15 };
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vCutWorld;')
+    .replace('#include <fog_vertex>',
+      '#include <fog_vertex>\nvCutWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>',
+      '#include <common>\nvarying vec3 vCutWorld;\nuniform vec3 uHand;\nuniform float uHandR;')
+    .replace('#include <dithering_fragment>',
+      '#include <dithering_fragment>\nif (distance(vCutWorld, uHand) < uHandR) discard;');
+  calibTargetMat.userData.shader = sh;
+};
 const calibTarget = new THREE.Group();
 {
   const bar = () => {
@@ -2159,16 +2296,18 @@ const calibTarget = new THREE.Group();
 calibTarget.visible = false;
 scene.add(calibTarget);
 
-function updateCalibTarget() {
-  const cp = new THREE.Vector3();
-  ctrlR.getWorldPosition(cp);
-  const op = nearestOpening(cp, 2.5);
+function updateCalibTarget(op) {
+  if (op === undefined) {              // legacy: nearest to the controller
+    const cp = new THREE.Vector3();
+    ctrlR.getWorldPosition(cp);
+    op = nearestOpening(cp, 2.5);
+  }
   if (!op) { calibTarget.visible = false; return; }
   const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
   const sill = op.sill || 0;
   const head = op.head || 2.03;
   const hgt = Math.max(0.1, head - sill);
-  const T = 0.025;
+  const T = 0.012;                     // slim bars: the real frame stays visible
   const u = calibTarget.userData;
   u.bottom.scale.set(len + T, T, T);
   u.bottom.position.set(0, sill + T / 2, 0);
@@ -2181,6 +2320,113 @@ function updateCalibTarget() {
   calibTarget.position.set((op.ax + op.bx) / 2, 0, (op.az + op.bz) / 2);
   calibTarget.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
   calibTarget.visible = true;
+}
+
+// live trace preview: the right-trigger samples drawn as a cyan line
+// while tracing (in dolly space, where the XR samples live)
+const traceLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color: 0x2ee6d6, transparent: true,
+                                opacity: 0.95, depthTest: false }));
+traceLine.renderOrder = 999;
+traceLine.frustumCulled = false;
+traceLine.visible = false;
+dolly.add(traceLine);
+
+// trace-stage isolation: hide the entire model except a faint ghost of
+// the wall that carries the selected opening, so passthrough shows the
+// real room with just the amber indicator floating on it
+let calibWallGhost = null;
+function isolationOn(op) {
+  if (calibWallGhost) { scene.remove(calibWallGhost); calibWallGhost = null; }
+  const w = planWallsWorld[parseInt(op.key)];
+  if (w) {
+    const L = Math.hypot(w.bx - w.ax, w.bz - w.az);
+    calibWallGhost = new THREE.Mesh(
+      new THREE.BoxGeometry(L, w.h, w.thick),
+      new THREE.MeshBasicMaterial({ color: 0x8fb7ff, transparent: true,
+                                    opacity: 0.1, depthWrite: false }));
+    calibWallGhost.position.set((w.ax + w.bx) / 2, w.h / 2, (w.az + w.bz) / 2);
+    calibWallGhost.rotation.y = Math.atan2(-(w.bz - w.az), w.bx - w.ax);
+    scene.add(calibWallGhost);
+  }
+  if (planGroup) planGroup.visible = false;
+  sky.visible = false;
+  ground.visible = false;
+  if (scene.fog) { savedFog = scene.fog; scene.fog = null; }
+  renderer.setClearColor(0x000000, 0);   // camera feed everywhere else
+}
+function isolationOff() {
+  if (calibWallGhost) { scene.remove(calibWallGhost); calibWallGhost = null; }
+  if (planGroup) planGroup.visible = true;
+  passthroughOff();
+}
+
+// select stage (B held): the laser picks the door/window to calibrate
+function calibSelectTick() {
+  const { hit, origin, dir } = laserCast();
+  const probe = hit ? hit.point : origin.clone().addScaledVector(dir, 2.2);
+  const op = nearestOpening(probe, 1.6);
+  calib.target = op || null;
+  updateCalibTarget(op || null);
+  calibHandTick();
+}
+
+// keep the hand-cutout uniform and the trace preview current
+const _handPos = new THREE.Vector3();
+function calibHandTick() {
+  ctrlR.getWorldPosition(_handPos);
+  const sh = calibTargetMat.userData.shader;
+  if (sh) sh.uniforms.uHand.value.copy(_handPos);
+  if (calib.tracing && calib.samples.length > 1) {
+    traceLine.geometry.setFromPoints(
+      calib.samples.map(s => new THREE.Vector3(s.x, s.y, s.z)));
+    traceLine.visible = true;
+  } else if (!calib.tracing) {
+    traceLine.visible = false;
+  }
+}
+
+// B is hold-to-select: press shows the laser, aim at a door or window,
+// release drops into passthrough tracing on that target. Pressing B
+// again while tracing goes back to selection; releasing over nothing
+// exits calibration entirely.
+function calibBDown() {
+  if (calib.stage === 'trace') isolationOff();   // world back while re-aiming
+  calib.stage = 'select';
+  calib.mode = true;
+  calib.tracing = false;
+  calib.samples = [];
+  anchorMarkers.visible = true;
+  refreshAnchorMarkers();
+  applyAlignment();
+  vrMsg(['Point the laser at a door or window ...',
+         '... release B to calibrate it (release on nothing: exit)'], true);
+}
+function calibBUp() {
+  if (calib.stage !== 'select') return;
+  if (calib.target) {
+    calib.stage = 'trace';
+    laserOff();
+    if (calib.ar) isolationOn(calib.target);
+    vrMsg(calibStatusLines(), true);
+  } else {
+    exitCalib();
+  }
+}
+function exitCalib() {
+  calib.stage = 'off';
+  calib.mode = false;
+  calib.tracing = false;
+  calib.samples = [];
+  calib.target = null;
+  isolationOff();
+  laserOff();
+  calibTarget.visible = false;
+  anchorMarkers.visible = false;
+  traceLine.visible = false;
+  vrPanel.visible = false;
+  vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
 }
 
 // cyan markers on anchored features, visible in calibration mode
@@ -2242,7 +2488,7 @@ function calibStatusLines() {
   const T = calib.anchors.length ? solveAlignment(calib.anchors) : null;
   const hint = calib.anchors.length === 1
     ? 'add a 2nd anchor (a window works best) to lock orientation'
-    : 'A: delete nearest anchor - X twice: clear all - B: exit';
+    : 'A: delete anchor - X twice: clear all - B: pick another / exit';
   return [
     'CALIBRATION - amber outline = where the plan thinks that door is.',
     'RIGHT trigger: trace the OPEN doorway, jamb to jamb, on YOUR side',
@@ -2265,15 +2511,17 @@ function nearestOpening(worldPos, maxDist) {
 
 function finishTrace() {
   calib.tracing = false;
+  traceLine.visible = false;
   const s = calib.samples;
   calib.samples = [];
   if (s.length < 12) { vrMsg(['Trace too short - hold trigger and', 'slide along the full base edge']); return; }
   const seg = fitTraceSegment(s);
   if (seg.len < 0.25) { vrMsg(['Trace too short - cover the whole edge']); return; }
-  // pick the plan feature nearest the trace midpoint (in world space)
+  // the selected target takes the trace; fall back to the plan feature
+  // nearest the trace midpoint (in world space) for legacy flows
   const midRef = new THREE.Vector3((seg.a[0] + seg.b[0]) / 2, 0, (seg.a[1] + seg.b[1]) / 2);
   const midWorld = midRef.clone().applyMatrix4(dolly.matrixWorld);
-  const op = nearestOpening(midWorld, 2.5);
+  const op = calib.target || nearestOpening(midWorld, 2.5);
   if (!op) { vrMsg(['No door/window near you in the plan -', 'walk up to one and trace again']); return; }
 
   // the canonical gesture traces the threshold on YOUR side of the wall,
@@ -2316,35 +2564,33 @@ function finishTrace() {
 
 // exposed for automated testing of the solver + anchor lifecycle
 window.PLAN2VR_DRAW = { draw, drawSample, drawFinish, drawTick, resetHeight, noteRec,
+  laserCast, laserOff, laserBeam, laserDot,
   get planOffset() { return planOffset; }, get ctrlR() { return ctrlR; } };
 window.PLAN2VR_CALIB = {
   fitTraceSegment, solveAlignment, calib,
   applyAlignment, saveAnchors, loadAnchors,
   insideRoom: (x, z) => insideAnyRoom(x, z),
   updateCalibTarget, calibTarget, toggleCalib,
+  calibBDown, calibBUp, exitCalib, calibSelectTick, calibHandTick,
+  finishTrace, calibTargetMat, traceLine,
+  get wallGhost() { return calibWallGhost; },
+  get planGroup() { return planGroup; },
   probes: { get sky() { return sky; }, get ground() { return ground; },
             get fog() { return scene.fog; }, get wallOpacity() { return wallMat.opacity; } },
   get openings() { return planOpeningsWorld; },
   get dolly() { return dolly; },
 };
 
+// legacy toggle (kept for tests/automation): enters the trace stage on
+// the opening nearest the controller, or exits calibration
 function toggleCalib() {
-  calib.mode = !calib.mode;
-  calib.tracing = false;
-  calib.samples = [];
-  calib.clearArmed = 0;
-  anchorMarkers.visible = calib.mode;
-  if (calib.mode) {
-    if (calib.ar) passthroughOn();   // see the real house while tracing
-    refreshAnchorMarkers();
-    applyAlignment();
-    vrMsg(calibStatusLines(), true);
-  } else {
-    if (calib.ar) passthroughOff();  // back to the immersive virtual house
-    calibTarget.visible = false;
-    vrPanel.visible = false;
-    vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
-  }
+  if (calib.stage !== 'off') { exitCalib(); return; }
+  calibBDown();
+  const cp = new THREE.Vector3();
+  ctrlR.getWorldPosition(cp);
+  calib.target = nearestOpening(cp, 2.5);
+  if (calib.target) updateCalibTarget(calib.target);
+  calibBUp();
 }
 
 function deleteNearestAnchor() {
@@ -2481,11 +2727,18 @@ function handleVRInput() {
     const stickX = ax.length >= 4 ? ax[2] : ax[0];
     const stickY = ax.length >= 4 ? ax[3] : ax[1];
 
-    // calibration controls (B toggles; see the VR calibration section)
+    // calibration controls (hold B to laser-select a door/window, release
+    // to trace it in passthrough; see the VR calibration section)
     if (src.handedness === 'right') {
-      if (btnEdge('right', gp, 5)) toggleCalib();
-      if (calib.mode) {
-        updateCalibTarget();
+      const bNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
+      if (bNow && !calib.bPrev) calibBDown();
+      if (!bNow && calib.bPrev) calibBUp();
+      calib.bPrev = bNow;
+      if (calib.stage === 'select') {
+        calibSelectTick();
+      } else if (calib.stage === 'trace') {
+        updateCalibTarget(calib.target);
+        calibHandTick();
         if (btnEdge('right', gp, 4)) deleteNearestAnchor();
         const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
         if (trig) {
@@ -2525,9 +2778,14 @@ function handleVRInput() {
         dolly.position.addScaledVector(side, dx * sp);
       }
     } else if (src.handedness === 'right') {
-      const trigR = gp.buttons[0] && gp.buttons[0].value > 0.55;
-      if (trigR) { draw.active = true; drawSample(); }
-      else if (draw.active) drawFinish();
+      // laser pointer: light touch aims, squeeze inks onto the surface
+      const trigV = gp.buttons[0] ? gp.buttons[0].value : 0;
+      if (trigV > 0.55) { draw.active = true; drawSample(); }
+      else {
+        if (draw.active) drawFinish();
+        if (trigV > 0.08 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
+        else laserOff();
+      }
       if (btnEdge('right', gp, 3)) resetHeight();   // stick click
       if (stickY < -0.6) {                 // push forward -> teleport aim
         teleAiming = true;
@@ -2553,8 +2811,8 @@ let vrDt = 0.016;
 function showVRHelp() {
   vrMsg([
     'L stick: walk · R stick: turn / push: teleport',
-    'R trigger: draw · hold L trigger: voice note',
-    'B: passthrough calibrate · Y: this help',
+    'R trigger: laser pointer, squeeze to draw · L trigger: voice note',
+    'Hold B: aim laser at a door, release: calibrate · Y: this help',
     'Click R stick: reset height (seated)',
   ], 14);
 }
@@ -2591,11 +2849,14 @@ renderer.xr.addEventListener('sessionend', () => {
   heightOffset = 0; groundY = 0; fallV = 0;
   dolly.position.y = 0;
   arc.visible = false; marker.visible = false;
-  if (calib.ar) {
-    passthroughOff();
-    calib.ar = false;
-  }
+  laserOff();
+  if (calib.stage === 'trace') isolationOff();
+  else if (calib.ar) passthroughOff();
+  calib.ar = false;
   calib.mode = false; calib.aligned = false;
+  calib.stage = 'off'; calib.target = null; calib.bPrev = false;
+  calib.tracing = false; calib.samples = [];
+  traceLine.visible = false;
   anchorMarkers.visible = false;
   calibTarget.visible = false;
   vrPanel.visible = false;

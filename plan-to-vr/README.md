@@ -109,16 +109,19 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
 5. Locomotion: **left thumbstick walks** (smooth, head-relative), **right
    thumbstick turns smoothly**; push the right stick forward to aim the
    teleport arc and release to jump. **Y** shows the controls help panel,
-   **B** toggles passthrough calibration, and **holding the left trigger
-   records a voice note** pinned to where you stand - review, play and
-   download notes later from the 🎤 button (desktop: hold **V**). Hold the
-   **right trigger to draw in the air**; strokes fade out a few seconds
-   after release, and anything drawn during (or just before) a voice note
-   is saved with it in plan coordinates - the note's "data" download is a
-   JSON of position, heading and strokes that maps straight onto the
-   sheet. Playing seated? A stationary guardian can sink the camera to
-   the floor - the rig auto-corrects on entry, and **clicking the right
-   stick resets your eye height** any time.
+   **holding B aims the calibration laser** (see the passthrough section),
+   and **holding the left trigger records a voice note** pinned to where
+   you stand - review, play and download notes later from the 🎤 button
+   (desktop: hold **V**), where one click also bundles **every note from
+   the current session** (or everything) into a single zip of audio +
+   `notes.json`. The **right trigger is a laser pointer**: rest a finger
+   on it for the red beam and dot, squeeze to draw on whatever surface
+   the dot touches; strokes fade out a few seconds after release, and
+   anything drawn during (or just before) a voice note is saved with it
+   in plan coordinates, so a spoken comment plus a scribble pins exactly
+   what it refers to. Playing seated? A stationary guardian can sink the
+   camera to the floor - the rig auto-corrects on entry, and **clicking
+   the right stick resets your eye height** any time.
 
 > WebXR normally requires HTTPS, but plain-HTTP works for LAN addresses in
 > the Quest Browser. If Enter VR is greyed out, tunnel through
@@ -384,10 +387,16 @@ importmap from a CDN, no build step. It:
 - **Passthrough calibration to your real house**: on Quest the single
   ENTER VR button starts an AR-capable session rendered fully opaque, so
   it looks exactly like VR (one session does both worlds - WebXR cannot
-  switch modes mid-flight). Press **B** and the house ghosts into
-  passthrough for calibration; press **B** again and you're back inside
-  the fully immersive model. While calibrating, walk to a real
-  door that exists in the plan, hold the **right trigger**, and trace the
+  switch modes mid-flight). **Hold B** and a laser appears - point it at
+  a door or window and the amber frame locks onto it; **release B** and
+  the entire model vanishes into passthrough except a faint ghost of that
+  one wall and the slim amber indicator, so the real room is fully
+  visible while you work (release while pointing at nothing to exit;
+  press B again to pick another target). The indicator carves a circular
+  cutout around your controller whenever your hand comes near, so it
+  never hides the edge you're tracing, and the trace draws as a live
+  cyan line while you make it. Walk to the real
+  door, hold the **right trigger**, and trace the
   floor through the OPEN doorway, jamb to jamb, along the edge on YOUR
   side (windows: along the sill). An amber outline previews where the
   plan currently believes the target feature is - the gap against the
