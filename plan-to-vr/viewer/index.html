@@ -65,6 +65,22 @@
     font: 12px system-ui, sans-serif; cursor: pointer;
   }
   #map-layers button.on { background: #2b6cb0; color: #eef2fa; border-color: #4a86c8; }
+  #notes-btn {
+    position: fixed; top: 12px; right: 96px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #notes-btn.rec { background: #b02b2b; border-color: #d05050; }
+  #notes-panel {
+    position: fixed; top: 52px; right: 96px; z-index: 40; width: 340px;
+    max-height: 60vh; overflow-y: auto; background: rgba(20,24,34,.95);
+    border: 1px solid #39415a; border-radius: 10px; padding: 10px;
+    font: 12px system-ui, sans-serif; color: #dfe6f3;
+  }
+  #notes-panel .note { border-bottom: 1px solid #2a3147; padding: 8px 0; }
+  #notes-panel audio { width: 100%; height: 28px; margin-top: 4px; }
+  #notes-panel a { color: #6db3f2; margin-right: 10px; }
   #err {
     position: fixed; inset: 0; z-index: 30; display: none;
     align-items: center; justify-content: center; text-align: center;
@@ -89,12 +105,14 @@
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · hold <b>V</b> voice note · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
 
 <button id="map-btn" title="top-down plan view (M)">▦ plan</button>
+<button id="notes-btn" title="voice notes (hold V or left trigger to record)">🎤 0</button>
+<div id="notes-panel" hidden></div>
 <div id="map-layers" hidden>
   <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
   <button data-layer="lines" title="plan linework (2)">lines</button>
@@ -898,7 +916,70 @@ function buildPlan(plan) {
     const stMat = std({ color: 0xb9a988, roughness: 0.85,
                         envMapIntensity: ENV_INTENSITY });
     const riserM = 0.17, capM = 1.1;
+    const wellMat = std({ color: 0x14161c, roughness: 1.0,
+                          envMapIntensity: 0 });
+    const railMat = std({ color: 0xcfc8ba, roughness: 0.6,
+                          envMapIntensity: ENV_INTENSITY });
     for (const st of plan.stairs) {
+      if (st.down) {
+        // a DOWN flight can't descend through the slab; render the well:
+        // a dark pit at floor level with a guard rail around it, which
+        // reads instantly as "stairs going down" without a basement
+        const pw = st.polygon.map(([px, py]) => toWorld(px, py));
+        let cx0 = Math.min(...pw.map(q => q.x)), cx1 = Math.max(...pw.map(q => q.x));
+        let cz0 = Math.min(...pw.map(q => q.z)), cz1 = Math.max(...pw.map(q => q.z));
+        const wellW = cx1 - cx0, wellD = cz1 - cz0;
+        const well = new THREE.Mesh(
+          new THREE.BoxGeometry(wellW, 0.02, wellD), wellMat);
+        well.position.set((cx0 + cx1) / 2, 0.012, (cz0 + cz1) / 2);
+        group.add(well);
+        // first three treads sink into the dark before it swallows them
+        const dirW = st.direction
+          ? [st.direction[0], -st.direction[1]]
+          : [wellW >= wellD ? 1 : 0, wellW >= wellD ? 0 : 1];
+        for (let i = 0; i < 3; i++) {
+          const t = st.treads[Math.min(i, st.treads.length - 1)];
+          const a2 = toWorld(t[0][0], t[0][1]);
+          const b2 = toWorld(t[1][0], t[1][1]);
+          const len = Math.hypot(b2.x - a2.x, b2.z - a2.z);
+          if (len < 0.2) continue;
+          const dep = 0.26;
+          const m = new THREE.Mesh(
+            new THREE.BoxGeometry(len, 0.02, dep), stMat);
+          m.position.set(
+            (a2.x + b2.x) / 2 + dirW[0] * dep * i,
+            -0.001 - i * 0.004,
+            (a2.z + b2.z) / 2 + dirW[1] * dep * i);
+          m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
+          group.add(m);
+        }
+        // guard rail on the long sides + far end
+        const railH = 0.92;
+        const mkRail = (x, z, len, rotY) => {
+          const r = new THREE.Mesh(
+            new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
+          r.position.set(x, railH, z);
+          r.rotation.y = rotY;
+          group.add(r);
+          const p1 = new THREE.Mesh(
+            new THREE.BoxGeometry(0.04, railH, 0.04), railMat);
+          p1.position.set(x - Math.cos(rotY) * len / 2, railH / 2,
+                          z + Math.sin(rotY) * len / 2);
+          group.add(p1);
+          const p2 = p1.clone();
+          p2.position.set(x + Math.cos(rotY) * len / 2, railH / 2,
+                          z - Math.sin(rotY) * len / 2);
+          group.add(p2);
+        };
+        if (wellW >= wellD) {           // run along x: rails on z sides
+          mkRail((cx0 + cx1) / 2, cz0 + 0.03, wellW, 0);
+          mkRail((cx0 + cx1) / 2, cz1 - 0.03, wellW, 0);
+        } else {
+          mkRail(cx0 + 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
+          mkRail(cx1 - 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
+        }
+        continue;
+      }
       const treads = st.treads.map(t => {
         const a2 = toWorld(t[0][0], t[0][1]);
         const b2 = toWorld(t[1][0], t[1][1]);
@@ -1229,13 +1310,127 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
   if (e.code === 'KeyM') toggleMap();
+  if (e.code === 'KeyV' && !e.repeat) { initVoiceNotes(); startVoiceNote(); }
   if (e.code === 'Digit1') { layerState.geom = !layerState.geom; applyLayers(); }
   if (e.code === 'Digit2') { layerState.lines = !layerState.lines; applyLayers(); }
   if (e.code === 'Digit3') { layerState.sheet = !layerState.sheet; applyLayers(); }
   if (e.code === 'KeyT') toggleTour();
   else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
 });
-addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'KeyV') stopVoiceNote();
+});
+
+// ---------------------------------------------------------- voice notes
+// Hold the left trigger in VR (or V on the desktop) to record a voice
+// memo pinned to where you stand; notes persist in IndexedDB and are
+// playable/downloadable from the mic button, so walkthrough feedback
+// can be captured in place and shared afterwards.
+const noteRec = { active: false, media: null, rec: null, chunks: [] };
+
+function notesDB() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open('plan2vr-notes', 1);
+    rq.onupgradeneeded = () =>
+      rq.result.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function notesAll() {
+  const db = await notesDB();
+  return new Promise(res => {
+    const out = [];
+    const cur = db.transaction('notes').objectStore('notes').openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (c) { out.push(c.value); c.continue(); } else res(out);
+    };
+  });
+}
+async function refreshNotesBadge() {
+  const n = (await notesAll()).length;
+  document.getElementById('notes-btn').textContent = '🎤 ' + n;
+}
+function initVoiceNotes() {
+  if (noteRec.media || !navigator.mediaDevices) return;
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(st => { noteRec.media = st; })
+    .catch(() => {});
+}
+function startVoiceNote() {
+  if (noteRec.active) return;
+  if (!noteRec.media) { initVoiceNotes(); return; }
+  noteRec.chunks = [];
+  try {
+    noteRec.rec = new MediaRecorder(noteRec.media);
+  } catch (e) { return; }
+  noteRec.rec.ondataavailable = e => { if (e.data.size) noteRec.chunks.push(e.data); };
+  noteRec.rec.onstop = async () => {
+    const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType || 'audio/webm' });
+    const cam = new THREE.Vector3();
+    camera.getWorldPosition(cam);
+    const db = await notesDB();
+    db.transaction('notes', 'readwrite').objectStore('notes').add({
+      t: Date.now(), plan: currentPlanKey,
+      x: +cam.x.toFixed(2), z: +cam.z.toFixed(2),
+      yaw: +dolly.rotation.y.toFixed(2), blob,
+    });
+    setTimeout(refreshNotesBadge, 200);
+    if (renderer.xr.isPresenting) vrMsg(['Voice note saved'], 3);
+  };
+  noteRec.rec.start();
+  noteRec.active = true;
+  document.getElementById('notes-btn').classList.add('rec');
+  if (renderer.xr.isPresenting) vrMsg(['● Recording... release to save'], true);
+}
+function stopVoiceNote() {
+  if (!noteRec.active) return;
+  noteRec.active = false;
+  document.getElementById('notes-btn').classList.remove('rec');
+  try { noteRec.rec.stop(); } catch (e) {}
+  if (renderer.xr.isPresenting) vrPanelTimer = 0.1;
+}
+async function renderNotesPanel() {
+  const panel = document.getElementById('notes-panel');
+  const notes = await notesAll();
+  panel.innerHTML = notes.length ? '' :
+    '<div>No notes yet. Hold <b>V</b> (or the left trigger in VR) to record.</div>';
+  for (const n of notes.reverse()) {
+    const div = document.createElement('div');
+    div.className = 'note';
+    const when = new Date(n.t).toLocaleString();
+    div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ (${n.x}, ${n.z})</div>`;
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = URL.createObjectURL(n.blob);
+    div.appendChild(audio);
+    const row = document.createElement('div');
+    const dl = document.createElement('a');
+    dl.href = audio.src;
+    dl.download = `note-${n.id}-${n.plan.split('/').pop().replace('.json','')}.webm`;
+    dl.textContent = 'download';
+    const del = document.createElement('a');
+    del.href = '#';
+    del.textContent = 'delete';
+    del.onclick = async e => {
+      e.preventDefault();
+      const db = await notesDB();
+      db.transaction('notes', 'readwrite').objectStore('notes').delete(n.id);
+      setTimeout(() => { renderNotesPanel(); refreshNotesBadge(); }, 150);
+    };
+    row.appendChild(dl); row.appendChild(del);
+    div.appendChild(row);
+    panel.appendChild(div);
+  }
+}
+document.getElementById('notes-btn').addEventListener('click', () => {
+  const panel = document.getElementById('notes-panel');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) renderNotesPanel();
+});
+refreshNotesBadge();
 
 // ------------------------------------------------------------- map view
 // Top-down orthographic "floor plan" mode (M / the ▦ button): ceilings
@@ -1626,10 +1821,13 @@ const calib = {
 const ghosted = new Map();
 let savedFog = null;
 function ghostOn() {
+  // 0.4 proved far too opaque on the Quest 2's dim grayscale feed - at
+  // 0.15 the real room reads first and the model floats over it
   for (const m of allMats) {
     if (!ghosted.has(m)) ghosted.set(m, { t: m.transparent, o: m.opacity });
     m.transparent = true;
-    m.opacity = Math.min(0.4, m.opacity);
+    m.opacity = Math.min(0.15, m.opacity);
+    m.depthWrite = false;
     m.needsUpdate = true;
   }
 }
@@ -1637,6 +1835,7 @@ function ghostOff() {
   for (const [m, s] of ghosted) {
     m.transparent = s.t;
     m.opacity = s.o;
+    m.depthWrite = true;
     m.needsUpdate = true;
   }
   ghosted.clear();
@@ -1645,17 +1844,24 @@ function ghostOff() {
 // In an AR session, opaque rendering covers the camera feed entirely, so
 // "VR" and "passthrough" are just render states of one session - which is
 // how B can flip between them instantly (WebXR can't switch session modes).
+let ptSavedCeil = true;
 function passthroughOn() {
   sky.visible = false;
   ground.visible = false;
   if (scene.fog) { savedFog = scene.fog; scene.fog = null; }
+  if (ceiling) { ptSavedCeil = ceiling.visible; ceiling.visible = false; }
+  if (underlayMesh) underlayMesh.visible = false;
+  renderer.setClearColor(0x000000, 0);   // let the camera feed through
   ghostOn();
 }
 function passthroughOff() {
   sky.visible = true;
   ground.visible = true;
   if (savedFog) scene.fog = savedFog;
+  if (ceiling) ceiling.visible = ptSavedCeil;
+  renderer.setClearColor(0x000000, 1);
   ghostOff();
+  applyLayers();
 }
 
 // fit a straight segment to trace samples via 2D PCA; returns endpoints
@@ -1883,7 +2089,7 @@ function vrMsg(lines, sticky) {
   lines.slice(0, 4).forEach((ln, i) => g.fillText(ln, 28, 66 + i * 56));
   vrPanelTex.needsUpdate = true;
   vrPanel.visible = true;
-  vrPanelTimer = sticky ? Infinity : 4;
+  vrPanelTimer = sticky === true ? Infinity : (sticky || 4);
 }
 function vrPanelTick(dt) {
   if (vrPanel.visible && vrPanelTimer !== Infinity) {
@@ -2128,12 +2334,32 @@ function handleVRInput() {
     if (src.handedness === 'left' && calib.mode) {
       if (btnEdge('left', gp, 4)) clearAllAnchors();
     }
-    if (calib.mode) continue;   // no teleport/snap while calibrating
+    // voice notes: hold the left trigger to record, release to save
+    if (src.handedness === 'left') {
+      const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
+      if (trig && !noteRec.active) startVoiceNote();
+      else if (!trig && noteRec.active) stopVoiceNote();
+      if (btnEdge('left', gp, 5)) showVRHelp();      // Y: help
+    }
+    if (calib.mode) continue;   // walking pauses while calibrating
 
     if (src.handedness === 'left') {
-      if (stickY < -0.6) {                 // push forward -> aim
+      // smooth, head-relative walking (FPS style)
+      const dx = Math.abs(stickX) > 0.12 ? stickX : 0;
+      const dy = Math.abs(stickY) > 0.12 ? stickY : 0;
+      if (dx || dy) {
+        const fwd = new THREE.Vector3();
+        camera.getWorldDirection(fwd);
+        fwd.y = 0; fwd.normalize();
+        const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+        const sp = 2.4 * vrDt;
+        dolly.position.addScaledVector(fwd, -dy * sp);
+        dolly.position.addScaledVector(side, dx * sp);
+      }
+    } else if (src.handedness === 'right') {
+      if (stickY < -0.6) {                 // push forward -> teleport aim
         teleAiming = true;
-        const { pts, hit } = computeArc(ctrlL);
+        const { pts, hit } = computeArc(ctrlR);
         arc.geometry.setFromPoints(pts);
         arc.visible = true;
         if (hit) { marker.position.copy(hit); marker.visible = true; teleTarget = hit; }
@@ -2142,21 +2368,30 @@ function handleVRInput() {
         teleAiming = false; arc.visible = false; marker.visible = false;
         if (teleTarget) teleportTo(teleTarget);
         teleTarget = null;
-      }
-    } else if (src.handedness === 'right') {
-      if (Math.abs(stickX) > 0.7 && snapReady) {
-        rotatePlayer(stickX > 0 ? -Math.PI / 4 : Math.PI / 4);   // 45deg snap
-        snapReady = false;
-      } else if (Math.abs(stickX) < 0.3) {
-        snapReady = true;
+      } else if (Math.abs(stickX) > 0.15) {
+        // smooth turn, ramped by deflection (think FPS mouse-look)
+        const rate = 2.2 * stickX * Math.abs(stickX);
+        rotatePlayer(-rate * vrDt);
       }
     }
   }
 }
 
+let vrDt = 0.016;
+function showVRHelp() {
+  vrMsg([
+    'Left stick: walk · Right stick: turn',
+    'Right stick push fwd: teleport arc',
+    'B: passthrough calibrate · Y: this help',
+    'Hold left trigger: voice note',
+  ], 14);
+}
+
 renderer.xr.addEventListener('sessionstart', () => {
   overlay.style.display = 'none';
   toggleMap(false);            // map view is a flat-screen affair
+  setTimeout(showVRHelp, 800);
+  initVoiceNotes();
   const session = renderer.xr.getSession();
   calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
   if (calib.ar && !calib.anchors.length && !calib.mode) {
@@ -2216,7 +2451,7 @@ function resolveCollision() {
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
-  if (renderer.xr.isPresenting) handleVRInput();
+  if (renderer.xr.isPresenting) { vrDt = dt; handleVRInput(); }
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else if (mapMode) mapMove(dt);
   else { desktopMove(dt); applyGyro(); }

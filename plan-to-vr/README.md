@@ -106,9 +106,12 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    Linux/macOS) — say it's `192.168.1.42`.
 3. In the Quest's **Browser**, visit `http://192.168.1.42:8000`.
 4. Tap **Enter VR** at the bottom of the page.
-5. Locomotion: push the **left thumbstick forward** to aim the teleport arc,
-   release to jump there; flick the **right thumbstick** left/right for 45°
-   snap turns.
+5. Locomotion: **left thumbstick walks** (smooth, head-relative), **right
+   thumbstick turns smoothly**; push the right stick forward to aim the
+   teleport arc and release to jump. **Y** shows the controls help panel,
+   **B** toggles passthrough calibration, and **holding the left trigger
+   records a voice note** pinned to where you stand - review, play and
+   download notes later from the 🎤 button (desktop: hold **V**).
 
 > WebXR normally requires HTTPS, but plain-HTTP works for LAN addresses in
 > the Quest Browser. If Enter VR is greyed out, tunnel through

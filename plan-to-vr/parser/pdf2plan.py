@@ -85,7 +85,7 @@ def page_segments(page):
             # stair walk-line tips); keep their centroids
             if f and max(f) < 0.05:
                 r = path["rect"]
-                if max(r.width, r.height) <= 8.0:
+                if max(r.width, r.height) <= 14.0:
                     c = xf(fitz.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2))
                     out["arrow"].append(c)
             # wall poche plots as a neutral gray fill; arrowheads are
@@ -940,32 +940,6 @@ def find_stairs(symbol_segs, gray_segs, wall_segs, arrows=()):
         ys = [q[1] for q in r["polygon"]]
         return min(xs), min(ys), max(xs), max(ys)
 
-    # merge runs the break symbol split: same cross extent, small gap
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(runs)):
-            for j in range(i + 1, len(runs)):
-                a, b = bbox(runs[i]), bbox(runs[j])
-                same_x = abs(a[0] - b[0]) <= 8 and abs(a[2] - b[2]) <= 8
-                same_y = abs(a[1] - b[1]) <= 8 and abs(a[3] - b[3]) <= 8
-                gap_y = max(a[1], b[1]) - min(a[3], b[3])
-                gap_x = max(a[0], b[0]) - min(a[2], b[2])
-                if (same_x and gap_y <= 3 * STAIR_SPACING[1]) or \
-                        (same_y and gap_x <= 3 * STAIR_SPACING[1]):
-                    x0 = min(a[0], b[0]); y0 = min(a[1], b[1])
-                    x1 = max(a[2], b[2]); y1 = max(a[3], b[3])
-                    runs[i] = {
-                        "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-                        "treads": runs[i]["treads"] + runs[j]["treads"],
-                        "_horiz": runs[i]["_horiz"],
-                    }
-                    runs.pop(j)
-                    merged = True
-                    break
-            if merged:
-                break
-
     # the walk line: a long line along the run's centerline whose tip
     # carries an arrowhead. It both points the run and vouches for runs
     # whose flanks are stringers rather than modeled walls (dimension
@@ -995,12 +969,117 @@ def find_stairs(symbol_segs, gray_segs, wall_segs, arrows=()):
                 lat = abs(my - (y0 + y1) / 2)
                 if lat > 0.3 * h_:
                     continue
-            for tip, tail in ((sg.a, sg.b), (sg.b, sg.a)):
-                near = min(math.dist(tip, ah) for ah in arrows) \
-                    if arrows else 1e9
-                if near <= 12.0 and (best is None or L > best[0]):
-                    best = (L, X.unit(X.sub(tip, tail)))
+            # resolve the pointing end. Two drafting conventions: a
+            # solid fill is either the arrowhead itself (dimension
+            # style) or the start-of-travel dot, with an open stroke-V
+            # at the actual tip. A V of short diagonals wins; a lone
+            # fill on one end is then the start marker.
+            u = X.unit(X.sub(sg.b, sg.a))
+
+            def fill_at(tip, d):
+                for ah in arrows:
+                    rel = (ah[0] - tip[0], ah[1] - tip[1])
+                    along = rel[0] * d[0] + rel[1] * d[1]
+                    lat = abs(rel[0] * -d[1] + rel[1] * d[0])
+                    if -2.0 <= along <= 10.0 and lat <= 3.0:
+                        return True
+                return False
+
+            def vee_at(tip):
+                n = 0
+                for t in symbol_segs:
+                    for e in (t.a, t.b):
+                        if math.dist(e, tip) > 3.0:
+                            continue
+                        tv = X.unit(X.sub(t.b, t.a))
+                        c = abs(tv[0] * u[0] + tv[1] * u[1])
+                        tl = X.length(X.sub(t.b, t.a))
+                        if 2.0 <= tl <= 14.0 and 0.3 <= c <= 0.99:
+                            n += 1
+                        break
+                return n >= 2
+
+            fa = fill_at(sg.a, (-u[0], -u[1])) if arrows else False
+            fb = fill_at(sg.b, u) if arrows else False
+            va, vb = vee_at(sg.a), vee_at(sg.b)
+            tip = tail = None
+            if va != vb:
+                tip, tail = (sg.a, sg.b) if va else (sg.b, sg.a)
+            elif fa != fb:
+                tip, tail = (sg.a, sg.b) if fa else (sg.b, sg.a)
+            if tip is None:
+                continue
+            if best is None or L > best[0]:
+                best = (L, X.unit(X.sub(tip, tail)))
         return best
+
+    def has_break(r):
+        # the floor cut plane is drawn as a zigzag polyline crossing the
+        # run where it continues below - i.e. a DOWN flight. The zigzag
+        # is a thin band: wide across the run, a few inches along it.
+        # (Door-swing arc chords are also short diagonals, but their
+        # chains spread as far along the run as across it.)
+        x0, y0, x1, y1 = bbox(r)
+        horiz = r["_horiz"]
+        ix0, iy0, ix1, iy1 = x0, y0, x1, y1
+        if horiz:
+            iy0 -= 42; iy1 += 42
+        else:
+            ix0 -= 42; ix1 += 42
+        cand = [sg for sg in symbol_segs
+                if X.length(X.sub(sg.b, sg.a)) <= 30.0
+                and ix0 - 1 <= (sg.a[0] + sg.b[0]) / 2 <= ix1 + 1
+                and iy0 - 1 <= (sg.a[1] + sg.b[1]) / 2 <= iy1 + 1]
+        for chain in chain_segments(list(cand), tol=1.2):
+            xs = [q[0] for q in chain]
+            ys = [q[1] for q in chain]
+            if horiz:
+                across = max(xs) - min(xs)
+                along = max(ys) - min(ys)
+                cross_w = x1 - x0
+            else:
+                across = max(ys) - min(ys)
+                along = max(xs) - min(xs)
+                cross_w = y1 - y0
+            if along <= 14.0 and 1.0 <= along and \
+                    across >= 0.45 * cross_w:
+                return True
+        return False
+
+    for r in runs:
+        r["_down"] = has_break(r)
+
+    # merge runs the break symbol split: same cross extent, small gap,
+    # and the same up/down character (never fuse an up flight with the
+    # down flight beside it)
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(runs)):
+            for j in range(i + 1, len(runs)):
+                a, b = bbox(runs[i]), bbox(runs[j])
+                same_x = abs(a[0] - b[0]) <= 8 and abs(a[2] - b[2]) <= 8
+                same_y = abs(a[1] - b[1]) <= 8 and abs(a[3] - b[3]) <= 8
+                gap_y = max(a[1], b[1]) - min(a[3], b[3])
+                gap_x = max(a[0], b[0]) - min(a[2], b[2])
+                if runs[i]["_down"] != runs[j]["_down"]:
+                    continue
+                if (same_x and gap_y <= 3 * STAIR_SPACING[1]) or \
+                        (same_y and gap_x <= 3 * STAIR_SPACING[1]):
+                    x0 = min(a[0], b[0]); y0 = min(a[1], b[1])
+                    x1 = max(a[2], b[2]); y1 = max(a[3], b[3])
+                    runs[i] = {
+                        "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                        "treads": runs[i]["treads"] + runs[j]["treads"],
+                        "_horiz": runs[i]["_horiz"],
+                        "_down": runs[i]["_down"],
+                    }
+                    runs.pop(j)
+                    merged = True
+                    break
+            if merged:
+                break
+
 
     kept = []
     for r in runs:
@@ -1009,7 +1088,10 @@ def find_stairs(symbol_segs, gray_segs, wall_segs, arrows=()):
             continue
         if wl:
             r["direction"] = [round(wl[1][0], 4), round(wl[1][1], 4)]
+        if r["_down"]:
+            r["down"] = True      # cut by the floor plane: descends
         r.pop("_horiz", None)
+        r.pop("_down", None)
         kept.append(r)
     return kept
 
