@@ -55,10 +55,14 @@ Then open <http://localhost:8000> — click the page to grab the mouse, walk
 with **WASD**, look with the mouse, press **C** to toggle the ceiling and
 **F** to toggle furniture. **M** (or the ▦ plan button) switches to a
 top-down orthographic floor-plan view — ceilings off, the source plan's
-wall lines and opening spans drawn color-coded over the built geometry
-(doors red, windows blue, cased openings orange) so the model can be
-checked against the drawing at a glance; scroll to zoom, drag or WASD to
-pan. You can also drag-and-drop any other `plan.json` onto the page.
+wall lines, opening spans, door swing arcs and stair treads drawn
+color-coded over the built geometry (doors red, windows blue, cased
+openings orange, stairs cyan) so the model can be checked against the
+drawing at a glance; scroll to zoom, drag or WASD to pan. Three layer
+toggles (**1/2/3** or the buttons): the 3D geometry, the plan linework,
+and — for PDF-derived plans — the source sheet itself rendered under
+the model at true scale, which makes the 2D comparison direct: sheet,
+linework and geometry in one registered view. You can also drag-and-drop any other `plan.json` onto the page.
 
 Expected parser summary for the sample:
 
@@ -227,6 +231,13 @@ line floating off the drawing:
 ```bash
 python parser/pdfoverlay.py binder.pdf plan.json --page 0 -o overlay.png
 ```
+
+The extraction also strips dashed historical linework first (demo walls,
+roof/overhead lines - short collinear pieces with low inked fraction, so
+real lines sharing the line never qualify), detects stair runs (evenly
+spaced tread ladders hugging a wall) into `plan.json`'s `stairs` and an
+`A-STRS` DXF layer, and derives each door's hinge end, swing side and
+leaf length from its refit arc.
 
 Audited to parity against the bundled renovation binder (two floors,
 three wall states, plotted at half size): every structural element on

@@ -14,6 +14,7 @@ Usage:
 """
 import argparse
 import json
+import math
 
 import fitz
 import matplotlib
@@ -84,6 +85,47 @@ def main():
         wall_lines, colors=[(1, 0.1, 0.7)], linewidths=1.1, alpha=0.85))
     ax.add_collection(LineCollection(
         open_lines, colors=open_cols, linewidths=2.2, alpha=0.85))
+    # stairs: run outline + treads
+    for st in plan.get("stairs") or []:
+        poly = st["polygon"] + [st["polygon"][0]]
+        pxs = [to_px(x, y) for x, y in poly]
+        ax.plot([q[0] for q in pxs], [q[1] for q in pxs],
+                color=(0, 0.75, 0.85), linewidth=1.4, alpha=0.9)
+        ax.add_collection(LineCollection(
+            [[to_px(*t[0]), to_px(*t[1])] for t in st["treads"]],
+            colors=[(0, 0.75, 0.85)], linewidths=0.8, alpha=0.8))
+
+    # door swings: hinge-anchored quarter arc + open leaf
+    import numpy as np
+    for o in plan["openings"]:
+        if o["type"] != "door" or not o.get("hinge"):
+            continue
+        w = walls[o["wall_index"]]
+        ax_, ay = w["start"]; bx, by = w["end"]
+        dx, dy = bx - ax_, by - ay
+        L = (dx * dx + dy * dy) ** 0.5 or 1
+        ux, uy = dx / L, dy / L
+        mx, my = ax_ + dx * o["position"], ay + dy * o["position"]
+        half = o["width"] / 2
+        hx = mx + ux * half * o["hinge"]      # hinge jamb
+        hy = my + uy * half * o["hinge"]
+        away = math.atan2(uy, ux)             # toward the far jamb
+        if o["hinge"] > 0:
+            away += math.pi
+        # rotate the leaf from along-the-wall toward the swing-side
+        # normal; the rotation sense flips with the hinge end
+        angs = [away + t * o["swing"] * (1 if o["hinge"] < 0 else -1)
+                for t in np.linspace(0, math.pi / 2, 24)]
+        leaf = min(o.get("leaf") or o["width"], o["width"])
+        pts = [(hx + leaf * math.cos(a),
+                hy + leaf * math.sin(a)) for a in angs]
+        ax.plot([to_px(x, y)[0] for x, y in pts],
+                [to_px(x, y)[1] for x, y in pts],
+                color=(0.9, 0, 0.4), linewidth=1.0, alpha=0.9)
+        ax.plot([to_px(hx, hy)[0], to_px(*pts[-1])[0]],
+                [to_px(hx, hy)[1], to_px(*pts[-1])[1]],
+                color=(0.9, 0, 0.4), linewidth=1.2, alpha=0.9)
+
     for f in plan.get("fixtures") or []:
         cx, cy = f["center"]
         w2, d2 = f["size"][0] / 2, f["size"][1] / 2

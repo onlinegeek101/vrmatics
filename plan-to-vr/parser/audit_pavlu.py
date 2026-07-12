@@ -47,9 +47,92 @@ def room_dims(room):
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
+def opening_center(plan, o):
+    w = plan["walls"][o["wall_index"]]
+    return (w["start"][0] + (w["end"][0] - w["start"][0]) * o["position"],
+            w["start"][1] + (w["end"][1] - w["start"][1]) * o["position"])
+
+
+def audit_openings(plan, dxf_path, tag):
+    """Reconcile doors against the sheet's swing arcs and windows against
+    the facade: every drawn swing should own a door (position + width +
+    orientation), every facade gap should carry glass."""
+    import ezdxf
+    doors = [o for o in plan["openings"] if o["type"] == "door"]
+    wins = [o for o in plan["openings"] if o["type"] == "window"]
+    print(f"  [{tag}] doors {len(doors)} ({sum(1 for o in doors if o.get('swing'))} "
+          f"with hinge+swing), windows {len(wins)}")
+
+    arcs = []
+    for e in ezdxf.readfile(dxf_path).modelspace():
+        if e.dxftype() == "ARC":
+            arcs.append(((e.dxf.center.x, e.dxf.center.y), e.dxf.radius))
+    unmatched = []
+    dists = []
+    for (cx, cy), r in arcs:
+        best = None
+        for o in doors:
+            gx, gy = opening_center(plan, o)
+            d = math.hypot(cx - gx, cy - gy)
+            if best is None or d < best[0]:
+                best = (d, o)
+        if best is None or best[0] > best[1]["width"] * 0.75 + 8:
+            unmatched.append((round(cx), round(cy), round(r)))
+        else:
+            dists.append(best[0])
+            # hinge must sit at a jamb: distance ~ half the width
+            err = abs(best[0] - best[1]["width"] / 2)
+            if err > 8:
+                print(f"    hinge offset {err:.0f}\" off-jamb for door at "
+                      f"({round(cx)},{round(cy)})")
+    if dists:
+        print(f"    swing arcs matched to doors: {len(dists)}/{len(arcs)}, "
+              f"hinge-to-gap distance mean {sum(dists)/len(dists):.1f}\"")
+    for u in unmatched:
+        print(f"    arc without a door: center ({u[0]},{u[1]}) r={u[2]}\"")
+    widths = sorted(round(o["width"]) for o in doors)
+    print(f"    door widths: {widths}")
+
+    fp = plan.get("footprint") or []
+    if len(fp) >= 3:
+        def inside(px, py):
+            hit = False
+            for i in range(len(fp)):
+                ax, ay = fp[i]
+                bx, by = fp[(i + 1) % len(fp)]
+                if (ay > py) != (by > py):
+                    if ax + (py - ay) * (bx - ax) / (by - ay) > px:
+                        hit = not hit
+            return hit
+        holes = []
+        for o in plan["openings"]:
+            if o["type"] != "opening":
+                continue
+            gx, gy = opening_center(plan, o)
+            w = plan["walls"][o["wall_index"]]
+            dx = w["end"][0] - w["start"][0]
+            dy = w["end"][1] - w["start"][1]
+            L = math.hypot(dx, dy) or 1
+            off = w["thickness"] / 2 + 4
+            s = inside(gx - dy / L * off, gy + dx / L * off) + \
+                inside(gx + dy / L * off, gy - dx / L * off)
+            if s == 1 and o["width"] < 96:
+                holes.append((round(gx), round(gy), round(o["width"])))
+        if holes:
+            print(f"    facade gaps left glass-less: {holes}")
+        else:
+            print("    facade check: every sub-garage-width exterior gap "
+                  "carries glass or a panel")
+
+
 def main():
     plans = [json.load(open(p)) for p in sys.argv[1:3]]
     print("=== sheet-label audit (PDF pipeline) ===")
+    dxfs = [p.replace(".json", ".dxf") for p in sys.argv[1:3]]
+    import os
+    for plan, dxf, tag in zip(plans, dxfs, ("L1", "L2")):
+        if os.path.exists(dxf):
+            audit_openings(plan, dxf, tag)
 
     # labels state clear interior dims; detected polygons follow wall
     # centerlines, one half-thickness out on each side

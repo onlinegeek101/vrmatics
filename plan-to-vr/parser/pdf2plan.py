@@ -114,6 +114,65 @@ def to_segs(pairs, scale):
                       (b[0] * scale, b[1] * scale)) for a, b in pairs]
 
 
+DASH_MAX_PIECE_PT = 6.0      # a dash is a short piece...
+DASH_MIN_PIECES = 4          # ...repeated along a line...
+DASH_MAX_SOLIDITY = 0.82     # ...with air between the pieces
+
+
+def split_dashed(pairs):
+    """Separate dashed linework (demo walls, hidden/overhead lines) from
+    solid strokes, in paper space.
+
+    Renovation sheets carry a second, historical drawing in dashes -
+    walls to demolish, roof lines overhead - and every downstream stage
+    is cleaner without it. A segment is dashed only when it is SHORT and
+    belongs to a merged collinear run of several short pieces whose
+    inked fraction is low; long solid members sharing the line (a real
+    wall continuing where a dashed run ends) never qualify.
+    Returns (solid_pairs, dashed_pairs).
+    """
+    RUN_BREAK = 10.0             # gap that ends a dashed run, points
+    buckets = {}                 # (axis, line offset) -> [(lo, hi, idx)]
+    diag = []
+    for idx, (a, b) in enumerate(pairs):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L = math.hypot(dx, dy)
+        if L > DASH_MAX_PIECE_PT or L == 0:
+            continue
+        if abs(dy) <= 0.3:       # horizontal piece on line y
+            key = ("h", round(a[1] / 0.8))
+            lo, hi = sorted((a[0], b[0]))
+        elif abs(dx) <= 0.3:     # vertical piece on line x
+            key = ("v", round(a[0] / 0.8))
+            lo, hi = sorted((a[1], b[1]))
+        else:
+            diag.append(idx)     # diagonal dashes are rare; keep them
+            continue
+        buckets.setdefault(key, []).append((lo, hi, idx))
+
+    dashed_idx = set()
+    for pieces in buckets.values():
+        if len(pieces) < DASH_MIN_PIECES:
+            continue
+        pieces.sort()
+        run = []
+        for lo, hi, k in pieces + [(1e18, 1e18, -1)]:
+            if run and lo - run[-1][1] > RUN_BREAK:
+                if len(run) >= DASH_MIN_PIECES:
+                    extent = run[-1][1] - run[0][0]
+                    inked = sum(h - l for l, h, _ in run)
+                    if extent > 0 and inked / extent <= DASH_MAX_SOLIDITY:
+                        dashed_idx.update(kk for _, _, kk in run)
+                run = []
+            if k >= 0:
+                run.append((lo, hi, k))
+
+    solid, dashed = [], []
+    for idx, pair in enumerate(pairs):
+        (dashed if idx in dashed_idx else solid).append(pair)
+    return solid, dashed
+
+
 def calibrate_scale(wall_pairs, paper_arcs, forced=None):
     """Pick inches-per-point so walls come out wall-thick and door swings
     door-sized.
@@ -720,6 +779,109 @@ def poche_wall_edges(poche_polys, ips, black_segs):
     return lines
 
 
+STAIR_TREAD_LEN = (24.0, 78.0)   # tread line length, inches
+STAIR_SPACING = (8.0, 14.0)      # tread-to-tread spacing in plan
+STAIR_MIN_TREADS = 4
+
+
+def find_stairs(symbol_segs, gray_segs, wall_segs):
+    """Stair runs: evenly spaced parallel tread lines (the ladder pattern
+    every wall-recovery guard rejects, captured on purpose this time).
+
+    Returns [{polygon, treads}] with the run rectangle and each tread as
+    a segment, both in inches. Handles horizontal and vertical runs;
+    break-symbol gaps inside a run are bridged by allowing one missing
+    tread. A run must hug a wall along at least one side - sofa cushion
+    seams and other furniture striping float in open floor instead.
+    Deliberately ignores direction (up/down needs the text).
+    """
+    def wall_beside(poly):
+        (x0, y0), (x2, y2) = poly[0], poly[2]
+        xa, xb = sorted((x0, x2))
+        ya, yb = sorted((y0, y2))
+        for s in wall_segs:
+            if abs(s.a[0] - s.b[0]) <= 1.0:       # vertical wall stroke
+                sy = sorted((s.a[1], s.b[1]))
+                if min(sy[1], yb) - max(sy[0], ya) >= 0.6 * (yb - ya) and \
+                        (abs(s.a[0] - xa) <= 8 or abs(s.a[0] - xb) <= 8):
+                    return True
+            if abs(s.a[1] - s.b[1]) <= 1.0:       # horizontal wall stroke
+                sx = sorted((s.a[0], s.b[0]))
+                if min(sx[1], xb) - max(sx[0], xa) >= 0.6 * (xb - xa) and \
+                        (abs(s.a[1] - ya) <= 8 or abs(s.a[1] - yb) <= 8):
+                    return True
+        return False
+    def collect(cands, horiz):
+        # index treads by their cross-axis extent so runs group together
+        treads = []
+        for s in cands:
+            dx = abs(s.b[0] - s.a[0])
+            dy = abs(s.b[1] - s.a[1])
+            L = math.hypot(dx, dy)
+            if not STAIR_TREAD_LEN[0] <= L <= STAIR_TREAD_LEN[1]:
+                continue
+            if horiz and dy > 1.0:
+                continue
+            if not horiz and dx > 1.0:
+                continue
+            lo, hi = (sorted((s.a[0], s.b[0])) if horiz
+                      else sorted((s.a[1], s.b[1])))
+            pos = s.a[1] if horiz else s.a[0]
+            treads.append((lo, hi, pos, s))
+        treads.sort(key=lambda t: t[2])
+        used = [False] * len(treads)
+        runs = []
+        for i in range(len(treads)):
+            if used[i]:
+                continue
+            chain = [treads[i]]
+            used[i] = True
+            while True:
+                last = chain[-1]
+                nxt = None
+                for j in range(len(treads)):
+                    if used[j]:
+                        continue
+                    lo, hi, pos, _ = treads[j]
+                    gap = pos - last[2]
+                    if gap <= 0.5:
+                        continue
+                    if gap > 2.2 * STAIR_SPACING[1]:
+                        break    # sorted: nothing closer will follow
+                    ov = min(hi, last[1]) - max(lo, last[0])
+                    if ov < 0.6 * min(hi - lo, last[1] - last[0]):
+                        continue
+                    if STAIR_SPACING[0] <= gap <= STAIR_SPACING[1] or \
+                            2 * STAIR_SPACING[0] <= gap <= 2 * STAIR_SPACING[1]:
+                        nxt = j
+                        break
+                if nxt is None:
+                    break
+                chain.append(treads[nxt])
+                used[nxt] = True
+            if len(chain) < STAIR_MIN_TREADS:
+                continue
+            lo = min(t[0] for t in chain)
+            hi = max(t[1] for t in chain)
+            p0, p1 = chain[0][2], chain[-1][2]
+            if horiz:
+                poly = [[lo, p0], [hi, p0], [hi, p1], [lo, p1]]
+                tl = [[[t[0], t[2]], [t[1], t[2]]] for t in chain]
+            else:
+                poly = [[p0, lo], [p0, hi], [p1, hi], [p1, lo]]
+                tl = [[[t[2], t[0]], [t[2], t[1]]] for t in chain]
+            runs.append({
+                "polygon": [[round(x, 2), round(y, 2)] for x, y in poly],
+                "treads": [[[round(v, 2) for v in q] for q in t]
+                           for t in tl],
+            })
+        return runs
+
+    cands = symbol_segs + gray_segs
+    return [r for r in collect(cands, True) + collect(cands, False)
+            if wall_beside(r["polygon"])]
+
+
 CHIMNEY_SIDE_IN = (24.0, 96.0)
 
 
@@ -826,10 +988,11 @@ def find_chimneys(symbol_segs, wall_segs):
     return fixtures
 
 
-def write_dxf(path, wall_segs, arcs, glaz_segs):
+def write_dxf(path, wall_segs, arcs, glaz_segs, stairs=()):
     doc = ezdxf.new("R2010")
     doc.header["$INSUNITS"] = 1   # inches
-    for name, color in (("A-WALL", 7), ("A-DOOR", 1), ("A-GLAZ", 5)):
+    for name, color in (("A-WALL", 7), ("A-DOOR", 1), ("A-GLAZ", 5),
+                        ("A-STRS", 3)):
         doc.layers.add(name, color=color)
     msp = doc.modelspace()
     for s in wall_segs:
@@ -839,6 +1002,12 @@ def write_dxf(path, wall_segs, arcs, glaz_segs):
                     dxfattribs={"layer": "A-DOOR"})
     for s in glaz_segs:
         msp.add_line(s.a, s.b, dxfattribs={"layer": "A-GLAZ"})
+    for st in stairs:
+        pts = st["polygon"] + [st["polygon"][0]]
+        msp.add_lwpolyline(pts, dxfattribs={"layer": "A-STRS"})
+        for t in st["treads"]:
+            msp.add_line(tuple(t[0]), tuple(t[1]),
+                         dxfattribs={"layer": "A-STRS"})
     doc.saveas(path)
 
 
@@ -864,6 +1033,44 @@ def debug_png(path, wall_segs, arcs, glaz_segs, dropped_note=""):
     plt.close(fig)
 
 
+def export_underlay(page, plan, ips, out_png, margin=50.0):
+    """Save a raster crop of the sheet around the plan, plus the metadata
+    the viewer needs to lay it under the model at true scale.
+
+    The crop is the wall bounding box plus a margin, which conveniently
+    leaves the title block and its personal details out of the image.
+    """
+    import numpy as np
+    from matplotlib.image import imsave
+
+    xs = [c for w in plan["walls"] for c in (w["start"][0], w["end"][0])]
+    ys = [c for w in plan["walls"] for c in (w["start"][1], w["end"][1])]
+    if not xs:
+        return None
+    x0, x1 = min(xs) - margin, max(xs) + margin
+    y0, y1 = min(ys) - margin, max(ys) + margin
+    dpi = 144.0
+    k = dpi / 72.0
+    pix = page.get_pixmap(dpi=int(dpi))
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+        pix.height, pix.width, pix.n)[:, :, :3]
+    H = page.rect.height
+    px0 = max(0, int(x0 / ips * k))
+    px1 = min(pix.width, int(x1 / ips * k))
+    py0 = max(0, int((H - y1 / ips) * k))
+    py1 = min(pix.height, int((H - y0 / ips) * k))
+    if px1 <= px0 or py1 <= py0:
+        return None
+    imsave(out_png, img[py0:py1, px0:px1])
+    return {
+        "file": os.path.basename(out_png),
+        # plan inches of the image top-left corner + inches per pixel
+        "x0": round(px0 / k * ips, 3),
+        "y1": round((H - py0 / k) * ips, 3),
+        "in_per_px": round(ips / k, 6),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="CAD-plotted PDF -> plan.json")
     ap.add_argument("input")
@@ -874,6 +1081,8 @@ def main():
                     help="inches per PDF point, or 'auto' to calibrate")
     ap.add_argument("--wall-height", type=float, default=96.0)
     ap.add_argument("--debug-png", default="")
+    ap.add_argument("--underlay", default="",
+                    help="save a sheet raster crop for the viewer underlay")
     args = ap.parse_args()
 
     doc = fitz.open(args.input)
@@ -881,6 +1090,15 @@ def main():
     raw = page_segments(page)
     print(f"page {args.page}: wall-weight segs {len(raw['wall'])}, "
           f"symbol segs {len(raw['symbol'])}, gray segs {len(raw['gray'])}")
+
+    # strip dashed historical linework (demo walls, roof/overhead lines)
+    # before anything downstream sees it
+    ndash = {}
+    for key in ("wall", "symbol", "gray"):
+        raw[key], gone = split_dashed(raw[key])
+        ndash[key] = len(gone)
+    print(f"dashed pieces filtered: wall {ndash['wall']}, "
+          f"symbol {ndash['symbol']}, gray {ndash['gray']}")
 
     paper_arcs = find_door_arcs_paper(raw["symbol"])
     forced = None if args.ips == "auto" else float(args.ips)
@@ -909,8 +1127,12 @@ def main():
     glaz = find_glazing(symbol_segs, wall_segs, panels)
     print(f"door swing arcs refit: {len(arcs)}; glazing lines: {len(glaz)}")
 
+    gray_in = to_segs(raw["gray"], ips)
+    stairs = find_stairs(symbol_segs, gray_in, wall_segs)
+    print(f"stair runs detected: {len(stairs)}")
+
     dxf_path = args.dxf or (os.path.splitext(args.output)[0] + ".dxf")
-    write_dxf(dxf_path, wall_segs, arcs, glaz)
+    write_dxf(dxf_path, wall_segs, arcs, glaz, stairs)
     print(f"wrote {dxf_path}")
 
     if args.debug_png:
@@ -922,6 +1144,7 @@ def main():
         tol=2.0, max_wall=14.0, units="inches")
     for w in plan["walls"]:
         w["height"] = args.wall_height
+    plan["stairs"] = stairs
     chimneys = find_chimneys(symbol_segs, wall_segs)
     fp = plan.get("footprint") or []
     if len(fp) >= 3:
@@ -962,6 +1185,12 @@ def main():
         "kind": "pdf", "page": args.page,
         "inches_per_point": round(ips, 4),
     }
+    if args.underlay:
+        meta = export_underlay(page, plan, ips, args.underlay)
+        if meta:
+            plan["underlay"] = meta
+            print(f"wrote {args.underlay} (sheet underlay)")
+
     with open(args.output, "w") as f:
         json.dump(plan, f, indent=1)
     print(f"wrote {args.output}")

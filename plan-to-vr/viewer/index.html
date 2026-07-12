@@ -55,6 +55,16 @@
     font: 13px system-ui, sans-serif; cursor: pointer;
   }
   #map-btn.on { background: #2b6cb0; border-color: #4a86c8; }
+  #map-layers {
+    position: fixed; top: 52px; right: 12px; z-index: 40;
+    display: flex; gap: 6px;
+  }
+  #map-layers button {
+    background: rgba(20,24,34,.85); color: #9aa4b8;
+    border: 1px solid #39415a; border-radius: 8px; padding: 6px 10px;
+    font: 12px system-ui, sans-serif; cursor: pointer;
+  }
+  #map-layers button.on { background: #2b6cb0; color: #eef2fa; border-color: #4a86c8; }
   #err {
     position: fixed; inset: 0; z-index: 30; display: none;
     align-items: center; justify-content: center; text-align: center;
@@ -79,12 +89,17 @@
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
 
 <button id="map-btn" title="top-down plan view (M)">▦ plan</button>
+<div id="map-layers" hidden>
+  <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
+  <button data-layer="lines" title="plan linework (2)">lines</button>
+  <button data-layer="sheet" title="source sheet underlay (3)">sheet</button>
+</div>
 <div id="overlay">
   <div class="card">
     <h2 id="overlay-title">Click to enter walkthrough</h2>
@@ -471,7 +486,9 @@ let planGroup = null;   // holds all generated geometry
 let ceiling = null;
 let fixtureGroup = null;
 let planOverlay = null;      // 2D plan linework, shown in map view
+let underlayMesh = null;     // raster of the source sheet under the model
 let planSizeM = { w: 10, h: 10 };
+const layerState = { geom: true, lines: false, sheet: false };
 let collisionSegs = []; // {ax, az, bx, bz, hw} solid wall spans, world XZ
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
 let footprintWorld = null; // building outline in world XZ, or null
@@ -819,8 +836,37 @@ function buildPlan(plan) {
           const jx = mx + ux * half * s, jz = mz + uz * half * s;
           push(jx + nx * 1.8, jz + nz * 1.8, jx - nx * 1.8, jz - nz * 1.8, c);
         }
+        if (o.type === 'door' && o.hinge) { // swing arc + open leaf
+          const hx = mx + ux * half * o.hinge;
+          const hz = mz + uz * half * o.hinge;
+          let base = Math.atan2(-uz, ux);   // plan-space angle (y-up)
+          if (o.hinge > 0) base += Math.PI;
+          const sgn = o.swing * (o.hinge < 0 ? 1 : -1);
+          const wm = Math.min(o.leaf || o.width, o.width) * IN2M;
+          let px = hx + wm * Math.cos(base), pz = hz - wm * Math.sin(base);
+          for (let i = 1; i <= 12; i++) {
+            const a2 = base + sgn * (i / 12) * Math.PI / 2;
+            const qx = hx + wm * Math.cos(a2), qz = hz - wm * Math.sin(a2);
+            push(px, pz, qx, qz, C.door);
+            px = qx; pz = qz;
+          }
+          push(hx, hz, px, pz, C.door);     // the leaf, fully open
+        }
       }
     });
+    const S = [0, 0.75, 0.85];              // stair runs: outline + treads
+    for (const st of (plan.stairs || [])) {
+      const pw = st.polygon.map(([px, py]) => toWorld(px, py));
+      for (let i = 0; i < pw.length; i++) {
+        const q = pw[(i + 1) % pw.length];
+        push(pw[i].x, pw[i].z, q.x, q.z, S);
+      }
+      for (const t of st.treads) {
+        const a2 = toWorld(t[0][0], t[0][1]);
+        const b2 = toWorld(t[1][0], t[1][1]);
+        push(a2.x, a2.z, b2.x, b2.z, S);
+      }
+    }
     const lg = new THREE.BufferGeometry();
     lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     lg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -829,6 +875,56 @@ function buildPlan(plan) {
     planOverlay.renderOrder = 990;
     planOverlay.visible = false;
     group.add(planOverlay);
+  }
+
+  // stair treads as thin raised strips so runs read from above without
+  // blocking the walkthrough (up/down is not knowable from the plot)
+  if (plan.stairs && plan.stairs.length) {
+    const stMat = std({ color: 0xb9a988, roughness: 0.9,
+                        envMapIntensity: ENV_INTENSITY });
+    for (const st of plan.stairs) {
+      for (const t of st.treads) {
+        const a2 = toWorld(t[0][0], t[0][1]);
+        const b2 = toWorld(t[1][0], t[1][1]);
+        const len = Math.hypot(b2.x - a2.x, b2.z - a2.z);
+        if (len < 0.2) continue;
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(len, 0.03, 0.06), stMat);
+        m.position.set((a2.x + b2.x) / 2, 0.015, (a2.z + b2.z) / 2);
+        m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
+        m.receiveShadow = true;
+        group.add(m);
+      }
+    }
+  }
+
+  // the source sheet itself, laid under the model at true scale - the
+  // definitive side-by-side: sheet, linework and geometry in one view
+  underlayMesh = null;
+  if (plan.underlay && plan.underlay.file &&
+      typeof currentPlanKey === 'string' && !currentPlanKey.startsWith('dropped:')) {
+    const base = currentPlanKey.includes('/')
+      ? currentPlanKey.slice(0, currentPlanKey.lastIndexOf('/') + 1) : '';
+    const u = plan.underlay;
+    new THREE.TextureLoader().load(base + u.file, tex => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const wpx = tex.image.width, hpx = tex.image.height;
+      const wM = wpx * u.in_per_px * IN2M, hM = hpx * u.in_per_px * IN2M;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(wM, hM),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true,
+                                      opacity: 0.93, depthWrite: false }));
+      mesh.rotation.x = -Math.PI / 2;
+      const cxIn = u.x0 + wpx * u.in_per_px / 2;
+      const cyIn = u.y1 - hpx * u.in_per_px / 2;
+      const pc = toWorld(cxIn, cyIn);
+      mesh.position.set(pc.x, 0.045, pc.z);
+      mesh.renderOrder = 985;
+      mesh.visible = false;
+      group.add(mesh);
+      underlayMesh = mesh;
+      applyLayers();
+    });
   }
 
   // corner closure: a wall endpoint that meets another wall extends by half
@@ -1092,6 +1188,9 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
   if (e.code === 'KeyM') toggleMap();
+  if (e.code === 'Digit1') { layerState.geom = !layerState.geom; applyLayers(); }
+  if (e.code === 'Digit2') { layerState.lines = !layerState.lines; applyLayers(); }
+  if (e.code === 'Digit3') { layerState.sheet = !layerState.sheet; applyLayers(); }
   if (e.code === 'KeyT') toggleTour();
   else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
 });
@@ -1120,6 +1219,27 @@ function fitMapCam() {
   mapCam.updateProjectionMatrix();
 }
 
+function applyLayers() {
+  if (planOverlay) planOverlay.visible = layerState.lines;
+  if (underlayMesh) underlayMesh.visible = layerState.sheet;
+  if (planGroup) {
+    for (const ch of planGroup.children) {
+      if (ch === planOverlay || ch === underlayMesh) continue;
+      ch.visible = layerState.geom;
+    }
+    if (layerState.geom && ceiling)
+      ceiling.visible = mapMode ? false : mapSavedCeil;
+  }
+  for (const b of document.querySelectorAll('#map-layers button'))
+    b.classList.toggle('on', !!layerState[b.dataset.layer]);
+}
+for (const b of document.querySelectorAll('#map-layers button')) {
+  b.addEventListener('click', () => {
+    layerState[b.dataset.layer] = !layerState[b.dataset.layer];
+    applyLayers();
+  });
+}
+
 function toggleMap(on) {
   const want = on !== undefined ? on : !mapMode;
   if (want === mapMode) return;
@@ -1132,15 +1252,17 @@ function toggleMap(on) {
     mapCam.updateProjectionMatrix();
     mapSavedCeil = ceiling ? ceiling.visible : true;
     if (ceiling) ceiling.visible = false;
-    if (planOverlay) planOverlay.visible = true;
+    layerState.lines = true;
     if (controls.isLocked) controls.unlock();
     overlay.style.display = 'none';
   } else {
-    if (ceiling) ceiling.visible = mapSavedCeil;
-    if (planOverlay) planOverlay.visible = false;
+    if (ceiling && layerState.geom) ceiling.visible = mapSavedCeil;
+    layerState.lines = false;
     if (!renderer.xr.isPresenting && !IS_TOUCH) overlay.style.display = 'flex';
   }
+  applyLayers();
   document.getElementById('map-btn').classList.toggle('on', mapMode);
+  document.getElementById('map-layers').hidden = !mapMode;
 }
 document.getElementById('map-btn').addEventListener('click', () => toggleMap());
 
@@ -2083,11 +2205,11 @@ function loadPlan(plan) {
   buildPlan(plan);
   if (mapMode) {               // keep map view across plan switches
     if (ceiling) ceiling.visible = false;
-    if (planOverlay) planOverlay.visible = true;
     fitMapCam();
     mapCam.position.x = 0; mapCam.position.z = 0;
     mapCam.zoom = 1; mapCam.updateProjectionMatrix();
   }
+  applyLayers();
   loadAnchors();               // per-plan persisted calibration anchors
   calib.aligned = false;
   if (calib.mode) { refreshAnchorMarkers(); vrMsg(calibStatusLines(), true); }

@@ -163,7 +163,8 @@ def read_opening_hints(msp, door_layers, window_layers, scale=1.0):
         if t == "ARC":
             c = e.dxf.center
             hints.append({"pt": (c.x * scale, c.y * scale), "kind": "door",
-                          "prio": 0, "r": e.dxf.radius * scale})
+                          "prio": 0, "r": e.dxf.radius * scale,
+                          "a0": e.dxf.start_angle, "a1": e.dxf.end_angle})
         elif t == "INSERT":
             kind = "window" if (is_win and not is_door) else "door"
             p = e.dxf.insert
@@ -567,6 +568,23 @@ def classify_openings(walls, hints, tol):
                 if best is None or key < best[0]:
                     best = (key, k, h["kind"])
 
+            hinge = swing = 0
+            leaf_r = 0.0
+            if best is not None and hints[best[1]]["prio"] == 0:
+                # door orientation from the swing arc: the hinge is the
+                # jamb nearest the arc center, the swing side is where
+                # the arc's midpoint bulges relative to the wall
+                h = hints[best[1]]
+                along = dot(sub(h["pt"], (wall.c0[0], wall.c0[1])), axis)
+                hinge = -1 if along < center else 1
+                leaf_r = h["r"]
+                if "a0" in h:
+                    a0, a1 = math.radians(h["a0"]), math.radians(h["a1"])
+                    span = (a1 - a0) % (2 * math.pi)
+                    amid = a0 + span / 2
+                    d = (math.cos(amid), math.sin(amid))
+                    nrm = (-axis[1], axis[0])
+                    swing = 1 if dot(d, nrm) >= 0 else -1
             if best is None:
                 # wide mullioned bands defeat the single-hint gate: each
                 # pane's glazing line is a fraction of the gap. Combine
@@ -601,14 +619,19 @@ def classify_openings(walls, hints, tol):
             else:                             # door and cased opening
                 sill, head = 0.0, DOOR_HEAD
             position = center / wall_len if wall_len else 0.0
-            openings.append({
+            entry = {
                 "wall_index": wi,
                 "position": round(position, 4),
                 "width": round(width, 2),
                 "type": kind,
                 "sill": sill,
                 "head": head,
-            })
+            }
+            if kind == "door" and hinge:
+                entry["hinge"] = hinge   # -1: jamb toward wall start
+                entry["swing"] = swing   # +1: opens toward wall normal
+                entry["leaf"] = round(leaf_r, 1)  # leaf length (arc radius)
+            openings.append(entry)
     return openings, pass_through, filled
 
 
