@@ -536,6 +536,7 @@ let underlayMesh = null;     // raster of the source sheet under the model
 let planSizeM = { w: 10, h: 10 };
 let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
 const layerState = { geom: true, lines: false, sheet: false };
+let doorLeaves = [];    // grabbable hinged doors: {pivot, theta0, rotSign, len, head, open}
 let collisionSegs = []; // {ax, az, bx, bz, hw, top} solid wall spans, world XZ
 let fixtureSegs = [];   // fixture capsules; collide only while fixtures shown
 let stairSteps = [];    // walkable riser tops: {cx,cz,ux,uz,kx,kz,hl,hd,top}
@@ -678,26 +679,43 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
       group.add(pane);
     }
   } else if (op.type === 'door') {
-    // leaf parked open, flat against whichever side of the jamb has wall
+    // a REAL hinged leaf: pivoted on the plan's hinge jamb, opened 90deg
+    // toward the plan's swing side (exactly the arc drawn on the sheet),
+    // and grabbable in VR - squeeze the grip near a door to swing it
     const LT = 1.75 * IN2M;
-    const leafW = Math.min(w, 36 * IN2M);
-    let c = null;
-    if (lo - leafW >= 0) c = lo - leafW / 2;
-    else if (hi + leafW <= wallLen) c = hi + leafW / 2;
-    if (c !== null) {
-      const out = depth / 2 + CT + LT / 2;
-      boxOnWall(group, worldStart, dir, angle, c, leafW,
-        head / 2, head, out, LT, doorMat);
-      // two recessed panels + a knob so it reads as a door, not a whiteboard
-      const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
-      boxOnWall(group, worldStart, dir, angle, c, leafW * 0.7,
-        head * 0.7, head * 0.35, out + LT * 0.55, 0.01, inset);
-      boxOnWall(group, worldStart, dir, angle, c, leafW * 0.7,
-        head * 0.25, head * 0.28, out + LT * 0.55, 0.01, inset);
-      const knobSide = (c < lo) ? c - leafW * 0.4 : c + leafW * 0.4;
-      boxOnWall(group, worldStart, dir, angle, knobSide, 0.05,
-        38 * IN2M, 0.05, out + LT * 0.8, 0.05, applianceMat);
+    const hingeLo = (op.hinge || -1) < 0;   // -1: jamb toward wall start
+    const hingeA = hingeLo ? lo : hi;
+    // plan swing +1 opens toward the plan normal, which maps to world
+    // -nrm here (the plan's y axis flips into world -z)
+    let s = op.swing;
+    if (!s) s = faceIsInterior(worldStart, dir, angle, lo, hi, depth, -1) ? 1 : -1;
+    const theta0 = angle + (hingeLo ? 0 : Math.PI);       // closed pose
+    const rotSign = hingeLo ? s : -s;                     // opening sense
+    const lw = w - 0.02;
+    const pivot = new THREE.Group();
+    pivot.position.set(
+      worldStart.x + dir.x * hingeA, 0, worldStart.z + dir.z * hingeA);
+    const leaf = new THREE.Mesh(
+      new THREE.BoxGeometry(lw, head - 0.02, LT), doorMat);
+    leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
+    leaf.castShadow = leaf.receiveShadow = true;
+    pivot.add(leaf);
+    // recessed panels + knobs on both faces so it reads as a door
+    const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
+    for (const zs of [1, -1]) {
+      for (const [yc, yh] of [[head * 0.7, head * 0.35], [head * 0.25, head * 0.28]]) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(lw * 0.7, yh, 0.01), inset);
+        p.position.set(0.01 + lw / 2, yc, zs * (LT / 2 + 0.004));
+        pivot.add(p);
+      }
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), applianceMat);
+      knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
+      pivot.add(knob);
     }
+    const open0 = Math.PI / 2;      // matches the sheet's drawn position
+    pivot.rotation.y = theta0 + rotSign * open0;
+    group.add(pivot);
+    doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
   }
 }
 
@@ -819,6 +837,7 @@ function buildPlan(plan) {
   fixtureSegs = [];
   stairSteps = [];
   planWallsWorld = [];
+  doorLeaves = [];
   const group = new THREE.Group();
   const walls = plan.walls || [];
   const openings = plan.openings || [];
@@ -1129,6 +1148,7 @@ function buildPlan(plan) {
         sill: (o.sill || 0) * IN2M,
         head: Math.min((o.head || 80), w.height || 96) * IN2M,
         type: o.type || 'opening',
+        hinge: o.hinge || 0, swing: o.swing || 0,
       };
     }).sort((a, b) => a.lo - b.lo);
 
@@ -1154,7 +1174,9 @@ function buildPlan(plan) {
       // lintel above the opening
       if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
       // sill below a window
-      if (op.sill > 0) { addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H); solid(lo, hi); }
+      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H);
+      // glass is not a doorway: a window blocks movement even at sill 0
+      if (op.type === 'window' || op.sill > 0) solid(lo, hi);
       // a closed garage door is solid too
       if (op.type === 'opening' && hi - lo >= 90 * IN2M &&
           openingIsExterior(worldStart, dir, angle, lo, hi, depth)) solid(lo, hi);
@@ -2682,17 +2704,22 @@ function computeArc(controller) {
 }
 
 // a teleport beam sample inside a wall span (below its top) is blocked,
-// so you can't teleport through walls or closed windows
+// so you can't teleport through walls, windows, doors or furniture
 function arcBlocked(p) {
-  for (const s of collisionSegs) {
-    if (p.y >= s.top) continue;
-    const dx = s.bx - s.ax, dz = s.bz - s.az;
-    const len2 = dx * dx + dz * dz;
-    const t = len2
-      ? Math.max(0, Math.min(1, ((p.x - s.ax) * dx + (p.z - s.az) * dz) / len2))
-      : 0;
-    const ox = p.x - (s.ax + t * dx), oz = p.z - (s.az + t * dz);
-    if (ox * ox + oz * oz < (s.hw + 0.05) * (s.hw + 0.05)) return true;
+  const lists = [collisionSegs];
+  if (doorLeaves.length) lists.push(doorSegs());
+  if (fixtureGroup && fixtureGroup.visible) lists.push(fixtureSegs);
+  for (const list of lists) {
+    for (const s of list) {
+      if (p.y >= s.top) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const len2 = dx * dx + dz * dz;
+      const t = len2
+        ? Math.max(0, Math.min(1, ((p.x - s.ax) * dx + (p.z - s.az) * dz) / len2))
+        : 0;
+      const ox = p.x - (s.ax + t * dx), oz = p.z - (s.az + t * dz);
+      if (ox * ox + oz * oz < (s.hw + 0.05) * (s.hw + 0.05)) return true;
+    }
   }
   return false;
 }
@@ -2764,6 +2791,11 @@ function handleVRInput() {
     }
     if (calib.mode) continue;   // walking pauses while calibrating
 
+    // grip squeeze near a door grabs its leaf (either hand)
+    handleDoorGrip(src.handedness,
+      src.handedness === 'left' ? ctrlL : ctrlR,
+      !!(gp.buttons[1] && gp.buttons[1].value > 0.6));
+
     if (src.handedness === 'left') {
       // smooth, head-relative walking (FPS style)
       const dx = Math.abs(stickX) > 0.12 ? stickX : 0;
@@ -2807,13 +2839,63 @@ function handleVRInput() {
   }
 }
 
+// ------------------------------------------------------------- door grab
+// squeeze the grip near a door leaf to grab it; while held, the leaf
+// swings to follow the hand around its hinge, clamped door-realistically
+const doorGrab = { hand: null, idx: -1 };
+const DOOR_MAX = 1.83;          // ~105 degrees
+function nearestDoorLeaf(p) {
+  let bi = -1, bd = 0.45;
+  doorLeaves.forEach((d, i) => {
+    const th = d.theta0 + d.rotSign * d.open;
+    const tx = Math.cos(th), tz = -Math.sin(th);   // hinge -> tip direction
+    const rx = p.x - d.pivot.position.x, rz = p.z - d.pivot.position.z;
+    const t = Math.max(0, Math.min(d.len, rx * tx + rz * tz));
+    const dist = Math.hypot(rx - tx * t, rz - tz * t);
+    if (p.y > d.head + 0.3 || dist >= bd) return;
+    bd = dist; bi = i;
+  });
+  return bi;
+}
+function doorGrabUpdate(ctrl) {
+  const d = doorLeaves[doorGrab.idx];
+  if (!d) return;
+  const p = new THREE.Vector3();
+  ctrl.getWorldPosition(p);
+  const rx = p.x - d.pivot.position.x, rz = p.z - d.pivot.position.z;
+  if (rx * rx + rz * rz < 0.01) return;          // too close to the hinge
+  const th = Math.atan2(-rz, rx);
+  let delta = (th - d.theta0) * d.rotSign;
+  delta = ((delta + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  d.open = Math.max(0, Math.min(DOOR_MAX, delta));
+  d.pivot.rotation.y = d.theta0 + d.rotSign * d.open;
+}
+function handleDoorGrip(handedness, ctrl, grip) {
+  if (grip) {
+    if (doorGrab.hand === null) {
+      const p = new THREE.Vector3();
+      ctrl.getWorldPosition(p);
+      const bi = nearestDoorLeaf(p);
+      if (bi >= 0) { doorGrab.hand = handedness; doorGrab.idx = bi; }
+    }
+    if (doorGrab.hand === handedness) doorGrabUpdate(ctrl);
+  } else if (doorGrab.hand === handedness) {
+    doorGrab.hand = null;
+    doorGrab.idx = -1;
+  }
+}
+window.PLAN2VR_DOORS = {
+  leaves: () => doorLeaves, nearestDoorLeaf, doorGrabUpdate,
+  handleDoorGrip, doorGrab,
+};
+
 let vrDt = 0.016;
 function showVRHelp() {
   vrMsg([
-    'L stick: walk · R stick: turn / push: teleport',
-    'R trigger: laser pointer, squeeze to draw · L trigger: voice note',
-    'Hold B: aim laser at a door, release: calibrate · Y: this help',
-    'Click R stick: reset height (seated)',
+    'Sticks: walk + turn · push R stick: teleport',
+    'R trigger: laser draw · grip: swing doors',
+    'L trigger: voice note · click R stick: height',
+    'Hold B on a door: calibrate · Y: this help',
   ], 14);
 }
 
@@ -2896,12 +2978,27 @@ function pushOut(segs) {
     }
   }
 }
+// door leaves are moving obstacles: collision segments at their current
+// swing angle, so a door blocks you until you grab it out of the way
+function doorSegs() {
+  return doorLeaves.map(d => {
+    const th = d.theta0 + d.rotSign * d.open;
+    const tx = Math.cos(th), tz = -Math.sin(th);
+    return {
+      ax: d.pivot.position.x, az: d.pivot.position.z,
+      bx: d.pivot.position.x + tx * d.len,
+      bz: d.pivot.position.z + tz * d.len,
+      hw: 0.045, top: d.head,
+    };
+  });
+}
 function resolveCollision() {
   const fixOn = fixtureGroup && fixtureGroup.visible && fixtureSegs.length;
-  if (!collisionSegs.length && !fixOn) return;
+  if (!collisionSegs.length && !fixOn && !doorLeaves.length) return;
   camera.getWorldPosition(_cpos);
   for (let iter = 0; iter < 2; iter++) {
     pushOut(collisionSegs);
+    if (doorLeaves.length) pushOut(doorSegs());
     if (fixOn) pushOut(fixtureSegs);
   }
 }
@@ -2965,7 +3062,9 @@ renderer.setAnimationLoop(() => {
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else if (mapMode) mapMove(dt);
   else { desktopMove(dt); applyGyro(); }
-  if (!tour.active && !(calib.mode || calib.aligned)) {
+  // collision + gravity apply everywhere except the auto-tour and while
+  // actively calibrating (a stale alignment must never disable them)
+  if (!tour.active && !calib.mode) {
     resolveCollision();
     applyTerrain(dt);
   }

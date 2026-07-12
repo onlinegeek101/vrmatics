@@ -370,12 +370,19 @@ importmap from a CDN, no build step. It:
 - flat roof slab on by default (toggle **C**); it doesn't cast shadows, so
   sunlight still fills the rooms; furniture toggles with **F**
 - **collision + gravity everywhere**: circle-vs-segment push-out against
-  solid wall spans, closed windows, stair guard rails and furniture, so
-  you walk through doorways but never through walls; the teleport beam is
-  blocked by walls too. Stairs are **walkable terrain** - the rig steps up
+  solid wall spans, windows (any sill height), stair guard rails, door
+  leaves at their current swing angle, and furniture, so you walk through
+  open doorways but never through structure; the teleport beam is blocked
+  by all of it too, and a stale saved calibration can no longer disable
+  collision. Stairs are **walkable terrain** - the rig steps up
   each riser as you walk (or teleport) onto it, and gravity drops you back
   to the slab when you walk off the open end of a flight. A ledge too tall
   to step up (over 35 cm) behaves like a wall.
+- **doors are real hinged leaves**: each pivots on the jamb the plan's
+  swing arc names, opened 90° toward the plan's swing side - exactly the
+  drawn position on the sheet. In VR, **squeeze the grip** near a door to
+  grab it and swing it with your hand (0-105°, either hand); it blocks
+  your path wherever you leave it. Wide (54"+) doors stay sliders.
 - desktop: PointerLockControls, WASD + mouse look
 - mobile/touch: **magic-window motion look** — physically turn/tilt the
   phone to look around (device orientation; iOS asks permission on entry);
