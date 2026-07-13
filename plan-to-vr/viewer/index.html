@@ -3454,7 +3454,9 @@ function computeArc(controller) {
       if (arcBlocked(mid) || arcBlocked(p)) break;
     }
     pts.push(p);
-    const gnd = groundHeightAt(p.x, p.z);
+    // relative to the sample's own height: the beam passes UNDER an
+    // overhead flight and still lands on top when aimed above it
+    const gnd = groundHeightAt(p.x, p.z, p.y);
     if (y <= gnd && i > 0) { p.y = gnd; hit = p.clone(); break; }
   }
   return { pts, hit };
@@ -3486,7 +3488,9 @@ function teleportTo(target) {
   camera.getWorldPosition(cam);
   dolly.position.x += target.x - cam.x;
   dolly.position.z += target.z - cam.z;
-  groundY = groundHeightAt(target.x, target.z);   // land on stair tops too
+  // land at the surface the marker showed (target.y), not whatever is
+  // stacked above that spot
+  groundY = groundHeightAt(target.x, target.z, target.y);
   fallV = 0;
   lastSafe.x = target.x; lastSafe.z = target.z;
   dolly.position.y = groundY + heightOffset;
@@ -3789,9 +3793,14 @@ function baseGroundAt(x, z) {
   return 0;
 }
 
-function groundHeightAt(x, z) {
+// refY: the height doing the asking. Steps more than a climbable rise
+// ABOVE refY are OVERHEAD (the return flight, the landing) - they are a
+// ceiling there, not ground, and must not wall off the space beneath.
+// Infinity means "top surface" (teleport beams landing on the flight).
+function groundHeightAt(x, z, refY = Infinity) {
   let g = baseGroundAt(x, z);
   for (const s of stairSteps) {
+    if (s.top > refY + STEP_MAX) continue;   // overhead, not ground
     const lx = (x - s.cx) * s.ux + (z - s.cz) * s.uz;   // along the tread
     const lz = (x - s.cx) * s.kx + (z - s.cz) * s.kz;   // along the climb
     if (Math.abs(lx) <= s.hl + 0.06 && Math.abs(lz) <= s.hd + 0.06 &&
@@ -3802,12 +3811,12 @@ function groundHeightAt(x, z) {
 
 function applyTerrain(dt) {
   camera.getWorldPosition(_cpos);
-  let target = groundHeightAt(_cpos.x, _cpos.z);
+  let target = groundHeightAt(_cpos.x, _cpos.z, groundY);
   if (target - groundY > STEP_MAX) {
     // too tall to climb: shove the player back where they came from
     dolly.position.x += lastSafe.x - _cpos.x;
     dolly.position.z += lastSafe.z - _cpos.z;
-    target = groundHeightAt(lastSafe.x, lastSafe.z);
+    target = groundHeightAt(lastSafe.x, lastSafe.z, groundY);
   } else {
     lastSafe.x = _cpos.x; lastSafe.z = _cpos.z;
   }
