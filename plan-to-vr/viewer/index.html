@@ -72,6 +72,12 @@
     font: 13px system-ui, sans-serif; cursor: pointer;
   }
   #notes-btn.rec { background: #b02b2b; border-color: #d05050; }
+  #issue-btn {
+    position: fixed; top: 12px; right: 158px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
   #notes-panel {
     position: fixed; top: 52px; right: 96px; z-index: 40; width: 340px;
     max-height: 60vh; overflow-y: auto; background: rgba(20,24,34,.95);
@@ -112,6 +118,7 @@
 
 <button id="map-btn" title="top-down plan view (M)">▦ plan</button>
 <button id="notes-btn" title="voice notes (hold V or left trigger to record)">🎤 0</button>
+<button id="issue-btn" title="file a GitHub issue from right here (X in VR)">⚑</button>
 <div id="notes-panel" hidden></div>
 <div id="map-layers" hidden>
   <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
@@ -1784,7 +1791,7 @@ async function ghPut(path, bytes, msg) {
 }
 async function ghIssue(title, body) {
   const c = feedbackCfg();
-  if (!c) return false;
+  if (!c) return null;
   const r = await fetch(
     `https://api.github.com/repos/${c.owner}/${c.repo}/issues`, {
       method: 'POST',
@@ -1792,8 +1799,80 @@ async function ghIssue(title, body) {
                  Accept: 'application/vnd.github+json' },
       body: JSON.stringify({ title, body }),
     });
-  return r.ok;
+  if (!r.ok) return null;
+  try { return (await r.json()).number || true; } catch (e) { return true; }
 }
+
+// file a GitHub issue from wherever you're standing: a screenshot of
+// exactly what you see (spectator-rendered in VR), your position and
+// heading, and any strokes drawn in the last two minutes. X in VR,
+// the flag button on the 2D page.
+let issueBusy = false;
+async function fileIssueFromHere(text) {
+  const c = feedbackCfg();
+  const say = lines => renderer.xr.isPresenting ? vrMsg(lines, 4)
+                                                : toast(lines.join(' '));
+  if (!c) { say(['Connect feedback first (🎤 panel)']); return null; }
+  if (issueBusy) return null;
+  issueBusy = true;
+  try {
+    say(['Filing issue...']);
+    // fresh render into the canvas THIS task so toDataURL sees pixels
+    if (renderer.xr.isPresenting) {
+      camera.getWorldPosition(specCam.position);
+      camera.getWorldQuaternion(specCam.quaternion);
+      renderer.xr.enabled = false;
+      renderer.render(scene, specCam);
+      renderer.xr.enabled = true;
+    } else {
+      renderer.render(scene, mapMode ? mapCam : camera);
+    }
+    const jpeg = renderer.domElement.toDataURL('image/jpeg', 0.85);
+    const bin = atob(jpeg.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const cam = new THREE.Vector3();
+    camera.getWorldPosition(cam);
+    const px = +(planOffset.cx + cam.x / IN2M).toFixed(1);
+    const py = +(planOffset.cy - cam.z / IN2M).toFixed(1);
+    const planName = (typeof currentPlanKey === 'string'
+      ? currentPlanKey.split('/').pop() : 'plan').replace('.json', '');
+    const tag = new Date().toISOString().replace(/[:.]/g, '-');
+    const okShot = await ghPut(`vr-notes/issues/shot-${tag}.jpg`, bytes,
+                               `VR issue screenshot ${tag}`);
+    const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}`;
+    const recent = draw.recent.filter(s => s.t >= Date.now() - 120000);
+    let strokesBlock = '';
+    if (recent.length) {
+      const js = JSON.stringify(recent);
+      if (js.length < 30000)
+        strokesBlock = `\n<details><summary>Laser strokes from the last 2 min` +
+          ` (${recent.length}), plan-inch [x, y, heightM]</summary>\n\n` +
+          '```json\n' + js + '\n```\n</details>\n';
+    }
+    const num = await ghIssue(
+      `[VR issue] ${planName} @ (${px}, ${py})`,
+      `**Plan:** \`${planName}\` · **standing at** (${px}, ${py}) ` +
+      `plan-inches · **facing** ${dolly.rotation.y.toFixed(2)} rad\n\n` +
+      (text ? text + '\n\n' : '') +
+      (okShot ? `**What I'm looking at:** ` +
+        `[shot-${tag}.jpg](${base}/vr-notes/issues/shot-${tag}.jpg)\n` : '') +
+      strokesBlock +
+      `\n_Filed from the VR walkthrough._`);
+    say([num ? `Issue ${typeof num === 'number' ? '#' + num + ' ' : ''}filed` :
+               'Issue failed - check the connection']);
+    return num;
+  } catch (e) {
+    say(['Issue failed - check the connection']);
+    return null;
+  } finally {
+    issueBusy = false;
+  }
+}
+document.getElementById('issue-btn').addEventListener('click', () => {
+  const text = prompt('Describe the issue (optional):') || '';
+  fileIssueFromHere(text);
+});
 let pushBusy = false;
 async function pushNote(rec, blob) {
   if (pushBusy) { setTimeout(() => pushNote(rec, blob), 1500); return; }
@@ -1975,7 +2054,8 @@ async function renderNotesPanel() {
   }
 }
 window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION,
-  feedbackCfg, initFeedbackFromHash, ghPut, ghIssue, pushNote, pushSessionZip };
+  feedbackCfg, initFeedbackFromHash, ghPut, ghIssue, pushNote, pushSessionZip,
+  fileIssueFromHere };
 document.getElementById('notes-btn').addEventListener('click', () => {
   const panel = document.getElementById('notes-panel');
   panel.hidden = !panel.hidden;
@@ -3017,8 +3097,11 @@ function handleVRInput() {
         }
       }
     }
-    if (src.handedness === 'left' && calib.mode) {
-      if (btnEdge('left', gp, 4)) clearAllAnchors();
+    if (src.handedness === 'left') {
+      if (btnEdge('left', gp, 4)) {
+        if (calib.mode) clearAllAnchors();       // X in calibration
+        else fileIssueFromHere();                // X: issue from right here
+      }
     }
     // voice notes: hold the left trigger to record, release to save
     if (src.handedness === 'left') {
@@ -3133,9 +3216,9 @@ window.PLAN2VR_DOORS = {
 let vrDt = 0.016;
 function showVRHelp() {
   vrMsg([
-    'Sticks: walk + turn · push R stick: teleport',
-    'R trigger: laser draw · grip: swing doors',
-    'L trigger: voice note · click R stick: height',
+    'Sticks: walk/turn · push R: teleport · grip: doors',
+    'R trigger: laser draw · L trigger: record note',
+    'X: file issue here · click R stick: height',
     'Hold B on a door: calibrate · Y: this help',
   ], 14);
 }

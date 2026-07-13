@@ -129,7 +129,11 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    GitHub issue** titled `[VR note] …` linking both files (give the
    token Issues read/write too), so each note lands as a work item
    Claude can read and you can discuss. The headset shows "Note pushed
-   to Claude". The 🎤 panel also has "push this session" for a one-shot
+   to Claude". For a deliberate flag without recording anything, press
+   **X** in VR (or the ⚑ button on the 2D page): it screenshots exactly
+   what you're looking at, commits it, and opens a `[VR issue]` with
+   your position, heading, and any laser strokes from the last two
+   minutes. The 🎤 panel also has "push this session" for a one-shot
    bundle, and disconnect. The **right trigger is a laser pointer**: rest a finger
    on it for the red beam and dot, squeeze to draw on whatever surface
    the dot touches; strokes fade out a few seconds after release, and
