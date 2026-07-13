@@ -84,33 +84,175 @@ def assign_names(plan, labels):
                 r["kind"] = k
 
 
-def add_stairs(plan, path, geom_layers, gt):
+def filter_disconnected(plan, snap=6.0, min_component=3):
+    """Drop walls in tiny disconnected components (stray fragments a CAD
+    file leaves floating - a lone bay-window wall west of the house).
+    Keeps the main wall network and any substantial sub-structure;
+    reindexes openings and recomputes the footprint so nothing dangles."""
+    walls = plan["walls"]
+    n = len(walls)
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]; a = parent[a]
+        return a
+
+    def union(a, b):
+        parent[find(a)] = find(b)
+
+    def pt_seg(p, a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0, min(1, ((p[0] - a[0]) * dx +
+                                              (p[1] - a[1]) * dy) / L2))
+        return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+    def touch(u, v):
+        # connected if any endpoint of one lands on the other's span
+        # (endpoint-to-endpoint OR a T-junction into mid-span)
+        for p in (u["start"], u["end"]):
+            if pt_seg(p, v["start"], v["end"]) <= snap:
+                return True
+        for p in (v["start"], v["end"]):
+            if pt_seg(p, u["start"], u["end"]) <= snap:
+                return True
+        return False
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if find(i) != find(j) and touch(walls[i], walls[j]):
+                union(i, j)
+    comp = {}
+    for i in range(n):
+        comp.setdefault(find(i), []).append(i)
+    if not comp:
+        return 0
+    keep = set()
+    biggest = max(comp.values(), key=len)
+    for members in comp.values():
+        if members is biggest or len(members) >= min_component:
+            keep.update(members)
+    dropped = n - len(keep)
+    if not dropped:
+        return 0
+    # remap surviving walls, drop openings on removed walls
+    order = sorted(keep)
+    remap = {old: new for new, old in enumerate(order)}
+    plan["walls"] = [walls[i] for i in order]
+    plan["openings"] = [dict(o, wall_index=remap[o["wall_index"]])
+                        for o in plan["openings"] if o["wall_index"] in remap]
+
+    class _W:  # adapter for compute_footprint
+        pass
+    ad = []
+    for w in plan["walls"]:
+        a = _W(); a.c0 = tuple(w["start"]); a.c1 = tuple(w["end"])
+        a.thickness = w["thickness"]; ad.append(a)
+    plan["footprint"] = X.compute_footprint(ad, plan.setdefault("warnings", []))
+    plan["warnings"].append(
+        f"{dropped} disconnected wall fragment(s) dropped")
+    return dropped
+
+
+def add_stairs(plan, path, geom_layers, gt, stair_labels):
+    """Label-gated stair detection. The architect labels every stairwell
+    ("STAIR", plus "Down"/"Up to Attic"); we keep only tread-runs sitting
+    inside a labeled stairwell (killing window-glazing false positives)
+    and MERGE every run near one label into a single stair. A switchback
+    is then just several runs under one label folded into one stairwell,
+    however messy its landings. down/direction come from the GT sidecar
+    (the plotted Up/Down text is unreadable geometry)."""
     runs = dxf_stairs.detect(path, set(geom_layers))
-    gt_stairs = (gt or {}).get("stairs", [])
-    out = []
+    if not stair_labels:
+        stair_labels = [tuple(g["near"]) for g in (gt or {}).get("stairs", [])]
+    R = 110.0                                     # run-to-label gate (inches)
+    groups = {}
     for r in runs:
         cx, cy = r["centroid"]
-        # a GT entry matched by centroid supplies down / direction / drop
-        # and can veto a run (exterior steps we don't model)
+        li, ld = None, R
+        for i, (lx, ly) in enumerate(stair_labels):
+            d = math.hypot(cx - lx, cy - ly)
+            if d < ld:
+                li, ld = i, d
+        if li is not None:
+            groups.setdefault(li, []).append(r)
+
+    gt_stairs = (gt or {}).get("stairs", [])
+    out = []
+    for li, grp in groups.items():
+        treads = [t for r in grp for t in r["treads"]]
+        xs = [c for t in treads for c in (t[0][0], t[1][0])]
+        ys = [c for t in treads for c in (t[0][1], t[1][1])]
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         g = min(gt_stairs, key=lambda s: math.hypot(
             s["near"][0] - cx, s["near"][1] - cy), default=None)
         matched = g and math.hypot(g["near"][0] - cx,
-                                   g["near"][1] - cy) <= (g.get("tol", 60))
+                                   g["near"][1] - cy) <= g.get("tol", 90)
         if matched and g.get("drop"):
-            continue                      # GT says: not a stair (exterior)
-        st = {"polygon": r["polygon"], "treads": r["treads"]}
-        if matched:
-            if "direction" in g:
-                st["direction"] = g["direction"]
-            else:
-                st["direction"] = r["climb"]
-            if g.get("down"):
-                st["down"] = True
-        else:
-            st["direction"] = r["climb"]
+            continue
+        # dominant run's climb sets the default direction
+        dom = max(grp, key=lambda r: len(r["treads"]))
+        st = {"polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+              "treads": treads,
+              "direction": (g.get("direction") if matched and "direction" in g
+                            else dom["climb"])}
+        if matched and g.get("down"):
+            st["down"] = True
         out.append(st)
     plan["stairs"] = out
     return len(out)
+
+
+def render_underlay(path, layers, plan, out_png, in_per_px=0.5, margin=40):
+    """Rasterize the DXF geometry layers at plan scale for the viewer's
+    'sheet' compare layer. Returns {file, x0, y1, in_per_px} mapping the
+    image's top-left pixel to plan (x0, y1) with +y up (matching how the
+    viewer lays the underlay under the model)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    xs = [c for w in plan["walls"] for c in (w["start"][0], w["end"][0])]
+    ys = [c for w in plan["walls"] for c in (w["start"][1], w["end"][1])]
+    x0, x1 = min(xs) - margin, max(xs) + margin
+    y0, y1 = min(ys) - margin, max(ys) + margin
+    W = max(1, round((x1 - x0) / in_per_px))
+    H = max(1, round((y1 - y0) / in_per_px))
+
+    doc = ezdxf.readfile(path)
+    lines, arcs = [], []
+    for e in doc.modelspace():
+        if e.dxf.layer not in layers:
+            continue
+        t = e.dxftype()
+        if t == "LINE":
+            a, b = e.dxf.start, e.dxf.end
+            lines.append([(a[0], a[1]), (b[0], b[1])])
+        elif t == "LWPOLYLINE":
+            pts = [(p[0], p[1]) for p in e.get_points()]
+            lines += [[pts[i], pts[i + 1]] for i in range(len(pts) - 1)]
+        elif t == "ARC":
+            c, r = e.dxf.center, e.dxf.radius
+            a0, a1 = math.radians(e.dxf.start_angle), math.radians(e.dxf.end_angle)
+            span = (a1 - a0) % (2 * math.pi)
+            steps = max(6, int(span / 0.2))
+            pth = [(c[0] + r * math.cos(a0 + span * k / steps),
+                    c[1] + r * math.sin(a0 + span * k / steps))
+                   for k in range(steps + 1)]
+            arcs += [[pth[k], pth[k + 1]] for k in range(len(pth) - 1)]
+
+    fig = plt.figure(figsize=(W / 100, H / 100), dpi=100)
+    ax = fig.add_axes([0, 0, 1, 1]); ax.set_axis_off()
+    ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)          # +y up
+    ax.add_collection(LineCollection(lines, colors="#222", linewidths=1.1))
+    ax.add_collection(LineCollection(arcs, colors="#555", linewidths=0.7))
+    fig.savefig(out_png, dpi=100, facecolor="white")
+    plt.close(fig)
+    return {"file": out_png.split("/")[-1], "x0": round(x0, 2),
+            "y1": round(y1, 2), "in_per_px": in_per_px}
 
 
 def main():
@@ -124,6 +266,8 @@ def main():
     ap.add_argument("--rmnames-layer", default="")
     ap.add_argument("--gt", default="")
     ap.add_argument("--wall-height", type=float, default=96.0)
+    ap.add_argument("--underlay", default="",
+                    help="also render a true-scale sheet PNG here")
     args = ap.parse_args()
 
     dw = args.dw_layers
@@ -135,15 +279,21 @@ def main():
 
     gt = json.load(open(args.gt)) if args.gt else {}
 
+    n_drop = filter_disconnected(plan)
+
+    stair_labels = []
     if args.rmnames_layer:
         labels = room_labels(args.input, args.rmnames_layer)
         assign_names(plan, labels)
-        # re-run garage classification now that names set the garage kind
         named_garage = [r for r in plan["rooms"] if r.get("kind") == "garage"]
         report["garage_rooms"] = len(named_garage)
+        # stairwell markers the architect places: STAIR + the flight tags
+        stair_labels = [pos for name, pos in labels
+                        if any(k in name.upper()
+                               for k in ("STAIR", "DOWN", "ATTIC", "UP TO"))]
 
     # treads live on the doors/windows layer; the wall layer only adds noise
-    n_st = add_stairs(plan, args.input, dw.split(","), gt)
+    n_st = add_stairs(plan, args.input, dw.split(","), gt, stair_labels)
 
     spawn = default_camera(plan, (gt.get("camera") or {}).get("near"))
     if spawn:
@@ -151,6 +301,11 @@ def main():
 
     # neutral source tag only - the raw DXF's title block carries the
     # owner's name/address, so it is never committed to the public repo
+    if args.underlay:
+        u = render_underlay(args.input, set(args.wall_layers.split(",")
+                                            + dw.split(",")), plan, args.underlay)
+        plan["underlay"] = u
+
     plan["source"] = {"kind": "dxf", "floor": args.floor}
     plan.setdefault("warnings", [])
     with open(args.output, "w") as f:

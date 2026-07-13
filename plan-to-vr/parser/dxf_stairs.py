@@ -30,62 +30,62 @@ def _angle(seg):
 
 
 def detect(path, layers, tread_min=22, tread_max=80, spacing_lo=7,
-           spacing_hi=15, min_treads=4):
+           spacing_hi=15, min_treads=3):
+    """Two-level clustering makes switchbacks fall out naturally:
+        angle bucket -> LATERAL BAND -> chain along the climb.
+    Treads in one flight share a lateral centre (they stack along the
+    climb); the two halves of a U-stair sit in two lateral bands, so
+    each becomes its own run instead of being merged into one."""
     segs = _lines(path, layers)
     treads = [s for s in segs
               if tread_min <= math.hypot(s[2] - s[0], s[3] - s[1]) <= tread_max]
-    # bucket by orientation (0 or 90-ish) rounded to 5 deg
     buckets = defaultdict(list)
     for s in treads:
         buckets[round(math.degrees(_angle(s)) / 5) * 5].append(s)
 
     runs = []
-    used = set()
     for ang, group in buckets.items():
         tdir = (math.cos(math.radians(ang)), math.sin(math.radians(ang)))
         nrm = (-tdir[1], tdir[0])            # climb axis (perp to tread)
-        # each tread: climb-projection, lateral span [lo,hi], length, seg
         items = []
         for s in group:
             mx, my = (s[0] + s[2]) / 2, (s[1] + s[3]) / 2
             L = math.hypot(s[2] - s[0], s[3] - s[1])
-            lat = mx * tdir[0] + my * tdir[1]
-            items.append({"c": mx * nrm[0] + my * nrm[1],
-                          "lo": lat - L / 2, "hi": lat + L / 2,
+            items.append({"c": mx * nrm[0] + my * nrm[1],       # climb pos
+                          "lat": mx * tdir[0] + my * tdir[1],    # lateral pos
                           "L": L, "seg": s})
-        items.sort(key=lambda d: d["c"])
-        i = 0
-        while i < len(items):
-            chain = [items[i]]
-            clat = [items[i]["lo"], items[i]["hi"]]        # running lateral span
-            j = i + 1
-            while j < len(items):
-                cand = items[j]
-                gap = cand["c"] - chain[-1]["c"]
-                if gap < spacing_lo:               # duplicate line
-                    j += 1
-                    continue
-                if gap > spacing_hi:
-                    break
-                # a real next tread must STACK: lateral overlap with the run,
-                # and comparable length (not a stray glazing line)
-                ov = min(clat[1], cand["hi"]) - max(clat[0], cand["lo"])
-                med = sorted(c["L"] for c in chain)[len(chain) // 2]
-                if ov > 0.4 * min(med, cand["L"]) and \
-                        0.55 * med <= cand["L"] <= 1.8 * med:
-                    chain.append(cand)
-                    clat[0] = min(clat[0], cand["lo"])
-                    clat[1] = max(clat[1], cand["hi"])
-                    j += 1
-                else:
-                    break
-            if len(chain) >= min_treads:
-                segset = [c["seg"] for c in chain]
-                key = tuple(sorted(id(s) for s in segset))
-                if key not in used:
-                    used.add(key)
-                    runs.append(_build(segset, nrm))
-            i = j if j > i + 1 else i + 1
+        # 1) split into lateral bands (one flight per band): sort by lateral
+        #    centre, break where the gap exceeds ~half a tread
+        items.sort(key=lambda d: d["lat"])
+        bands, cur = [], []
+        for it in items:
+            if cur and it["lat"] - cur[-1]["lat"] > 0.6 * it["L"]:
+                bands.append(cur); cur = []
+            cur.append(it)
+        if cur:
+            bands.append(cur)
+        # 2) within a band, chain evenly-spaced treads along the climb
+        for band in bands:
+            band.sort(key=lambda d: d["c"])
+            i = 0
+            while i < len(band):
+                chain = [band[i]]
+                j = i + 1
+                while j < len(band):
+                    gap = band[j]["c"] - chain[-1]["c"]
+                    if gap < spacing_lo:
+                        j += 1
+                        continue
+                    if gap > spacing_hi:
+                        break
+                    med = sorted(c["L"] for c in chain)[len(chain) // 2]
+                    if 0.55 * med <= band[j]["L"] <= 1.8 * med:
+                        chain.append(band[j]); j += 1
+                    else:
+                        break
+                if len(chain) >= min_treads:
+                    runs.append(_build([c["seg"] for c in chain], nrm))
+                i = j if j > i + 1 else i + 1
     return runs
 
 

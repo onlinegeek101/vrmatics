@@ -16,18 +16,6 @@
   },
   {
    "start": [
-    204.227,
-    64.082
-   ],
-   "end": [
-    227.329,
-    63.961
-   ],
-   "thickness": 11.75,
-   "height": 96.0
-  },
-  {
-   "start": [
     -188.58,
     -280.557
    ],
@@ -120,18 +108,6 @@
     -88.579
    ],
    "thickness": 6.88,
-   "height": 96.0
-  },
-  {
-   "start": [
-    -188.548,
-    -45.167
-   ],
-   "end": [
-    -188.548,
-    223.986
-   ],
-   "thickness": 6.16,
    "height": 96.0
   },
   {
@@ -373,23 +349,11 @@
    ],
    "thickness": 6.0,
    "height": 96.0
-  },
-  {
-   "start": [
-    237.873,
-    56.841
-   ],
-   "end": [
-    208.75,
-    56.841
-   ],
-   "thickness": 5.25,
-   "height": 96.0
   }
  ],
  "openings": [
   {
-   "wall_index": 2,
+   "wall_index": 1,
    "position": 0.846,
    "width": 38.02,
    "type": "door",
@@ -401,7 +365,7 @@
    "hinge_at": 142.5
   },
   {
-   "wall_index": 4,
+   "wall_index": 3,
    "position": 0.4784,
    "width": 107.03,
    "type": "window",
@@ -409,7 +373,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 5,
+   "wall_index": 4,
    "position": 0.2871,
    "width": 55.5,
    "type": "window",
@@ -417,7 +381,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 5,
+   "wall_index": 4,
    "position": 0.8893,
    "width": 37.02,
    "type": "window",
@@ -425,7 +389,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 7,
+   "wall_index": 6,
    "position": 0.1471,
    "width": 33.78,
    "type": "window",
@@ -433,7 +397,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 7,
+   "wall_index": 6,
    "position": 0.5319,
    "width": 35.77,
    "type": "window",
@@ -441,7 +405,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 7,
+   "wall_index": 6,
    "position": 0.9165,
    "width": 35.79,
    "type": "window",
@@ -449,7 +413,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 8,
+   "wall_index": 7,
    "position": 0.0939,
    "width": 60.02,
    "type": "window",
@@ -457,7 +421,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 8,
+   "wall_index": 7,
    "position": 0.4668,
    "width": 89.51,
    "type": "window",
@@ -465,7 +429,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 8,
+   "wall_index": 7,
    "position": 0.6852,
    "width": 60.36,
    "type": "window",
@@ -473,7 +437,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 8,
+   "wall_index": 7,
    "position": 0.9331,
    "width": 38.02,
    "type": "window",
@@ -481,7 +445,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 9,
+   "wall_index": 8,
    "position": 0.2462,
    "width": 56.38,
    "type": "window",
@@ -489,23 +453,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 10,
-   "position": 0.3686,
-   "width": 33.89,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 10,
-   "position": 0.8408,
-   "width": 71.84,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 11,
+   "wall_index": 9,
    "position": 0.5782,
    "width": 31.9,
    "type": "door",
@@ -517,7 +465,7 @@
    "hinge_at": 89.9
   },
   {
-   "wall_index": 12,
+   "wall_index": 10,
    "position": 0.3998,
    "width": 18.37,
    "type": "opening",
@@ -525,7 +473,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 15,
+   "wall_index": 13,
    "position": 0.4014,
    "width": 120.94,
    "type": "opening",
@@ -533,7 +481,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 15,
+   "wall_index": 13,
    "position": 0.8233,
    "width": 34.01,
    "type": "door",
@@ -545,7 +493,7 @@
    "hinge_at": 188.4
   },
   {
-   "wall_index": 17,
+   "wall_index": 15,
    "position": 0.295,
    "width": 62.06,
    "type": "door",
@@ -557,7 +505,7 @@
    "hinge_at": 45.8
   },
   {
-   "wall_index": 18,
+   "wall_index": 16,
    "position": 0.1155,
    "width": 41.21,
    "type": "door",
@@ -569,7 +517,7 @@
    "hinge_at": 56.7
   },
   {
-   "wall_index": 18,
+   "wall_index": 16,
    "position": 0.5173,
    "width": 32.3,
    "type": "opening",
@@ -577,7 +525,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 18,
+   "wall_index": 16,
    "position": 0.8182,
    "width": 69.83,
    "type": "window",
@@ -585,7 +533,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 19,
+   "wall_index": 17,
    "position": 0.429,
    "width": 32.32,
    "type": "opening",
@@ -593,7 +541,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 19,
+   "wall_index": 17,
    "position": 0.8919,
    "width": 34.01,
    "type": "door",
@@ -605,7 +553,7 @@
    "hinge_at": 341.6
   },
   {
-   "wall_index": 21,
+   "wall_index": 19,
    "position": 0.3726,
    "width": 30.1,
    "type": "door",
@@ -617,7 +565,7 @@
    "hinge_at": 22.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 20,
    "position": 0.3677,
    "width": 132.08,
    "type": "window",
@@ -625,7 +573,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 20,
    "position": 0.7555,
    "width": 109.92,
    "type": "window",
@@ -633,7 +581,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 26,
+   "wall_index": 24,
    "position": 0.5956,
    "width": 92.86,
    "type": "window",
@@ -641,7 +589,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 27,
+   "wall_index": 25,
    "position": 0.5258,
    "width": 34.0,
    "type": "opening",
@@ -793,59 +741,39 @@
  ],
  "footprint": [
   [
-   -188.576,
-   -285.832
-  ],
-  [
-   -188.567,
-   -283.604
-  ],
-  [
-   -191.594,
-   -283.636
-  ],
-  [
-   -193.656,
-   -87.806
-  ],
-  [
-   -188.982,
-   -87.757
-  ],
-  [
-   -188.978,
+   -188.977,
    -85.134
   ],
   [
-   -110.132,
+   -110.133,
    -85.243
   ],
   [
-   -110.132,
-   32.385
+   -110.133,
+   32.386
   ],
   [
-   -108.166,
-   32.385
+   -108.168,
+   32.386
   ],
   [
-   -108.166,
-   34.466
+   -108.168,
+   34.468
   ],
   [
-   -44.424,
-   34.466
+   -44.426,
+   34.468
   ],
   [
-   -43.888,
-   142.884
+   -43.89,
+   142.886
   ],
   [
-   -40.052,
-   142.865
+   -40.051,
+   142.867
   ],
   [
-   -40.143,
+   -40.141,
    124.475
   ],
   [
@@ -854,79 +782,99 @@
   ],
   [
    -7.673,
-   223.975
+   223.973
   ],
   [
-   -41.549,
-   223.946
+   -41.548,
+   223.945
   ],
   [
-   -41.457,
-   200.908
+   -41.455,
+   200.906
   ],
   [
-   -45.623,
-   200.892
+   -45.625,
+   200.89
   ],
   [
-   -45.716,
-   223.943
+   -45.718,
+   223.941
   ],
   [
-   -109.876,
-   223.889
+   -109.878,
+   223.887
   ],
   [
-   -109.882,
-   230.056
+   -109.884,
+   230.057
   ],
   [
    -6.725,
-   230.142
+   230.144
   ],
   [
    -6.714,
-   231.623
+   231.624
   ],
   [
-   214.071,
+   214.072,
    229.988
   ],
   [
    214.05,
-   227.053
+   227.055
   ],
   [
-   217.019,
-   227.063
+   217.021,
+   227.066
   ],
   [
-   217.547,
+   217.549,
    73.37
   ],
   [
-   261.221,
+   261.222,
    73.37
   ],
   [
-   261.221,
-   71.041
+   261.222,
+   71.039
   ],
   [
-   265.013,
-   71.049
+   265.012,
+   71.047
   ],
   [
-   265.745,
-   -283.557
+   265.743,
+   -283.555
   ],
   [
-   261.974,
-   -283.564
+   261.975,
+   -283.562
   ],
   [
-   261.959,
-   -287.501
+   261.961,
+   -287.502
+  ],
+  [
+   -188.577,
+   -285.834
+  ],
+  [
+   -188.569,
+   -283.602
+  ],
+  [
+   -191.593,
+   -283.634
+  ],
+  [
+   -193.654,
+   -87.808
+  ],
+  [
+   -188.981,
+   -87.759
   ]
  ],
  "warnings": [
@@ -1104,26 +1052,27 @@
   "orphan line not paired into a wall: (223.2,53.5)->(223.2,53.5)",
   "orphan line not paired into a wall: (223.2,53.5)->(223.2,60.2)",
   "11 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings",
+  "3 disconnected wall fragment(s) dropped"
  ],
  "stairs": [
   {
    "polygon": [
     [
-     -130.756115575483,
-     -280.275146484375
+     -130.8,
+     -280.3
     ],
     [
-     -80.756115575483,
-     -280.275146484375
+     -80.8,
+     -280.3
     ],
     [
-     -80.756115575483,
-     -234.525138587184
+     -80.8,
+     -234.5
     ],
     [
-     -130.756115575483,
-     -234.525138587184
+     -130.8,
+     -234.5
     ]
    ],
    "treads": [
@@ -1205,6 +1154,12 @@
    "is_primary": true
   }
  ],
+ "underlay": {
+  "file": "home-l2.png",
+  "x0": -230.58,
+  "y1": 268.53,
+  "in_per_px": 0.5
+ },
  "source": {
   "kind": "dxf",
   "floor": "2"
