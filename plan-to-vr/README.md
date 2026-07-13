@@ -114,7 +114,18 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    you stand - review, play and download notes later from the 🎤 button
    (desktop: hold **V**), where one click also bundles **every note from
    the current session** (or everything) into a single zip of audio +
-   `notes.json`. The **right trigger is a laser pointer**: rest a finger
+   `notes.json` — and can **push notes straight to Claude from inside the
+   headset**, no downloads or device shuffling: connect once by opening
+   the viewer with `#feedback=TOKEN@owner/repo` (a fine-grained GitHub
+   token with Contents read/write on ONE repo — make it a **private**
+   repo so your voice audio stays private; the token lives only in that
+   browser's localStorage and the fragment is stripped immediately).
+   From then on every saved voice note uploads itself as
+   `vr-notes/<date>/note-<time>.json` + `.webm` (position, heading and
+   drawn strokes in plan inches, plus the audio), the headset shows
+   "Note pushed to Claude", and Claude Code pulls the repo on the other
+   side. The 🎤 panel also has "push this session" for a one-shot
+   bundle, and disconnect. The **right trigger is a laser pointer**: rest a finger
    on it for the red beam and dot, squeeze to draw on whatever surface
    the dot touches; strokes fade out a few seconds after release, and
    anything drawn during (or just before) a voice note is saved with it

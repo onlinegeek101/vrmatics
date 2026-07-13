@@ -1579,14 +1579,16 @@ function startVoiceNote() {
     const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType || 'audio/webm' });
     const cam = new THREE.Vector3();
     camera.getWorldPosition(cam);
-    const db = await notesDB();
-    db.transaction('notes', 'readwrite').objectStore('notes').add({
+    const rec = {
       t: Date.now(), plan: currentPlanKey, sess: NOTES_SESSION,
       x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
       y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
       yaw: +dolly.rotation.y.toFixed(2), blob,
       strokes: noteRec.strokes.slice(),
-    });
+    };
+    const db = await notesDB();
+    db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
+    if (feedbackCfg()) pushNote(rec, blob);   // straight to Claude's repo
     noteRec.strokes = [];
     setTimeout(refreshNotesBadge, 200);
     if (renderer.xr.isPresenting) vrMsg(['Voice note saved'], 3);
@@ -1681,6 +1683,96 @@ async function downloadNotesZip(notes, label) {
   setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 }
 
+// ------------------------------------------------- push notes to Claude
+// The headset pushes feedback straight into a GitHub repo over the REST
+// API (api.github.com allows browser calls), so nothing needs downloading
+// or moving between devices - Claude Code pulls the repo on the other
+// side. Connect ONCE by opening the viewer with a URL fragment:
+//     https://<viewer-url>/#feedback=TOKEN@owner/repo[@branch]
+// (fine-grained PAT, Contents read/write on ONE repo - use a PRIVATE
+// repo so voice audio stays private). The token lives only in this
+// browser's localStorage; the fragment never reaches any server and is
+// stripped from the URL immediately.
+function feedbackCfg() {
+  try { return JSON.parse(localStorage.getItem('plan2vr-feedback')); }
+  catch (e) { return null; }
+}
+function initFeedbackFromHash() {
+  const m = location.hash.match(
+    /feedback=([^@#&]+)@([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?(?:[#&]|$)/);
+  if (!m) return false;
+  localStorage.setItem('plan2vr-feedback', JSON.stringify({
+    token: m[1], owner: m[2], repo: m[3], branch: m[4] || 'main' }));
+  history.replaceState(null, '', location.pathname + location.search);
+  toast(`Feedback connected: ${m[2]}/${m[3]}`);
+  return true;
+}
+async function ghPut(path, bytes, msg) {
+  const c = feedbackCfg();
+  if (!c) return false;
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const r = await fetch(
+    `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + c.token,
+                 Accept: 'application/vnd.github+json' },
+      body: JSON.stringify({ message: msg, content: btoa(s),
+                             branch: c.branch }),
+    });
+  return r.ok;
+}
+let pushBusy = false;
+async function pushNote(rec, blob) {
+  if (pushBusy) { setTimeout(() => pushNote(rec, blob), 1500); return; }
+  pushBusy = true;
+  try {
+    const tag = new Date(rec.t).toISOString().replace(/[:.]/g, '-');
+    const dir = `vr-notes/${new Date(NOTES_SESSION).toISOString().slice(0, 10)}`;
+    const meta = { t: rec.t, when: new Date(rec.t).toISOString(),
+                   plan: rec.plan, x: rec.x, y: rec.y, yaw: rec.yaw,
+                   strokes: rec.strokes || [],
+                   audio: `note-${tag}.webm`,
+                   coords: 'plan inches; strokes [x,y,heightM]' };
+    const ok1 = await ghPut(`${dir}/note-${tag}.json`,
+      new TextEncoder().encode(JSON.stringify(meta, null, 1)),
+      `VR note ${tag} (${rec.plan.split('/').pop()})`);
+    const ok2 = await ghPut(`${dir}/note-${tag}.webm`,
+      new Uint8Array(await blob.arrayBuffer()), `VR note audio ${tag}`);
+    const ok = ok1 && ok2;
+    if (renderer.xr.isPresenting)
+      vrMsg([ok ? 'Note pushed to Claude' : 'Push failed - note kept locally'], 3);
+    else toast(ok ? 'Note pushed to Claude' : 'Push failed - note kept locally');
+    return ok;
+  } catch (e) {
+    if (renderer.xr.isPresenting) vrMsg(['Push failed - note kept locally'], 3);
+    return false;
+  } finally {
+    pushBusy = false;
+  }
+}
+async function pushSessionZip(notes) {
+  const files = [];
+  const meta = [];
+  for (const n of notes) {
+    const file = `note-${n.id}.webm`;
+    meta.push({ id: n.id, t: n.t, when: new Date(n.t).toISOString(),
+                plan: n.plan, x: n.x, y: n.y ?? n.z, yaw: n.yaw,
+                strokes: n.strokes || [], file });
+    files.push({ name: file, data: new Uint8Array(await n.blob.arrayBuffer()) });
+  }
+  files.unshift({ name: 'notes.json', data: new TextEncoder().encode(
+    JSON.stringify({ exported: new Date().toISOString(),
+                     coordinate_system: 'plan inches; strokes [x,y,heightM]',
+                     notes: meta }, null, 1)) });
+  const zip = new Uint8Array(await makeZip(files).arrayBuffer());
+  const tag = new Date().toISOString().replace(/[:.]/g, '-');
+  return ghPut(`vr-notes/bundles/session-${tag}.zip`, zip,
+               `VR session bundle (${notes.length} notes)`);
+}
+setTimeout(initFeedbackFromHash, 0);   // after toast/DOM wiring exists
+
 async function renderNotesPanel() {
   const panel = document.getElementById('notes-panel');
   const notes = await notesAll();
@@ -1701,6 +1793,57 @@ async function renderNotesPanel() {
        'session-' + new Date(NOTES_SESSION).toISOString().slice(0, 19).replace(/[T:]/g, '-'));
     mk(`⬇ everything (${notes.length})`, notes, 'all');
     panel.appendChild(head);
+    // direct-to-Claude push (GitHub) - no downloads, no device shuffle
+    const cfg = feedbackCfg();
+    const claude = document.createElement('div');
+    claude.className = 'note';
+    if (cfg) {
+      claude.innerHTML = `→ Claude: connected to <b>${cfg.owner}/${cfg.repo}</b>` +
+        ' (new notes push automatically) · ';
+      const all = document.createElement('a');
+      all.href = '#';
+      all.textContent = `push this session (${sess.length})`;
+      all.onclick = async e => {
+        e.preventDefault();
+        all.textContent = 'pushing…';
+        const ok = await pushSessionZip(sess.length ? sess : notes);
+        all.textContent = ok ? 'pushed ✓' : 'push failed';
+      };
+      claude.appendChild(all);
+      claude.appendChild(document.createTextNode(' · '));
+      const off = document.createElement('a');
+      off.href = '#';
+      off.textContent = 'disconnect';
+      off.onclick = e => {
+        e.preventDefault();
+        localStorage.removeItem('plan2vr-feedback');
+        renderNotesPanel();
+      };
+      claude.appendChild(off);
+    } else {
+      claude.innerHTML = '→ Claude: not connected. Open the viewer once with ' +
+        '<code>#feedback=TOKEN@owner/repo</code> (fine-grained PAT, Contents ' +
+        'read/write, a PRIVATE repo) and every note pushes itself. Or ';
+      const con = document.createElement('a');
+      con.href = '#';
+      con.textContent = 'paste it here';
+      con.onclick = e => {
+        e.preventDefault();
+        const v = prompt('TOKEN@owner/repo (optionally @branch):');
+        if (v && /.+@.+\/.+/.test(v)) {
+          const [tok, rest] = v.split('@', 2);
+          const rem = v.slice(tok.length + 1);
+          const mm = rem.match(/([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?$/);
+          if (mm) {
+            localStorage.setItem('plan2vr-feedback', JSON.stringify(
+              { token: tok, owner: mm[1], repo: mm[2], branch: mm[3] || 'main' }));
+            renderNotesPanel();
+          }
+        }
+      };
+      claude.appendChild(con);
+    }
+    panel.appendChild(claude);
   }
   for (const n of notes.reverse()) {
     const div = document.createElement('div');
@@ -1739,7 +1882,8 @@ async function renderNotesPanel() {
     panel.appendChild(div);
   }
 }
-window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION };
+window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION,
+  feedbackCfg, initFeedbackFromHash, ghPut, pushNote, pushSessionZip };
 document.getElementById('notes-btn').addEventListener('click', () => {
   const panel = document.getElementById('notes-panel');
   panel.hidden = !panel.hidden;
