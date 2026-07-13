@@ -1380,6 +1380,73 @@ function buildPlan(plan) {
     if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
   });
 
+  // ------------------------------------------------- shell closure
+  // The exterior shell is built from `walls`, but a footprint edge can have
+  // no wall behind it - e.g. the short return where the garage front steps
+  // back from the taller house front (VR note #11). Below grade the foundation
+  // stem walls hide it, but above grade it left a full-height slot open to the
+  // yard: from the lawn you saw sky + the raised interior floor through the
+  // gap, next to the front door. Close any footprint span that no near-parallel
+  // wall backs with a matching full-height wall panel (addPiece sides it).
+  if (footprintWorld) {
+    const shellH = ((walls[0] && walls[0].height) || 96) * IN2M;
+    const shellThick = 6 * IN2M;
+    for (let i = 0; i < footprintWorld.length; i++) {
+      const [ax, az] = footprintWorld[i];
+      const [bx, bz] = footprintWorld[(i + 1) % footprintWorld.length];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.12) continue;
+      const ux = (bx - ax) / len, uz = (bz - az) / len;   // along the edge
+      const px = -uz, pz = ux;                             // edge normal (world)
+      // spans already backed by a near-parallel, near-collinear wall
+      const cuts = [];
+      for (const w of planWallsWorld) {
+        if (!w) continue;
+        const wl = Math.hypot(w.bx - w.ax, w.bz - w.az) || 1;
+        const wux = (w.bx - w.ax) / wl, wuz = (w.bz - w.az) / wl;
+        if (Math.abs(wux * ux + wuz * uz) < 0.985) continue;   // not parallel
+        const lat0 = Math.abs((w.ax - ax) * px + (w.az - az) * pz);
+        const lat1 = Math.abs((w.bx - ax) * px + (w.bz - az) * pz);
+        if (lat0 > w.thick / 2 + 0.12 || lat1 > w.thick / 2 + 0.12) continue;
+        const t0 = (w.ax - ax) * ux + (w.az - az) * uz;
+        const t1 = (w.bx - ax) * ux + (w.bz - az) * uz;
+        cuts.push([Math.min(t0, t1), Math.max(t0, t1)]);
+      }
+      cuts.sort((p, q) => p[0] - q[0]);
+      const open = [];
+      let t = 0;
+      for (const [c0, c1] of cuts) {
+        if (c1 <= t) continue;
+        if (c0 > t) open.push([t, Math.min(c0, len)]);
+        t = Math.max(t, c1);
+      }
+      if (t < len) open.push([t, len]);
+      for (const [s0, s1] of open) {
+        // only close a substantial, essentially wall-less edge (a genuine hole
+        // like the garage/house jog return, 0.63 m) - never the small residual
+        // slivers that thick walls leave at footprint corners
+        if (s1 - s0 < 0.5 || s1 - s0 < 0.6 * len) continue;
+        // inward normal: whichever offset lands inside the footprint
+        const mmx = ax + ux * (s0 + s1) / 2, mmz = az + uz * (s0 + s1) / 2;
+        const inSign =
+          pointInPoly(mmx + px * 0.2, mmz + pz * 0.2, footprintWorld) ? 1 : -1;
+        // centre the panel half a thickness inward so its outer face sits on
+        // the footprint line (siding faces the yard, drywall faces in)
+        const cx0 = ax + px * inSign * shellThick / 2;
+        const cz0 = az + pz * inSign * shellThick / 2;
+        const dir2 = new THREE.Vector3(ux, 0, uz);
+        const angle2 = Math.atan2(-uz, ux);
+        const ws = new THREE.Vector3(cx0, 0, cz0);
+        addPiece(group, ws, dir2, angle2, s0, s1, 0, shellH, shellThick, shellH);
+        collisionSegs.push({
+          ax: cx0 + ux * s0, az: cz0 + uz * s0,
+          bx: cx0 + ux * s1, bz: cz0 + uz * s1,
+          hw: shellThick / 2 + 0.03, top: shellH,
+        });
+      }
+    }
+  }
+
   // ------------------------------------------------- grade & foundation
   // VR note #9: from the yard the front door opened onto flat lawn and the
   // garage rode at house-floor level. With split levels, foundation stem
