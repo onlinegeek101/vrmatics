@@ -584,8 +584,8 @@
    "wall_index": 24,
    "position": 0.5956,
    "width": 92.86,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -1052,7 +1052,7 @@
   "orphan line not paired into a wall: (223.2,53.5)->(223.2,53.5)",
   "orphan line not paired into a wall: (223.2,53.5)->(223.2,60.2)",
   "11 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings",
+  "6 wide gap(s) had no door/window evidence; kept as full-height cased openings",
   "3 disconnected wall fragment(s) dropped"
  ],
  "stairs": [

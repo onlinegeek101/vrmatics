@@ -43,6 +43,11 @@ MIN_WALL_THICK = 2.0    # ignore near-zero "thickness" (duplicate/trim lines)
 MIN_WALL_LEN = 12.0     # drop merged "walls" shorter than this (jamb caps etc.)
 MIN_OPENING = 18.0      # unmatched gaps below this are wall-intersection breaks
 MIN_HINT_LINE = 6.0     # ignore tiny tick lines when hunting window glazing
+GLAZE_FACE_TOL = 0.9    # a glazing line this close to a wall FACE is a cased-
+                        # opening jamb return, not glass (see off_face())
+GLAZE_OVERHANG_MAX = 6.0  # glazing sits within the wall + a small sill
+                        # overhang; a parallel line farther out is another
+                        # wall's window, not this gap's glass
 
 # drawing-unit -> inch scale factors, keyed by CLI name and $INSUNITS code
 UNIT_SCALES = {
@@ -600,7 +605,28 @@ def classify_openings(walls, hints, tol):
     (archways, pass-throughs, the garage opening); narrow ones are the
     breaks drafters leave where a crossing wall meets, and get filled
     back in (no opening emitted). Returns (openings, pass_through, filled).
+
+    Window vs. cased opening: real glazing is drawn INSIDE the wall depth
+    (a glass plane near the centre and/or a sill that overhangs past the
+    faces), so at least one glazing line sits OFF the wall faces. A cased
+    opening (pass-through) is drawn by continuing the two wall faces across
+    the gap - every line is collinear with a face. off_face() is the test:
+    a face-collinear line is a jamb return, not glass, so a wide interior
+    span with only face lines (the hall opening, the kitchen/living
+    casement) reads as an opening, not a 14-foot "window".
     """
+    def off_face(hint, gp, axis, thickness):
+        # A glazing line lives in the wall band (a glass plane toward the
+        # centre, a sill overhanging a little past a face). It must be
+        # near THIS wall, and off its faces. A line collinear with a face
+        # is a cased-opening jamb return; a line far to the side belongs to
+        # a different wall's window and must not claim this gap.
+        face = thickness / 2.0
+        lateral = abs(cross(sub(hint["pt"], gp), axis))
+        if lateral > face + GLAZE_OVERHANG_MAX:
+            return False
+        return abs(lateral - face) > GLAZE_FACE_TOL
+
     used = [False] * len(hints)
     openings = []
     pass_through = 0
@@ -642,6 +668,8 @@ def classify_openings(walls, hints, tol):
                         continue
                     if not (0.3 * width <= h["len"] <= 1.5 * width):
                         continue
+                    if not off_face(h, gp, axis, wall.thickness):
+                        continue          # collinear with a face = cased jamb
                 key = (h["prio"], d)
                 if best is None or key < best[0]:
                     best = (key, k, h["kind"])
@@ -680,7 +708,8 @@ def classify_openings(walls, hints, tol):
                     rel = sub(h["pt"], gp)
                     along = abs(dot(rel, axis))
                     lateral = abs(cross(rel, axis))
-                    if along <= width / 2 + 2 and lateral <= 8.0:
+                    if (along <= width / 2 + 2 and lateral <= 8.0
+                            and off_face(h, gp, axis, wall.thickness)):
                         ingap.append(k)
                 total = sum(hints[k]["len"] for k in ingap)
                 if len(ingap) >= 3 and 0.45 * width <= total <= 2.6 * width:

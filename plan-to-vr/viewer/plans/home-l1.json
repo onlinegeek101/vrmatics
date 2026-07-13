@@ -440,16 +440,16 @@
    "wall_index": 1,
    "position": 0.4433,
    "width": 154.14,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 3,
    "position": 0.7226,
    "width": 68.25,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -672,8 +672,8 @@
    "wall_index": 18,
    "position": 0.4967,
    "width": 98.02,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -704,16 +704,16 @@
    "wall_index": 22,
    "position": 0.2029,
    "width": 166.17,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 22,
    "position": 0.4671,
    "width": 116.73,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
@@ -915,7 +915,7 @@
      -98.275
     ]
    ],
-   "kind": "room",
+   "kind": "garage",
    "area": 71722.9,
    "name": "HALL"
   },
@@ -1317,7 +1317,7 @@
   "orphan line not paired into a wall: (-46.4,-43.8)->(-81.8,-43.8)",
   "orphan line not paired into a wall: (-83.7,-180.0)->(-83.9,-131.3)",
   "6 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "3 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "8 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
   {
