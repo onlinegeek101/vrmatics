@@ -85,6 +85,11 @@
     font: 12px system-ui, sans-serif; color: #dfe6f3;
   }
   #notes-panel .note { border-bottom: 1px solid #2a3147; padding: 8px 0; }
+  #notes-panel input, #notes-panel button {
+    background: #141a28; color: #dfe6f3; border: 1px solid #39415a;
+    border-radius: 6px; padding: 4px 8px; font: 12px system-ui, sans-serif;
+  }
+  #notes-panel button { cursor: pointer; }
   #notes-panel audio { width: 100%; height: 28px; margin-top: 4px; }
   #notes-panel a { color: #6db3f2; margin-right: 10px; }
   #err {
@@ -159,6 +164,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 
 const IN2M = 0.0254;                 // inches -> meters (1 unit = 1 meter)
 const EYE = 1.6;                     // standing eye height (m)
+const APP_VERSION = 'plan2vr 2026-07-13';   // stamped into VR-note issues
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 // ---------------------------------------------------------------- renderer
@@ -250,6 +256,7 @@ let tourStops = [];    // world-space waypoints for the automated walkthrough
 let planOpeningsWorld = []; // door/window base segments in world XZ
 let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
 let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
+let currentPlanSource = null;               // plan.json "source" block, for notes
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
@@ -1607,6 +1614,37 @@ function initVoiceNotes() {
     .then(st => { noteRec.media = st; })
     .catch(() => {});
 }
+
+// live client-side transcription while a note records (Web Speech API,
+// where the browser has it); the text lands in the note's metadata and
+// the GitHub issue body so notes are readable without playing audio
+function startTranscript() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  try {
+    const r = new SR();
+    r.continuous = true;
+    r.interimResults = false;
+    r.lang = 'en-US';
+    const out = { text: '', rec: r, done: null };
+    out.ended = new Promise(res => { out.done = res; });
+    r.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++)
+        if (e.results[i].isFinal) out.text += e.results[i][0].transcript + ' ';
+    };
+    r.onend = () => out.done();
+    r.onerror = () => out.done();
+    r.start();
+    return out;
+  } catch (e) { return null; }
+}
+async function finishTranscript(stt) {
+  if (!stt) return '';
+  try { stt.rec.stop(); } catch (e) {}
+  // final results can trail the stop by a moment
+  await Promise.race([stt.ended, new Promise(r => setTimeout(r, 1200))]);
+  return stt.text.trim();
+}
 function startVoiceNote() {
   if (noteRec.active) return;
   if (!noteRec.media) { initVoiceNotes(); return; }
@@ -1638,9 +1676,12 @@ function startVoiceNote() {
     try { noteRec.rec = new MediaRecorder(noteRec.media); }
     catch (e2) { return; }
   }
+  noteRec.stt = startTranscript();
   noteRec.rec.ondataavailable = e => { if (e.data.size) noteRec.chunks.push(e.data); };
   noteRec.rec.onstop = async () => {
     const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType || 'audio/webm' });
+    const transcript = await finishTranscript(noteRec.stt);
+    noteRec.stt = null;
     const cam = new THREE.Vector3();
     camera.getWorldPosition(cam);
     const rec = {
@@ -1649,6 +1690,7 @@ function startVoiceNote() {
       y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
       yaw: +dolly.rotation.y.toFixed(2), blob,
       strokes: noteRec.strokes.slice(),
+      transcript,
     };
     const db = await notesDB();
     db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
@@ -1880,34 +1922,54 @@ async function pushNote(rec, blob) {
   try {
     const tag = new Date(rec.t).toISOString().replace(/[:.]/g, '-');
     const dir = `vr-notes/${new Date(NOTES_SESSION).toISOString().slice(0, 10)}`;
+    const kind = (blob.type || '').startsWith('video') ? 'video' : 'audio';
     const meta = { t: rec.t, when: new Date(rec.t).toISOString(),
-                   plan: rec.plan, x: rec.x, y: rec.y, yaw: rec.yaw,
+                   app: APP_VERSION,
+                   session: new Date(NOTES_SESSION).toISOString(),
+                   plan: rec.plan, plan_source: currentPlanSource,
+                   x: rec.x, y: rec.y, yaw: rec.yaw,
+                   transcript: rec.transcript || '',
                    strokes: rec.strokes || [],
-                   audio: `note-${tag}.webm`,
-                   kind: (blob.type || '').startsWith('video') ? 'video' : 'audio',
+                   audio: `note-${tag}.webm`, kind,
                    coords: 'plan inches; strokes [x,y,heightM]' };
     const ok1 = await ghPut(`${dir}/note-${tag}.json`,
       new TextEncoder().encode(JSON.stringify(meta, null, 1)),
       `VR note ${tag} (${rec.plan.split('/').pop()})`);
     const ok2 = await ghPut(`${dir}/note-${tag}.webm`,
       new Uint8Array(await blob.arrayBuffer()), `VR note media ${tag}`);
-    // the note also files itself as an issue, linking the committed
-    // media (the API has no true issue-attachment upload), so feedback
-    // shows up as a work item Claude and you can discuss
+    // THE ISSUE IS THE NOTE: recording linked (the API has no true
+    // issue-attachment upload), full metadata, transcript when the
+    // browser could produce one, and the strokes inline
     const c = feedbackCfg();
     const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}/${dir}`;
     const planName = rec.plan.split('/').pop().replace('.json', '');
-    const nStrokes = (rec.strokes || []).length;
+    const strokes = rec.strokes || [];
+    let strokesBlock = '';
+    if (strokes.length) {
+      const js = JSON.stringify(strokes);
+      strokesBlock = js.length < 30000
+        ? `\n<details><summary>Laser strokes (${strokes.length}), ` +
+          `plan-inch [x, y, heightM]</summary>\n\n\`\`\`json\n${js}\n\`\`\`\n</details>\n`
+        : `\n**Laser strokes:** ${strokes.length} (too large inline - see the JSON)\n`;
+    }
+    const src = currentPlanSource
+      ? ` (${currentPlanSource.kind || '?'}${currentPlanSource.page !== undefined
+          ? ', sheet page ' + currentPlanSource.page : ''})` : '';
     await ghIssue(
-      `[VR note] ${planName} @ (${rec.x}, ${rec.y}) — ${meta.when}`,
-      `**Plan:** \`${planName}\` · **standing at** (${rec.x}, ${rec.y}) ` +
-      `plan-inches · **facing** ${rec.yaw} rad\n` +
-      `**Laser strokes:** ${nStrokes}\n\n` +
-      (ok2 ? `**${meta.kind === 'video' ? 'View + voice recording' : 'Voice recording'}:** ` +
+      `[VR note] ${planName} @ (${rec.x}, ${rec.y}) — ` +
+        new Date(rec.t).toLocaleString(),
+      `**When:** ${meta.when} · **app:** ${APP_VERSION} · ` +
+      `**session:** ${meta.session}\n` +
+      `**Plan:** \`${planName}\`${src} · **standing at** ` +
+      `(${rec.x}, ${rec.y}) plan-inches · **facing** ${rec.yaw} rad\n\n` +
+      (rec.transcript ? `> ${rec.transcript}\n\n` : '') +
+      (ok2 ? `**${kind === 'video' ? 'View + voice recording' : 'Voice recording'}:** ` +
              `[note-${tag}.webm](${base}/note-${tag}.webm)\n` : '') +
-      (ok1 ? `**Position + strokes:** [note-${tag}.json](${base}/note-${tag}.json)\n` : '') +
-      `\n_Recorded in the VR walkthrough. Strokes are plan-inch ` +
-      `[x, y, heightM] and map directly onto the sheets._`
+      (ok1 ? `**Full metadata:** [note-${tag}.json](${base}/note-${tag}.json)\n` : '') +
+      strokesBlock +
+      `\n_Recorded in the VR walkthrough` +
+      (rec.transcript ? '; transcript is client-side speech recognition' : '') +
+      `. Strokes map directly onto the sheets._`
     ).catch(() => {});
     const ok = ok1 && ok2;
     if (renderer.xr.isPresenting)
@@ -1990,27 +2052,40 @@ async function renderNotesPanel() {
       };
       claude.appendChild(off);
     } else {
-      claude.innerHTML = '→ Claude: not connected. Open the viewer once with ' +
-        '<code>#feedback=TOKEN@owner/repo</code> (fine-grained PAT, Contents ' +
-        'read/write, a PRIVATE repo) and every note pushes itself. Or ';
-      const con = document.createElement('a');
-      con.href = '#';
-      con.textContent = 'paste it here';
-      con.onclick = e => {
-        e.preventDefault();
-        const v = prompt('TOKEN@owner/repo (optionally @branch):');
-        if (v && /.+@.+\/.+/.test(v)) {
-          const [tok, rest] = v.split('@', 2);
-          const rem = v.slice(tok.length + 1);
-          const mm = rem.match(/([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?$/);
-          if (mm) {
-            localStorage.setItem('plan2vr-feedback', JSON.stringify(
-              { token: tok, owner: mm[1], repo: mm[2], branch: mm[3] || 'main' }));
-            renderNotesPanel();
-          }
-        }
+      // ~OAuth-ish two-click connect: GitHub can't do a real browser
+      // OAuth without a secret-holding server (and its device flow has
+      // no CORS), so step 1 opens a PRE-FILLED token page - just press
+      // "Generate token" there - and step 2 pastes it here once
+      claude.innerHTML = '→ Claude: not connected.<br>';
+      const open = document.createElement('a');
+      open.href = 'https://github.com/settings/tokens/new' +
+        '?scopes=repo&description=plan2vr%20VR%20notes';
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = '1) Create the token (pre-filled - just press Generate)';
+      claude.appendChild(open);
+      const form = document.createElement('div');
+      form.style.cssText = 'display:flex;gap:4px;margin-top:6px;flex-wrap:wrap';
+      const tok = document.createElement('input');
+      tok.type = 'password';
+      tok.placeholder = '2) paste token';
+      tok.style.cssText = 'flex:1 1 90px;min-width:90px';
+      const repo = document.createElement('input');
+      repo.value = 'onlinegeek101/vrmatics';
+      repo.title = 'owner/repo the notes go to';
+      repo.style.cssText = 'flex:1 1 130px;min-width:130px';
+      const go = document.createElement('button');
+      go.textContent = 'Connect';
+      go.onclick = () => {
+        const mm = repo.value.trim().match(/^([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?$/);
+        if (!tok.value.trim() || !mm) { go.textContent = 'Check inputs'; return; }
+        localStorage.setItem('plan2vr-feedback', JSON.stringify(
+          { token: tok.value.trim(), owner: mm[1], repo: mm[2],
+            branch: mm[3] || 'main' }));
+        renderNotesPanel();
       };
-      claude.appendChild(con);
+      form.append(tok, repo, go);
+      claude.appendChild(form);
     }
     panel.appendChild(claude);
   }
@@ -2020,7 +2095,8 @@ async function renderNotesPanel() {
     const when = new Date(n.t).toLocaleString();
     const nStrokes = (n.strokes || []).length;
     div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ plan-in (${n.x}, ${n.y ?? n.z})` +
-      (nStrokes ? ` · ✏ ${nStrokes} stroke${nStrokes > 1 ? 's' : ''}` : '') + `</div>`;
+      (nStrokes ? ` · ✏ ${nStrokes} stroke${nStrokes > 1 ? 's' : ''}` : '') + `</div>` +
+      (n.transcript ? `<div style="color:#9fb4d8">“${n.transcript}”</div>` : '');
     const isVid = ((n.blob && n.blob.type) || '').startsWith('video');
     const media = document.createElement(isVid ? 'video' : 'audio');
     media.controls = true;
@@ -3434,6 +3510,7 @@ function showError(msg) {
 
 function loadPlan(plan) {
   document.getElementById('err').style.display = 'none';
+  currentPlanSource = plan.source || null;   // stamped into VR-note issues
   buildPlan(plan);
   if (mapMode) {               // keep map view across plan switches
     if (ceiling) ceiling.visible = false;

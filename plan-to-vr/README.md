@@ -118,17 +118,24 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    (desktop: hold **V**), where one click also bundles **every note from
    the current session** (or everything) into a single zip of audio +
    `notes.json` — and can **push notes straight to Claude from inside the
-   headset**, no downloads or device shuffling: connect once by opening
-   the viewer with `#feedback=TOKEN@owner/repo` (a fine-grained GitHub
-   token with Contents read/write on ONE repo — make it a **private**
-   repo so your voice audio stays private; the token lives only in that
-   browser's localStorage and the fragment is stripped immediately).
-   From then on every saved note uploads itself as
-   `vr-notes/<date>/note-<time>.json` + `.webm` (position, heading and
-   drawn strokes in plan inches, plus the recording) **and opens a
-   GitHub issue** titled `[VR note] …` linking both files (give the
-   token Issues read/write too), so each note lands as a work item
-   Claude can read and you can discuss. The headset shows "Note pushed
+   headset**, no downloads or device shuffling. Connecting is
+   two clicks in the 🎤 panel: a link opens GitHub's **pre-filled token
+   page** (press Generate there), paste it next to the suggested repo,
+   Connect. (A real OAuth popup isn't possible from a static page —
+   GitHub's browser flows need a secret-holding server — so this is the
+   closest one-click flow.) Power users can instead open the viewer
+   once with `#feedback=TOKEN@owner/repo` (fine-grained PAT, Contents +
+   Issues read/write on ONE repo — a **private** repo keeps recordings
+   private). Either way the token lives only in that browser's
+   localStorage.
+   From then on **every note IS a GitHub issue** (give the token Issues
+   read/write too): `[VR note] <plan> @ (x,y)` with the recording
+   linked (view+voice webm), when it was collected, the app version and
+   session, the plan and its source sheet, your position/heading, the
+   laser strokes inline, and — where the browser supports the Web
+   Speech API — a **client-side transcript** of what you said quoted at
+   the top, so notes read without playing audio. The same files also
+   land as `vr-notes/<date>/note-<time>.json` + `.webm`. The headset shows "Note pushed
    to Claude". For a deliberate flag without recording anything, press
    **X** in VR (or the ⚑ button on the 2D page): it screenshots exactly
    what you're looking at, commits it, and opens a `[VR issue]` with
