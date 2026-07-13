@@ -1676,6 +1676,7 @@ function startVoiceNote() {
   noteRec.recV = null;
   specVideoTrack = null;
   try {
+    if (renderer.xr.isPresenting) ensureSpecRenderer();
     const srcCanvas = renderer.xr.isPresenting ? specCanvas : renderer.domElement;
     const cs = srcCanvas.captureStream(0);       // frames only when asked
     specVideoTrack = cs.getVideoTracks()[0] || null;
@@ -3008,7 +3009,8 @@ function finishTrace() {
 
 // exposed for automated testing of the solver + anchor lifecycle
 window.PLAN2VR_DRAW = { draw, drawSample, drawFinish, drawTick, resetHeight, noteRec,
-  laserCast, laserOff, laserBeam, laserDot,
+  laserCast, laserOff, laserBeam, laserDot, renderSpectator,
+  get specCanvas() { return specCanvas; },
   get planOffset() { return planOffset; }, get ctrlR() { return ctrlR; } };
 window.PLAN2VR_CALIB = {
   fitTraceSegment, solveAlignment, calib,
@@ -3342,6 +3344,9 @@ renderer.xr.addEventListener('sessionstart', () => {
   toggleMap(false);            // map view is a flat-screen affair
   setTimeout(showVRHelp, 800);
   initVoiceNotes();
+  // warm the spectator renderer now: its one-time shader compile would
+  // otherwise hitch the first seconds of the first recording
+  setTimeout(() => { if (renderer.xr.isPresenting) renderSpectator(); }, 2500);
   setTimeout(() => {
     if (renderer.xr.isPresenting && camera.position.y < 0.95) resetHeight();
   }, 1600);
@@ -3484,37 +3489,48 @@ window.PLAN2VR_PHYS = {
 
 // ---------------------------------------------------------------- loop
 // spectator camera: mirrors the headset view while a note records, so
-// notes capture what the wearer sees. The mirror renders at 640x360
-// with shadow-map updates FROZEN (they're fresh from the main render;
-// re-running them tripled the frame cost and made the headset flash),
-// then blits into a small dedicated capture canvas.
-const specCam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 500);
+// notes capture what the wearer sees. It renders on a SECOND renderer
+// with its own small canvas and GL context - sharing the XR context
+// corrupted the in-flight XR frame and the headset flashed into
+// passthrough on every capture frame. An isolated context cannot
+// touch the XR frame by construction. Shadows off, own IBL env.
+const specCam = new THREE.PerspectiveCamera(75, 16 / 9, 0.05, 500);
 const SPEC_W = 640, SPEC_H = 360;
 const specCanvas = document.createElement('canvas');
 specCanvas.width = SPEC_W;
 specCanvas.height = SPEC_H;
-const specCtx = specCanvas.getContext('2d');
-const _specSize = new THREE.Vector2();
+let specRenderer = null;
+let specEnv = null;
+function ensureSpecRenderer() {
+  if (specRenderer) return true;
+  try {
+    specRenderer = new THREE.WebGLRenderer({
+      canvas: specCanvas, antialias: false, powerPreference: 'low-power' });
+    specRenderer.setSize(SPEC_W, SPEC_H, false);
+    specRenderer.setPixelRatio(1);
+    specRenderer.shadowMap.enabled = false;
+    specRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    specRenderer.toneMappingExposure = 0.9;
+    const pm = new THREE.PMREMGenerator(specRenderer);
+    specEnv = pm.fromScene(new RoomEnvironment(specRenderer), 0.04).texture;
+    return true;
+  } catch (e) {
+    specRenderer = null;
+    return false;
+  }
+}
 let specFrame = 0;
 function renderSpectator() {
+  if (!ensureSpecRenderer()) return;
   camera.getWorldPosition(specCam.position);
   camera.getWorldQuaternion(specCam.quaternion);
-  specCam.aspect = SPEC_W / SPEC_H;
-  specCam.updateProjectionMatrix();
-  const shadowAuto = renderer.shadowMap.autoUpdate;
-  renderer.shadowMap.autoUpdate = false;   // reuse this frame's shadow maps
-  renderer.xr.enabled = false;
-  const pr = renderer.getPixelRatio();
-  renderer.getSize(_specSize);
-  renderer.setViewport(0, 0, SPEC_W / pr, SPEC_H / pr);
-  renderer.render(scene, specCam);
-  // GL viewport y=0 is the bottom of the buffer; 2D canvas y=0 is the top
-  specCtx.drawImage(renderer.domElement,
-    0, renderer.domElement.height - SPEC_H, SPEC_W, SPEC_H,
-    0, 0, SPEC_W, SPEC_H);
-  renderer.setViewport(0, 0, _specSize.x, _specSize.y);
-  renderer.xr.enabled = true;
-  renderer.shadowMap.autoUpdate = shadowAuto;
+  // textures re-upload to the second context automatically, but the
+  // PMREM env is a render-target texture and is context-bound: swap in
+  // this context's own copy for the pass
+  const envMain = scene.environment;
+  scene.environment = specEnv;
+  try { specRenderer.render(scene, specCam); }
+  finally { scene.environment = envMain; }
 }
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
