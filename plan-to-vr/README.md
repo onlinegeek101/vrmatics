@@ -465,8 +465,22 @@ importmap from a CDN, no build step. It:
 
 ## Swapping in your own drawings (e.g. DataCAD exports)
 
-Export to DXF (R2010 or later works well), then point the flags at your
-office's layer names:
+Export to DXF (R2010 or later works well), one file per floor. A 2D-only
+drawing with no vertical/z data is exactly the input this pipeline wants —
+it synthesizes the third dimension (wall heights, openings, stairs) from
+the flat linework, so an architect who "draws strictly in 2D" is no
+obstacle.
+
+First inspect the file to learn its layer names (offices rarely use the
+AIA `A-WALL`/`A-DOOR`/`A-GLAZ` defaults):
+
+```bash
+python parser/dxfinfo.py myhouse.dxf
+```
+
+`dxfinfo` lists every layer with its entity mix, extent, and a guess at
+its role (walls, doors, windows, fixtures, annotation), plus a ready-made
+`extract.py` command with the layer flags filled in. Then run that:
 
 ```bash
 python parser/extract.py myhouse.dxf -o viewer/plan.json \
