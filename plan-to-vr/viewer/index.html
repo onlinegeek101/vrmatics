@@ -985,11 +985,30 @@ function buildPlan(plan) {
 
   // stairs as ascending stepped geometry: each tread becomes a riser
   // box climbing along the run (toward the walk-line arrow when the plot
-  // has one). Height caps at hip height - a flight to nowhere reads as
-  // stairs without piercing the ceiling, and the eye passes over it.
+  // has one). A lone flight still caps at hip height, but when a DOWN
+  // run shares the well (the drafter's switchback pair), the flight now
+  // goes somewhere: full height to a landing, a return flight climbing
+  // back over the down-run, and a hole cut in the roof above - no more
+  // stairs dead-ending under a closed ceiling.
+  const roofHoles = [];   // world rects the roof must open over
+  const stripsAdjacent = (pa, pb) => {
+    const bb = p => {
+      const xs = p.map(q => q[0]), ys = p.map(q => q[1]);
+      return { x0: Math.min(...xs), x1: Math.max(...xs),
+               y0: Math.min(...ys), y1: Math.max(...ys) };
+    };
+    const a = bb(pa), b = bb(pb);
+    const ovX = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    const ovY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+    const gapX = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
+    const gapY = Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1);
+    return (ovX > 30 && gapY > -6 && gapY < 24) ||
+           (ovY > 30 && gapX > -6 && gapX < 24);
+  };
   if (plan.stairs && plan.stairs.length) {
     const stMat = std({ color: 0xb9a988, roughness: 0.85,
                         envMapIntensity: ENV_INTENSITY });
+    const wallHm = ((walls[0] && walls[0].height) || 96) * IN2M;
     const riserM = 0.17, capM = 1.1;
     const wellMat = std({ color: 0x14161c, roughness: 1.0,
                           envMapIntensity: 0 });
@@ -1088,9 +1107,17 @@ function buildPlan(plan) {
       }
       gaps.sort((x, y) => x - y);
       const depth = gaps.length ? gaps[gaps.length >> 1] : 0.26;
+      // a DOWN run sharing the well means this is a switchback pair:
+      // the flight rises full height to a landing and a return flight
+      // climbs back over the down-run to the floor above
+      const partner = (plan.stairs || []).find(o =>
+        o !== st && o.down && stripsAdjacent(st.polygon, o.polygon));
+      const flightTop = treads.length * riserM;
+      const through = !!partner && flightTop < wallHm - 0.15;
+      const cap = through ? Infinity : capM;
       treads.forEach((t, i) => {
         const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
-        const h = Math.min((i + 1) * riserM, capM);
+        const h = Math.min((i + 1) * riserM, cap);
         const m = new THREE.Mesh(new THREE.BoxGeometry(len, h, depth), stMat);
         m.position.set(t.mx + cx * depth / 2, h / 2, t.mz + cz * depth / 2);
         m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
@@ -1104,6 +1131,62 @@ function buildPlan(plan) {
           kx: cx, kz: cz, hl: len / 2, hd: depth / 2, top: h,
         });
       });
+      if (through) {
+        // axis-aligned well: combined bbox of both strips, world space
+        const wpts = st.polygon.concat(partner.polygon)
+          .map(([px, py]) => toWorld(px, py));
+        const bx0 = Math.min(...wpts.map(q => q.x)), bx1 = Math.max(...wpts.map(q => q.x));
+        const bz0 = Math.min(...wpts.map(q => q.z)), bz1 = Math.max(...wpts.map(q => q.z));
+        const pw = partner.polygon.map(([px, py]) => toWorld(px, py));
+        const px0 = Math.min(...pw.map(q => q.x)), px1 = Math.max(...pw.map(q => q.x));
+        const pz0 = Math.min(...pw.map(q => q.z)), pz1 = Math.max(...pw.map(q => q.z));
+        const alongX = Math.abs(cx) > 0.5;      // climb axis of the pair
+        const lastT = treads[treads.length - 1];
+        // landing platform past the top tread, spanning BOTH strips
+        const landD = 0.95;
+        const lax = alongX ? lastT.mx + cx * (depth + landD / 2) : (bx0 + bx1) / 2;
+        const laz = alongX ? (bz0 + bz1) / 2 : lastT.mz + cz * (depth + landD / 2);
+        const lw = alongX ? landD : bx1 - bx0;
+        const ld = alongX ? bz1 - bz0 : landD;
+        const land = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.16, ld), stMat);
+        land.position.set(lax, flightTop - 0.08, laz);
+        land.castShadow = land.receiveShadow = true;
+        group.add(land);
+        laserTargets.push(land);
+        stairSteps.push({ cx: lax, cz: laz, ux: 1, uz: 0, kx: 0, kz: 1,
+                          hl: lw / 2, hd: ld / 2, top: flightTop });
+        // return flight over the partner strip, climbing back the
+        // other way from the landing up to the floor above
+        const alongLen = alongX ? px1 - px0 : pz1 - pz0;
+        const wide = alongX ? pz1 - pz0 : px1 - px0;
+        const n = Math.max(3, Math.round((wallHm - flightTop) / riserM));
+        const rise = (wallHm - flightTop) / n;
+        const stepD = alongLen / n;
+        for (let i = 0; i < n; i++) {
+          const h = flightTop + (i + 1) * rise;
+          const a = (i + 0.5) * stepD;     // distance from the landing end
+          const sx = alongX ? (cx < 0 ? px0 + a : px1 - a) : (px0 + px1) / 2;
+          const sz = alongX ? (pz0 + pz1) / 2 : (cz < 0 ? pz0 + a : pz1 - a);
+          const slab = new THREE.Mesh(new THREE.BoxGeometry(
+            alongX ? stepD : wide, 0.16, alongX ? wide : stepD), stMat);
+          slab.position.set(sx, h - 0.08, sz);
+          slab.castShadow = slab.receiveShadow = true;
+          group.add(slab);
+          laserTargets.push(slab);
+          stairSteps.push({ cx: sx, cz: sz,
+            ux: alongX ? 1 : 0, uz: alongX ? 0 : 1,
+            kx: alongX ? -cx : 0, kz: alongX ? 0 : -cz,
+            hl: (alongX ? stepD : wide) / 2, hd: (alongX ? wide : stepD) / 2,
+            top: h });
+        }
+        // the roof opens over the shaft: return strip + landing
+        roofHoles.push({
+          x0: Math.min(px0, lax - lw / 2) - 0.05,
+          z0: Math.min(pz0, laz - ld / 2) - 0.05,
+          x1: Math.max(px1, lax + lw / 2) + 0.05,
+          z1: Math.max(pz1, laz + ld / 2) + 0.05,
+        });
+      }
     }
   }
 
@@ -1309,6 +1392,18 @@ function buildPlan(plan) {
   const H = walls.reduce((m, ww) => Math.max(m, (ww.height || 96) * IN2M), 0) || 2.44;
   let roof;
   if (footShape) {
+    // stairwell shafts punch through: each hole is wound opposite to
+    // the outline so the triangulator treats it as a cutout
+    const outerCCW = THREE.ShapeUtils.area(footShape.getPoints()) > 0;
+    for (const hr of roofHoles) {
+      const pts = [
+        new THREE.Vector2(hr.x0, -hr.z0), new THREE.Vector2(hr.x1, -hr.z0),
+        new THREE.Vector2(hr.x1, -hr.z1), new THREE.Vector2(hr.x0, -hr.z1)];
+      if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
+      const hole = new THREE.Path();
+      hole.setFromPoints(pts);
+      footShape.holes.push(hole);
+    }
     const geo = new THREE.ExtrudeGeometry(footShape, { depth: 0.14, bevelEnabled: false });
     geo.rotateX(-Math.PI / 2);   // extrusion axis -> up
     roof = new THREE.Mesh(geo, ceilMat);
@@ -1697,8 +1792,8 @@ function startVoiceNote() {
   noteRec.active = true;
   document.getElementById('notes-btn').classList.add('rec');
   if (renderer.xr.isPresenting)
-    vrMsg([noteRec.videoOn ? '● Recording view + voice... release to save'
-                           : '● Recording voice... release to save'], true);
+    vrMsg([noteRec.videoOn ? '● Recording view + voice'
+                           : '● Recording voice'], 1.6);
 }
 function stopVoiceNote() {
   if (!noteRec.active) return;
@@ -2905,7 +3000,21 @@ const vrPanel = new THREE.Mesh(
 vrPanel.position.set(0, -0.32, -1.1);
 vrPanel.renderOrder = 999;
 vrPanel.visible = false;
+vrPanel.layers.set(2);          // HUD layer: never captured in recordings
 camera.add(vrPanel);
+camera.layers.enable(2);
+// recording indicator: a small pulsing red dot low in the view - the
+// old sticky "Recording..." panel blocked half the scene AND got baked
+// into every recording
+const recDot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.0065, 10, 8),
+  new THREE.MeshBasicMaterial({ color: 0xff2a2a, depthTest: false,
+                                transparent: true }));
+recDot.position.set(0.115, -0.085, -0.55);
+recDot.renderOrder = 999;
+recDot.visible = false;
+recDot.layers.set(2);
+camera.add(recDot);
 let vrPanelTimer = 0;
 function vrMsg(lines, sticky) {
   const g = vrPanelCanvas.getContext('2d');
@@ -3548,6 +3657,9 @@ renderer.setAnimationLoop(() => {
   if (calib.clearArmed > 0) calib.clearArmed -= dt;
   drawTick(dt);
   vrPanelTick(dt);
+  recDot.visible = noteRec.active;
+  if (noteRec.active)
+    recDot.material.opacity = 0.55 + 0.45 * Math.sin(clock.elapsedTime * 5);
   renderer.render(scene,
     mapMode && !renderer.xr.isPresenting ? mapCam : camera);
   // in-headset recording: every 3rd frame, re-render the scene from the
