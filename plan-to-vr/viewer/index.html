@@ -1762,6 +1762,8 @@ function startVoiceNote() {
   if (!noteRec.media) { initVoiceNotes(); return; }
   noteRec.chunksA = [];
   noteRec.chunksV = [];
+  noteRec.stills = [];     // periodic screen grabs, embedded in the issue
+  noteRec.lastStill = -10;
   // adopt strokes drawn in the 6s before recording started
   const t0 = Date.now() - 6000;
   noteRec.strokes = draw.recent.filter(st => st.t >= t0);
@@ -1820,6 +1822,11 @@ async function finalizeNote() {
   // a starved video mux is just a header; only trust real payload
   const blob = (videoBlob && videoBlob.size > 65536) ? videoBlob : audioBlob;
   specVideoTrack = null;
+  // 2-3 stills for the issue body: first, middle, last of the grabs
+  const grabs = noteRec.stills || [];
+  const stills = grabs.length <= 3 ? grabs.slice()
+    : [grabs[0], grabs[Math.floor(grabs.length / 2)], grabs[grabs.length - 1]];
+  noteRec.stills = [];
   const transcript = await finishTranscript(noteRec.stt);
   noteRec.stt = null;
   const cam = new THREE.Vector3();
@@ -1834,7 +1841,7 @@ async function finalizeNote() {
   };
   const db = await notesDB();
   db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
-  if (feedbackCfg()) pushNote(rec, blob);   // straight to Claude's repo
+  if (feedbackCfg()) pushNote(rec, blob, stills);   // straight to Claude's repo
   noteRec.strokes = [];
   setTimeout(refreshNotesBadge, 200);
   if (renderer.xr.isPresenting)
@@ -2024,8 +2031,8 @@ async function fileIssueFromHere(text) {
       `**Plan:** \`${planName}\` · **standing at** (${px}, ${py}) ` +
       `plan-inches · **facing** ${dolly.rotation.y.toFixed(2)} rad\n\n` +
       (text ? text + '\n\n' : '') +
-      (okShot ? `**What I'm looking at:** ` +
-        `[shot-${tag}.jpg](${base}/vr-notes/issues/shot-${tag}.jpg)\n` : '') +
+      (okShot ? `![what I'm looking at](https://raw.githubusercontent.com/` +
+        `${c.owner}/${c.repo}/${c.branch}/vr-notes/issues/shot-${tag}.jpg)\n` : '') +
       strokesBlock +
       `\n_Filed from the VR walkthrough._`);
     say([num ? `Issue ${typeof num === 'number' ? '#' + num + ' ' : ''}filed` :
@@ -2042,9 +2049,15 @@ document.getElementById('issue-btn').addEventListener('click', () => {
   const text = prompt('Describe the issue (optional):') || '';
   fileIssueFromHere(text);
 });
+function dataUrlBytes(u) {
+  const bin = atob(u.split(',')[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 let pushBusy = false;
-async function pushNote(rec, blob) {
-  if (pushBusy) { setTimeout(() => pushNote(rec, blob), 1500); return; }
+async function pushNote(rec, blob, stills) {
+  if (pushBusy) { setTimeout(() => pushNote(rec, blob, stills), 1500); return; }
   pushBusy = true;
   try {
     const tag = new Date(rec.t).toISOString().replace(/[:.]/g, '-');
@@ -2069,6 +2082,17 @@ async function pushNote(rec, blob) {
     // browser could produce one, and the strokes inline
     const c = feedbackCfg();
     const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}/${dir}`;
+    const rawBase = `https://raw.githubusercontent.com/${c.owner}/${c.repo}/${c.branch}/${dir}`;
+    // screen grabs embedded inline so the issue reads at a glance
+    let stillsMd = '';
+    for (let i = 0; i < (stills || []).length; i++) {
+      try {
+        const p = `note-${tag}-shot${i + 1}.jpg`;
+        if (await ghPut(`${dir}/${p}`, dataUrlBytes(stills[i]),
+                        `VR note still ${tag} (${i + 1})`))
+          stillsMd += `![view ${i + 1}](${rawBase}/${p})\n`;
+      } catch (e) {}
+    }
     const planName = rec.plan.split('/').pop().replace('.json', '');
     const strokes = rec.strokes || [];
     let strokesBlock = '';
@@ -2090,6 +2114,7 @@ async function pushNote(rec, blob) {
       `**Plan:** \`${planName}\`${src} · **standing at** ` +
       `(${rec.x}, ${rec.y}) plan-inches · **facing** ${rec.yaw} rad\n\n` +
       (rec.transcript ? `> ${rec.transcript}\n\n` : '') +
+      stillsMd + (stillsMd ? '\n' : '') +
       (ok2 ? `**${kind === 'video' ? 'View + voice recording' : 'Voice recording'}:** ` +
              `[note-${tag}.webm](${base}/note-${tag}.webm)\n` : '') +
       (ok1 ? `**Full metadata:** [note-${tag}.json](${base}/note-${tag}.json)\n` : '') +
@@ -3682,6 +3707,16 @@ renderer.setAnimationLoop(() => {
     if (specFrame === 0) {
       if (renderer.xr.isPresenting) renderSpectator();
       requestSpecFrame();   // explicit capture: auto-fps gets no frames in XR
+      // periodic stills - 2-3 of these get embedded in the issue body
+      if (clock.elapsedTime - noteRec.lastStill > 2.5) {
+        noteRec.lastStill = clock.elapsedTime;
+        try {
+          const src = renderer.xr.isPresenting ? specCanvas : renderer.domElement;
+          noteRec.stills.push(src.toDataURL('image/jpeg', 0.8));
+          if (noteRec.stills.length > 9)      // keep memory bounded
+            noteRec.stills = noteRec.stills.filter((_, i) => i % 2 === 0);
+        } catch (e) {}
+      }
     }
   }
 });
