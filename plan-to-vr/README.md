@@ -488,6 +488,20 @@ python parser/extract.py myhouse.dxf -o viewer/plan.json \
     --fixture-layers A-FURN,A-FIXTURE,A-EQPM --tolerance 2.0
 ```
 
+For a full floor (the bundled home plans are built this way from the
+architect's DataCAD DXF), `dxf2plan.py` wraps the extractor and adds what
+a native CAD file gives for free: room **names** from the room-label text
+layer (which set room kinds and drive garage split-level + per-room
+floors), **stair runs** detected straight from the tread ladders
+(`dxf_stairs.py`) with down/direction from a small ground-truth sidecar,
+and the **demo layer simply excluded** (no dash-filtering needed):
+
+```bash
+python parser/dxf2plan.py A1.1.dxf -o viewer/plans/home-l1.json --floor 1 \
+    --wall-layers 1.1WALL --dw-layers 1.1DRWDWS --rmnames-layer 1.1RMNAMES \
+    --gt parser/corrections/dxf-l1.json
+```
+
 For a renovation set (existing / demo / new wall layers), pass only the
 layers for the state you want to walk through — e.g. existing + new but not
 demo — and run the parser once per floor for multi-story projects (one DXF

@@ -1,0 +1,7 @@
+{
+ "_source": "DXF migration GT",
+ "stairs": [
+  {"near": [-105, -257], "down": true, "direction": [-1, 0],
+   "_note": "main stairwell: down to floor 1 (attic-up flight shares the well; fast-follow to split them)"}
+ ]
+}
