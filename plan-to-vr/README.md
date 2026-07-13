@@ -110,8 +110,11 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    thumbstick turns smoothly**; push the right stick forward to aim the
    teleport arc and release to jump. **Y** shows the controls help panel,
    **holding B aims the calibration laser** (see the passthrough section),
-   and **holding the left trigger records a voice note** pinned to where
-   you stand - review, play and download notes later from the 🎤 button
+   and **holding the left trigger records a note** pinned to where you
+   stand - **voice plus a video of exactly what you're seeing** (a
+   spectator view mirrors the headset into the recording; falls back to
+   audio-only where canvas capture is unsupported) - review, play and
+   download notes later from the 🎤 button
    (desktop: hold **V**), where one click also bundles **every note from
    the current session** (or everything) into a single zip of audio +
    `notes.json` — and can **push notes straight to Claude from inside the
@@ -120,17 +123,22 @@ python parser/extract.py sample/ceco-metric.dxf -o viewer/plan.json \
    token with Contents read/write on ONE repo — make it a **private**
    repo so your voice audio stays private; the token lives only in that
    browser's localStorage and the fragment is stripped immediately).
-   From then on every saved voice note uploads itself as
+   From then on every saved note uploads itself as
    `vr-notes/<date>/note-<time>.json` + `.webm` (position, heading and
-   drawn strokes in plan inches, plus the audio), the headset shows
-   "Note pushed to Claude", and Claude Code pulls the repo on the other
-   side. The 🎤 panel also has "push this session" for a one-shot
+   drawn strokes in plan inches, plus the recording) **and opens a
+   GitHub issue** titled `[VR note] …` linking both files (give the
+   token Issues read/write too), so each note lands as a work item
+   Claude can read and you can discuss. The headset shows "Note pushed
+   to Claude". The 🎤 panel also has "push this session" for a one-shot
    bundle, and disconnect. The **right trigger is a laser pointer**: rest a finger
    on it for the red beam and dot, squeeze to draw on whatever surface
    the dot touches; strokes fade out a few seconds after release, and
    anything drawn during (or just before) a voice note is saved with it
    in plan coordinates, so a spoken comment plus a scribble pins exactly
-   what it refers to. Playing seated? A stationary guardian can sink the
+   what it refers to. (Drawing is tuned for headset reality: trigger
+   hysteresis so jitter can't chop a gesture into fragments, a pruned
+   raycast list so aiming never costs frames, and preallocated stroke
+   buffers so long scribbles don't stutter.) Playing seated? A stationary guardian can sink the
    camera to the floor - the rig auto-corrects on entry, and **clicking
    the right stick resets your eye height** any time.
 

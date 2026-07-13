@@ -537,6 +537,8 @@ let planSizeM = { w: 10, h: 10 };
 let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
 const layerState = { geom: true, lines: false, sheet: false };
 let doorLeaves = [];    // grabbable hinged doors: {pivot, theta0, rotSign, len, head, open}
+let laserTargets = [];  // big drawable surfaces only - keeps the laser
+                        // raycast cheap on Quest (no per-trim-board tests)
 let collisionSegs = []; // {ax, az, bx, bz, hw, top} solid wall spans, world XZ
 let fixtureSegs = [];   // fixture capsules; collide only while fixtures shown
 let stairSteps = [];    // walkable riser tops: {cx,cz,ux,uz,kx,kz,hl,hd,top}
@@ -700,6 +702,7 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
     leaf.castShadow = leaf.receiveShadow = true;
     pivot.add(leaf);
+    laserTargets.push(leaf);
     // recessed panels + knobs on both faces so it reads as a door
     const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
     for (const zs of [1, -1]) {
@@ -802,6 +805,7 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   group.add(mesh);
+  laserTargets.push(mesh);
 
   if (zb === 0)
     addTrim(group, worldStart, dir, angle, a0, a1, depth, 0, BASEBOARD_PROFILE);
@@ -840,6 +844,7 @@ function buildPlan(plan) {
   stairSteps = [];
   planWallsWorld = [];
   doorLeaves = [];
+  laserTargets = [];
   const group = new THREE.Group();
   const walls = plan.walls || [];
   const openings = plan.openings || [];
@@ -989,6 +994,7 @@ function buildPlan(plan) {
           new THREE.BoxGeometry(wellW, 0.02, wellD), wellMat);
         well.position.set((cx0 + cx1) / 2, 0.012, (cz0 + cz1) / 2);
         group.add(well);
+        laserTargets.push(well);
         // first three treads sink into the dark before it swallows them
         const dirW = st.direction
           ? [st.direction[0], -st.direction[1]]
@@ -1076,6 +1082,7 @@ function buildPlan(plan) {
         m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
         m.castShadow = m.receiveShadow = true;
         group.add(m);
+        laserTargets.push(m);
         // walkable: the riser top is ground under the player's feet
         stairSteps.push({
           cx: t.mx + cx * depth / 2, cz: t.mz + cz * depth / 2,
@@ -1215,6 +1222,7 @@ function buildPlan(plan) {
   }
   floor.receiveShadow = true;
   group.add(floor);
+  laserTargets.push(floor, ground);   // lawn included: drawing outside works
 
   const H0 = ((walls[0] && walls[0].height) || 96) * IN2M;
   // ceilings live in one group: the footprint roof + any per-room ceiling
@@ -1234,6 +1242,7 @@ function buildPlan(plan) {
     mesh.position.y = 0.004;
     mesh.receiveShadow = true;
     group.add(mesh);
+    laserTargets.push(mesh);
 
     // measured per-room ceiling plane, when the plan provides one
     const roomH = r.ceiling ? r.ceiling * IN2M : H0;
@@ -1296,6 +1305,7 @@ function buildPlan(plan) {
   }
   roof.receiveShadow = true;
   ceilGroup.add(roof);
+  laserTargets.push(roof);
   ceiling = ceilGroup;           // C toggles roof + room ceilings together
   ceiling.visible = true;
   lamp.intensity = rooms.length ? 0 : 0.45;   // room light disks take over
@@ -1427,9 +1437,10 @@ const draw = {
 const drawMat = () => new THREE.LineBasicMaterial({
   color: 0xff3d6e, transparent: true, opacity: 0.95, depthTest: false });
 
+const laserBeamPos = new THREE.BufferAttribute(new Float32Array(6), 3);
+laserBeamPos.setUsage(THREE.DynamicDrawUsage);
 const laserBeam = new THREE.Line(
-  new THREE.BufferGeometry().setFromPoints(
-    [new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.BufferGeometry().setAttribute('position', laserBeamPos),
   new THREE.LineBasicMaterial({ color: 0xff3d6e, transparent: true,
                                 opacity: 0.7 }));
 laserBeam.visible = false;
@@ -1450,44 +1461,69 @@ const _visUp = ob => {   // raycaster ignores the visible flag; we don't
 };
 // cast the pointer from the right controller, update the beam + dot
 // visuals, and return what it hit (walls, floors, stairs, lawn ...)
+const _lo = new THREE.Vector3(), _lq = new THREE.Quaternion();
+const _ld = new THREE.Vector3();
 function laserCast() {
-  const o = new THREE.Vector3(), q = new THREE.Quaternion();
-  ctrlR.getWorldPosition(o);
-  ctrlR.getWorldQuaternion(q);
-  const d = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
-  _ray.set(o, d);
-  const targets = [];
-  if (planGroup && planGroup.visible) targets.push(planGroup);
-  targets.push(ground);
-  const hit = _ray.intersectObjects(targets, true)
-    .find(h => h.object.isMesh && _visUp(h.object)) || null;
-  laserBeam.geometry.setFromPoints(
-    [o, hit ? hit.point : o.clone().addScaledVector(d, 6)]);
+  ctrlR.getWorldPosition(_lo);
+  ctrlR.getWorldQuaternion(_lq);
+  _ld.set(0, 0, -1).applyQuaternion(_lq);
+  _ray.set(_lo, _ld);
+  // explicit flat target list (walls, floors, stairs, doors, lawn) -
+  // testing every trim board recursively cost whole frames on Quest
+  const hit = _ray.intersectObjects(laserTargets, false)
+    .find(h => _visUp(h.object)) || null;
+  const ex = hit ? hit.point.x : _lo.x + _ld.x * 6;
+  const ey = hit ? hit.point.y : _lo.y + _ld.y * 6;
+  const ez = hit ? hit.point.z : _lo.z + _ld.z * 6;
+  laserBeamPos.setXYZ(0, _lo.x, _lo.y, _lo.z);
+  laserBeamPos.setXYZ(1, ex, ey, ez);
+  laserBeamPos.needsUpdate = true;
   laserBeam.visible = true;
   laserDot.visible = !!hit;
   if (hit) laserDot.position.copy(hit.point);
-  return { hit, origin: o, dir: d };
+  return { hit, origin: _lo, dir: _ld };
 }
 function laserOff() { laserBeam.visible = false; laserDot.visible = false; }
 
 function drawSample() {
   const { hit, dir } = laserCast();
-  if (!hit) return;
+  if (!hit) return;    // beam in the air: keep the stroke open, keep aiming
   // ink floats a touch off the surface so it never z-fights the wall
   const v = hit.point.clone().addScaledVector(dir, -0.012);
   const last = draw.pts[draw.pts.length - 1];
   if (last && v.distanceTo(last) < 0.008) return;
-  // a large jump means the laser slid onto another surface: break the
-  // stroke there rather than streaking a line across the room
-  if (last && v.distanceTo(last) > 0.6) { drawFinish(); draw.active = true; }
+  // a HUGE jump means the laser slid onto a far surface: break the stroke
+  // there rather than streaking a line across the room. (0.6m proved too
+  // eager - fast sweeps at distance jump farther than that per frame and
+  // shredded gestures into confetti)
+  if (last && v.distanceTo(last) > 1.4) { drawFinish(); draw.active = true; }
   draw.pts.push(v.clone());
   if (!draw.line) {
-    draw.line = new THREE.Line(new THREE.BufferGeometry(), drawMat());
+    // preallocated, growable position buffer: rebuilding the geometry on
+    // every sample caused GC hitches in the headset
+    const cap = 512;
+    const attr = new THREE.BufferAttribute(new Float32Array(cap * 3), 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', attr);
+    g.setDrawRange(0, 0);
+    draw.line = new THREE.Line(g, drawMat());
+    draw.line.frustumCulled = false;
     draw.line.renderOrder = 997;
     scene.add(draw.line);
   }
-  if (draw.pts.length > 1)
-    draw.line.geometry.setFromPoints(draw.pts);
+  let attr = draw.line.geometry.getAttribute('position');
+  if (draw.pts.length > attr.count) {        // grow ×2, keep what's drawn
+    const bigger = new THREE.BufferAttribute(
+      new Float32Array(attr.count * 6), 3);
+    bigger.setUsage(THREE.DynamicDrawUsage);
+    bigger.array.set(attr.array);
+    draw.line.geometry.setAttribute('position', bigger);
+    attr = bigger;
+  }
+  attr.setXYZ(draw.pts.length - 1, v.x, v.y, v.z);
+  attr.needsUpdate = true;
+  draw.line.geometry.setDrawRange(0, draw.pts.length);
 }
 
 function drawFinish() {
@@ -1571,9 +1607,30 @@ function startVoiceNote() {
   // adopt strokes drawn in the 6s before recording started
   const t0 = Date.now() - 6000;
   noteRec.strokes = draw.recent.filter(st => st.t >= t0);
+  // notes capture WHAT YOU SEE: the page canvas streams as the video
+  // track (in VR a spectator render mirrors the headset view into it)
+  // with the mic mixed in; falls back to audio-only if unsupported
+  noteRec.videoOn = false;
+  let stream = noteRec.media;
+  let opts = null;
   try {
-    noteRec.rec = new MediaRecorder(noteRec.media);
-  } catch (e) { return; }
+    const vt = renderer.domElement.captureStream(24).getVideoTracks()[0];
+    const mt = ['video/webm;codecs=vp8,opus', 'video/webm'].find(
+      t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+    if (vt && mt) {
+      stream = new MediaStream([vt, ...noteRec.media.getAudioTracks()]);
+      opts = { mimeType: mt, videoBitsPerSecond: 2500000 };
+      noteRec.videoOn = true;
+    }
+  } catch (e) { stream = noteRec.media; }
+  try {
+    noteRec.rec = opts ? new MediaRecorder(stream, opts)
+                       : new MediaRecorder(stream);
+  } catch (e) {
+    noteRec.videoOn = false;
+    try { noteRec.rec = new MediaRecorder(noteRec.media); }
+    catch (e2) { return; }
+  }
   noteRec.rec.ondataavailable = e => { if (e.data.size) noteRec.chunks.push(e.data); };
   noteRec.rec.onstop = async () => {
     const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType || 'audio/webm' });
@@ -1596,7 +1653,9 @@ function startVoiceNote() {
   noteRec.rec.start();
   noteRec.active = true;
   document.getElementById('notes-btn').classList.add('rec');
-  if (renderer.xr.isPresenting) vrMsg(['● Recording... release to save'], true);
+  if (renderer.xr.isPresenting)
+    vrMsg([noteRec.videoOn ? '● Recording view + voice... release to save'
+                           : '● Recording voice... release to save'], true);
 }
 function stopVoiceNote() {
   if (!noteRec.active) return;
@@ -1723,6 +1782,18 @@ async function ghPut(path, bytes, msg) {
     });
   return r.ok;
 }
+async function ghIssue(title, body) {
+  const c = feedbackCfg();
+  if (!c) return false;
+  const r = await fetch(
+    `https://api.github.com/repos/${c.owner}/${c.repo}/issues`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + c.token,
+                 Accept: 'application/vnd.github+json' },
+      body: JSON.stringify({ title, body }),
+    });
+  return r.ok;
+}
 let pushBusy = false;
 async function pushNote(rec, blob) {
   if (pushBusy) { setTimeout(() => pushNote(rec, blob), 1500); return; }
@@ -1734,12 +1805,31 @@ async function pushNote(rec, blob) {
                    plan: rec.plan, x: rec.x, y: rec.y, yaw: rec.yaw,
                    strokes: rec.strokes || [],
                    audio: `note-${tag}.webm`,
+                   kind: (blob.type || '').startsWith('video') ? 'video' : 'audio',
                    coords: 'plan inches; strokes [x,y,heightM]' };
     const ok1 = await ghPut(`${dir}/note-${tag}.json`,
       new TextEncoder().encode(JSON.stringify(meta, null, 1)),
       `VR note ${tag} (${rec.plan.split('/').pop()})`);
     const ok2 = await ghPut(`${dir}/note-${tag}.webm`,
-      new Uint8Array(await blob.arrayBuffer()), `VR note audio ${tag}`);
+      new Uint8Array(await blob.arrayBuffer()), `VR note media ${tag}`);
+    // the note also files itself as an issue, linking the committed
+    // media (the API has no true issue-attachment upload), so feedback
+    // shows up as a work item Claude and you can discuss
+    const c = feedbackCfg();
+    const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}/${dir}`;
+    const planName = rec.plan.split('/').pop().replace('.json', '');
+    const nStrokes = (rec.strokes || []).length;
+    await ghIssue(
+      `[VR note] ${planName} @ (${rec.x}, ${rec.y}) — ${meta.when}`,
+      `**Plan:** \`${planName}\` · **standing at** (${rec.x}, ${rec.y}) ` +
+      `plan-inches · **facing** ${rec.yaw} rad\n` +
+      `**Laser strokes:** ${nStrokes}\n\n` +
+      (ok2 ? `**${meta.kind === 'video' ? 'View + voice recording' : 'Voice recording'}:** ` +
+             `[note-${tag}.webm](${base}/note-${tag}.webm)\n` : '') +
+      (ok1 ? `**Position + strokes:** [note-${tag}.json](${base}/note-${tag}.json)\n` : '') +
+      `\n_Recorded in the VR walkthrough. Strokes are plan-inch ` +
+      `[x, y, heightM] and map directly onto the sheets._`
+    ).catch(() => {});
     const ok = ok1 && ok2;
     if (renderer.xr.isPresenting)
       vrMsg([ok ? 'Note pushed to Claude' : 'Push failed - note kept locally'], 3);
@@ -1799,7 +1889,7 @@ async function renderNotesPanel() {
     claude.className = 'note';
     if (cfg) {
       claude.innerHTML = `→ Claude: connected to <b>${cfg.owner}/${cfg.repo}</b>` +
-        ' (new notes push automatically) · ';
+        ' (new notes push files + open an issue) · ';
       const all = document.createElement('a');
       all.href = '#';
       all.textContent = `push this session (${sess.length})`;
@@ -1852,13 +1942,15 @@ async function renderNotesPanel() {
     const nStrokes = (n.strokes || []).length;
     div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ plan-in (${n.x}, ${n.y ?? n.z})` +
       (nStrokes ? ` · ✏ ${nStrokes} stroke${nStrokes > 1 ? 's' : ''}` : '') + `</div>`;
-    const audio = document.createElement('audio');
-    audio.controls = true;
-    audio.src = URL.createObjectURL(n.blob);
-    div.appendChild(audio);
+    const isVid = ((n.blob && n.blob.type) || '').startsWith('video');
+    const media = document.createElement(isVid ? 'video' : 'audio');
+    media.controls = true;
+    if (isVid) { media.width = 300; media.playsInline = true; }
+    media.src = URL.createObjectURL(n.blob);
+    div.appendChild(media);
     const row = document.createElement('div');
     const dl = document.createElement('a');
-    dl.href = audio.src;
+    dl.href = media.src;
     dl.download = `note-${n.id}-${n.plan.split('/').pop().replace('.json','')}.webm`;
     dl.textContent = 'download';
     const dj = document.createElement('a');
@@ -1883,7 +1975,7 @@ async function renderNotesPanel() {
   }
 }
 window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION,
-  feedbackCfg, initFeedbackFromHash, ghPut, pushNote, pushSessionZip };
+  feedbackCfg, initFeedbackFromHash, ghPut, ghIssue, pushNote, pushSessionZip };
 document.getElementById('notes-btn').addEventListener('click', () => {
   const panel = document.getElementById('notes-panel');
   panel.hidden = !panel.hidden;
@@ -2956,12 +3048,15 @@ function handleVRInput() {
         dolly.position.addScaledVector(side, dx * sp);
       }
     } else if (src.handedness === 'right') {
-      // laser pointer: light touch aims, squeeze inks onto the surface
+      // laser pointer: light touch aims, squeeze inks onto the surface.
+      // Hysteresis (start >0.6, keep until <0.4) stops trigger jitter
+      // from chopping one gesture into many little strokes
       const trigV = gp.buttons[0] ? gp.buttons[0].value : 0;
-      if (trigV > 0.55) { draw.active = true; drawSample(); }
+      const inking = draw.active ? trigV > 0.4 : trigV > 0.6;
+      if (inking) { draw.active = true; drawSample(); }
       else {
         if (draw.active) drawFinish();
-        if (trigV > 0.08 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
+        if (trigV > 0.05 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
         else laserOff();
       }
       if (btnEdge('right', gp, 3)) resetHeight();   // stick click
@@ -3201,6 +3296,10 @@ window.PLAN2VR_PHYS = {
 };
 
 // ---------------------------------------------------------------- loop
+// spectator camera: mirrors the headset view into the page canvas while
+// a note records, so notes capture what the wearer sees
+const specCam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 500);
+let specFrame = 0;
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -3219,11 +3318,26 @@ renderer.setAnimationLoop(() => {
   vrPanelTick(dt);
   renderer.render(scene,
     mapMode && !renderer.xr.isPresenting ? mapCam : camera);
+  // in-headset recording: every 3rd frame, re-render the scene from the
+  // head pose into the page canvas (the canvas is what captureStream
+  // records - the XR framebuffer itself is not capturable)
+  if (noteRec.active && noteRec.videoOn && renderer.xr.isPresenting) {
+    specFrame = (specFrame + 1) % 3;
+    if (specFrame === 0) {
+      camera.getWorldPosition(specCam.position);
+      camera.getWorldQuaternion(specCam.quaternion);
+      renderer.xr.enabled = false;
+      renderer.render(scene, specCam);
+      renderer.xr.enabled = true;
+    }
+  }
 });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  specCam.aspect = innerWidth / innerHeight;
+  specCam.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   if (mapMode) fitMapCam();
 });
