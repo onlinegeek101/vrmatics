@@ -1645,61 +1645,54 @@ async function finishTranscript(stt) {
   await Promise.race([stt.ended, new Promise(r => setTimeout(r, 1200))]);
   return stt.text.trim();
 }
+// The video track is pulled from a canvas with captureStream(0) and
+// EXPLICIT requestFrame() calls after each spectator blit: during an
+// immersive session the browser never composites the page canvas, so
+// fps-based auto capture delivers ZERO frames and the webm muxer sits
+// waiting for the first one - swallowing the audio with it (that is
+// exactly how a note once reached GitHub as a 110-byte husk). A
+// parallel audio-only recorder always runs, so even if the video
+// starves, the note survives.
+let specVideoTrack = null;
+function requestSpecFrame() {
+  try {
+    if (specVideoTrack && specVideoTrack.requestFrame) specVideoTrack.requestFrame();
+  } catch (e) {}
+}
 function startVoiceNote() {
   if (noteRec.active) return;
   if (!noteRec.media) { initVoiceNotes(); return; }
-  noteRec.chunks = [];
+  noteRec.chunksA = [];
+  noteRec.chunksV = [];
   // adopt strokes drawn in the 6s before recording started
   const t0 = Date.now() - 6000;
   noteRec.strokes = draw.recent.filter(st => st.t >= t0);
-  // notes capture WHAT YOU SEE: the page canvas streams as the video
-  // track (in VR a spectator render mirrors the headset view into it)
-  // with the mic mixed in; falls back to audio-only if unsupported
-  noteRec.videoOn = false;
-  let stream = noteRec.media;
-  let opts = null;
   try {
-    const vt = renderer.domElement.captureStream(24).getVideoTracks()[0];
+    noteRec.recA = new MediaRecorder(noteRec.media);
+  } catch (e) { return; }
+  noteRec.recA.ondataavailable = e => { if (e.data.size) noteRec.chunksA.push(e.data); };
+  noteRec.recA.start(1000);
+  noteRec.videoOn = false;
+  noteRec.recV = null;
+  specVideoTrack = null;
+  try {
+    const srcCanvas = renderer.xr.isPresenting ? specCanvas : renderer.domElement;
+    const cs = srcCanvas.captureStream(0);       // frames only when asked
+    specVideoTrack = cs.getVideoTracks()[0] || null;
     const mt = ['video/webm;codecs=vp8,opus', 'video/webm'].find(
       t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
-    if (vt && mt) {
-      stream = new MediaStream([vt, ...noteRec.media.getAudioTracks()]);
-      opts = { mimeType: mt, videoBitsPerSecond: 2500000 };
+    if (specVideoTrack && mt) {
+      noteRec.recV = new MediaRecorder(
+        new MediaStream([specVideoTrack, ...noteRec.media.getAudioTracks()]),
+        { mimeType: mt, videoBitsPerSecond: 2500000 });
+      noteRec.recV.ondataavailable = e => { if (e.data.size) noteRec.chunksV.push(e.data); };
+      noteRec.recV.start(1000);
       noteRec.videoOn = true;
+      if (renderer.xr.isPresenting) renderSpectator();
+      requestSpecFrame();                        // prime the first frame
     }
-  } catch (e) { stream = noteRec.media; }
-  try {
-    noteRec.rec = opts ? new MediaRecorder(stream, opts)
-                       : new MediaRecorder(stream);
-  } catch (e) {
-    noteRec.videoOn = false;
-    try { noteRec.rec = new MediaRecorder(noteRec.media); }
-    catch (e2) { return; }
-  }
+  } catch (e) { noteRec.recV = null; noteRec.videoOn = false; }
   noteRec.stt = startTranscript();
-  noteRec.rec.ondataavailable = e => { if (e.data.size) noteRec.chunks.push(e.data); };
-  noteRec.rec.onstop = async () => {
-    const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType || 'audio/webm' });
-    const transcript = await finishTranscript(noteRec.stt);
-    noteRec.stt = null;
-    const cam = new THREE.Vector3();
-    camera.getWorldPosition(cam);
-    const rec = {
-      t: Date.now(), plan: currentPlanKey, sess: NOTES_SESSION,
-      x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
-      y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
-      yaw: +dolly.rotation.y.toFixed(2), blob,
-      strokes: noteRec.strokes.slice(),
-      transcript,
-    };
-    const db = await notesDB();
-    db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
-    if (feedbackCfg()) pushNote(rec, blob);   // straight to Claude's repo
-    noteRec.strokes = [];
-    setTimeout(refreshNotesBadge, 200);
-    if (renderer.xr.isPresenting) vrMsg(['Voice note saved'], 3);
-  };
-  noteRec.rec.start();
   noteRec.active = true;
   document.getElementById('notes-btn').classList.add('rec');
   if (renderer.xr.isPresenting)
@@ -1710,8 +1703,44 @@ function stopVoiceNote() {
   if (!noteRec.active) return;
   noteRec.active = false;
   document.getElementById('notes-btn').classList.remove('rec');
-  try { noteRec.rec.stop(); } catch (e) {}
   if (renderer.xr.isPresenting) vrPanelTimer = 0.1;
+  finalizeNote();
+}
+async function finalizeNote() {
+  const stopOne = r => new Promise(res => {
+    if (!r || r.state === 'inactive') return res();
+    r.onstop = () => res();
+    try { r.stop(); } catch (e) { res(); }
+  });
+  await Promise.all([stopOne(noteRec.recA), stopOne(noteRec.recV)]);
+  const audioBlob = new Blob(noteRec.chunksA,
+    { type: (noteRec.recA && noteRec.recA.mimeType) || 'audio/webm' });
+  const videoBlob = noteRec.recV
+    ? new Blob(noteRec.chunksV, { type: noteRec.recV.mimeType || 'video/webm' })
+    : null;
+  // a starved video mux is just a header; only trust real payload
+  const blob = (videoBlob && videoBlob.size > 65536) ? videoBlob : audioBlob;
+  specVideoTrack = null;
+  const transcript = await finishTranscript(noteRec.stt);
+  noteRec.stt = null;
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  const rec = {
+    t: Date.now(), plan: currentPlanKey, sess: NOTES_SESSION,
+    x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
+    y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
+    yaw: +dolly.rotation.y.toFixed(2), blob,
+    strokes: noteRec.strokes.slice(),
+    transcript,
+  };
+  const db = await notesDB();
+  db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
+  if (feedbackCfg()) pushNote(rec, blob);   // straight to Claude's repo
+  noteRec.strokes = [];
+  setTimeout(refreshNotesBadge, 200);
+  if (renderer.xr.isPresenting)
+    vrMsg([blob === videoBlob ? 'Note saved (view + voice)'
+                              : 'Note saved (voice)'], 3);
 }
 // minimal store-only ZIP writer, so one click bundles every note (audio
 // + a notes.json of positions/headings/strokes) into a single download
@@ -1859,17 +1888,16 @@ async function fileIssueFromHere(text) {
   issueBusy = true;
   try {
     say(['Filing issue...']);
-    // fresh render into the canvas THIS task so toDataURL sees pixels
+    // fresh render THIS task so toDataURL sees pixels; in VR use the
+    // cheap spectator path (shadows frozen, 640x360) to avoid a hitch
+    let shotCanvas = renderer.domElement;
     if (renderer.xr.isPresenting) {
-      camera.getWorldPosition(specCam.position);
-      camera.getWorldQuaternion(specCam.quaternion);
-      renderer.xr.enabled = false;
-      renderer.render(scene, specCam);
-      renderer.xr.enabled = true;
+      renderSpectator();
+      shotCanvas = specCanvas;
     } else {
       renderer.render(scene, mapMode ? mapCam : camera);
     }
-    const jpeg = renderer.domElement.toDataURL('image/jpeg', 0.85);
+    const jpeg = shotCanvas.toDataURL('image/jpeg', 0.85);
     const bin = atob(jpeg.split(',')[1]);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -3455,10 +3483,39 @@ window.PLAN2VR_PHYS = {
 };
 
 // ---------------------------------------------------------------- loop
-// spectator camera: mirrors the headset view into the page canvas while
-// a note records, so notes capture what the wearer sees
+// spectator camera: mirrors the headset view while a note records, so
+// notes capture what the wearer sees. The mirror renders at 640x360
+// with shadow-map updates FROZEN (they're fresh from the main render;
+// re-running them tripled the frame cost and made the headset flash),
+// then blits into a small dedicated capture canvas.
 const specCam = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 500);
+const SPEC_W = 640, SPEC_H = 360;
+const specCanvas = document.createElement('canvas');
+specCanvas.width = SPEC_W;
+specCanvas.height = SPEC_H;
+const specCtx = specCanvas.getContext('2d');
+const _specSize = new THREE.Vector2();
 let specFrame = 0;
+function renderSpectator() {
+  camera.getWorldPosition(specCam.position);
+  camera.getWorldQuaternion(specCam.quaternion);
+  specCam.aspect = SPEC_W / SPEC_H;
+  specCam.updateProjectionMatrix();
+  const shadowAuto = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.autoUpdate = false;   // reuse this frame's shadow maps
+  renderer.xr.enabled = false;
+  const pr = renderer.getPixelRatio();
+  renderer.getSize(_specSize);
+  renderer.setViewport(0, 0, SPEC_W / pr, SPEC_H / pr);
+  renderer.render(scene, specCam);
+  // GL viewport y=0 is the bottom of the buffer; 2D canvas y=0 is the top
+  specCtx.drawImage(renderer.domElement,
+    0, renderer.domElement.height - SPEC_H, SPEC_W, SPEC_H,
+    0, 0, SPEC_W, SPEC_H);
+  renderer.setViewport(0, 0, _specSize.x, _specSize.y);
+  renderer.xr.enabled = true;
+  renderer.shadowMap.autoUpdate = shadowAuto;
+}
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -3480,14 +3537,11 @@ renderer.setAnimationLoop(() => {
   // in-headset recording: every 3rd frame, re-render the scene from the
   // head pose into the page canvas (the canvas is what captureStream
   // records - the XR framebuffer itself is not capturable)
-  if (noteRec.active && noteRec.videoOn && renderer.xr.isPresenting) {
+  if (noteRec.active && noteRec.videoOn) {
     specFrame = (specFrame + 1) % 3;
     if (specFrame === 0) {
-      camera.getWorldPosition(specCam.position);
-      camera.getWorldQuaternion(specCam.quaternion);
-      renderer.xr.enabled = false;
-      renderer.render(scene, specCam);
-      renderer.xr.enabled = true;
+      if (renderer.xr.isPresenting) renderSpectator();
+      requestSpecFrame();   // explicit capture: auto-fps gets no frames in XR
     }
   }
 });
