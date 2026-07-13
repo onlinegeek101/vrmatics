@@ -1,0 +1,3748 @@
+<meta charset="utf-8">
+<title>Plan-to-VR Walkthrough</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #10121a; }
+  canvas { display: block; touch-action: none; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
+    z-index: 15; font: 13px system-ui, sans-serif; color: #eef2fa;
+    background: rgba(24,28,40,.92); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 8px; padding: 8px 14px; opacity: 0; pointer-events: none;
+    transition: opacity .25s;
+  }
+
+  #hud {
+    position: fixed; top: 12px; left: 12px; z-index: 25;
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    color: #dfe6f2; background: rgba(16,18,26,.72);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+    padding: 10px 12px; max-width: 320px; backdrop-filter: blur(6px);
+  }
+  #hud h1 { font-size: 13px; margin-bottom: 6px; color: #8fb7ff; }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .warn { margin-top: 6px; color: #ffcf6b; }
+  #hud .warn div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hud .keys { margin-top: 8px; color: #9aa4b8; }
+  #hud select {
+    width: 100%; margin-bottom: 8px; font: inherit; color: inherit;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 6px; padding: 4px 6px;
+  }
+
+  #overlay {
+    position: fixed; inset: 0; z-index: 20; display: flex;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(10,12,18,.55); cursor: pointer;
+    font: 14px/1.6 system-ui, sans-serif; color: #eef2fa;
+  }
+  #overlay .card {
+    background: rgba(24,28,40,.9); border: 1px solid rgba(255,255,255,.14);
+    padding: 22px 28px; border-radius: 12px; max-width: 420px;
+  }
+  #overlay h2 { font-size: 18px; margin-bottom: 8px; }
+  #overlay small { color: #9aa4b8; }
+  #drop-hint {
+    position: fixed; bottom: 12px; left: 12px; z-index: 10;
+    font: 11px ui-monospace, monospace; color: #6b7488;
+  }
+  #map-btn {
+    position: fixed; top: 12px; right: 12px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #map-btn.on { background: #2b6cb0; border-color: #4a86c8; }
+  #map-layers {
+    position: fixed; top: 52px; right: 12px; z-index: 40;
+    display: flex; gap: 6px;
+  }
+  #map-layers button {
+    background: rgba(20,24,34,.85); color: #9aa4b8;
+    border: 1px solid #39415a; border-radius: 8px; padding: 6px 10px;
+    font: 12px system-ui, sans-serif; cursor: pointer;
+  }
+  #map-layers button.on { background: #2b6cb0; color: #eef2fa; border-color: #4a86c8; }
+  #notes-btn {
+    position: fixed; top: 12px; right: 96px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #notes-btn.rec { background: #b02b2b; border-color: #d05050; }
+  #issue-btn {
+    position: fixed; top: 12px; right: 158px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  #notes-panel {
+    position: fixed; top: 52px; right: 96px; z-index: 40; width: 340px;
+    max-height: 60vh; overflow-y: auto; background: rgba(20,24,34,.95);
+    border: 1px solid #39415a; border-radius: 10px; padding: 10px;
+    font: 12px system-ui, sans-serif; color: #dfe6f3;
+  }
+  #notes-panel .note { border-bottom: 1px solid #2a3147; padding: 8px 0; }
+  #notes-panel input, #notes-panel button {
+    background: #141a28; color: #dfe6f3; border: 1px solid #39415a;
+    border-radius: 6px; padding: 4px 8px; font: 12px system-ui, sans-serif;
+  }
+  #notes-panel button { cursor: pointer; }
+  #notes-panel audio { width: 100%; height: 28px; margin-top: 4px; }
+  #notes-panel a { color: #6db3f2; margin-right: 10px; }
+  #err {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; text-align: center;
+    font: 14px system-ui, sans-serif; color: #ffb4b4; padding: 30px;
+  }
+</style>
+
+<div id="hud" hidden>
+  <h1>Plan-to-VR</h1>
+  <select id="plan-select">
+    <option value="plans/home-l1.json" selected>Home Reno — first floor (from PDF)</option>
+    <option value="plans/home-l2.json">Home Reno — second floor (from PDF)</option>
+    <option value="plan.json">Bishop-Overland — imperial ranch house</option>
+    <option value="plans/zind-000.json">ZInD 000 — real home (Zillow dataset)</option>
+    <option value="plans/duplex-l1.json">Duplex Apartment — Level 1 (IFC/BIM)</option>
+    <option value="plans/duplex-l2.json">Duplex Apartment — Level 2 (IFC/BIM)</option>
+    <option value="plans/schependomlaan-gf.json">Schependomlaan — whole building floor (IFC)</option>
+    <option value="plans/ceco.json">Ceco.NET — metric building</option>
+  </select>
+  <div class="row"><span>walls</span><span id="hud-walls">0</span></div>
+  <div class="row"><span>openings</span><span id="hud-openings">0</span></div>
+  <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
+  <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
+  <div class="warn" id="hud-warn"></div>
+  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · hold <b>V</b> voice note · drag-drop a plan.json</div>
+</div>
+
+<div id="drop-hint">drop a plan.json anywhere to load it</div>
+
+<button id="map-btn" title="top-down plan view (M)">▦ plan</button>
+<button id="notes-btn" title="voice notes (hold V or left trigger to record)">🎤 0</button>
+<button id="issue-btn" title="file a GitHub issue from right here (X in VR)">⚑</button>
+<div id="notes-panel" hidden></div>
+<div id="map-layers" hidden>
+  <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
+  <button data-layer="lines" title="plan linework (2)">lines</button>
+  <button data-layer="sheet" title="source sheet underlay (3)">sheet</button>
+</div>
+<div id="overlay">
+  <div class="card">
+    <h2 id="overlay-title">Click to enter walkthrough</h2>
+    <div id="overlay-help">Move with <b>WASD</b>, look with the mouse, press <b>C</b> for ceiling.</div>
+    <small>Or tap <b>Enter VR</b> (bottom of screen) on a headset.</small>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="err"></div>
+
+<!-- optional embedded plan (written by the parser next to plan.json);
+     classic script so it also loads when the page is opened via file:// -->
+<script src="plan.js" onerror="void 0"></script>
+
+<script async src="https://unpkg.com/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const IN2M = 0.0254;                 // inches -> meters (1 unit = 1 meter)
+const EYE = 1.6;                     // standing eye height (m)
+const APP_VERSION = 'plan2vr 2026-07-13';   // stamped into VR-note issues
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+// ---------------------------------------------------------------- renderer
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // cap for mobile GPUs
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // filmic response like a camera
+renderer.toneMappingExposure = 0.9;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+// One entry button. On headsets with passthrough (Quest) it starts an
+// immersive-AR session rendered fully opaque - identical to VR - so the
+// B button can flip passthrough on and off instantly (WebXR cannot switch
+// session modes mid-flight, which is why a plain VR session can't do it).
+async function setupXRButton() {
+  const btn = document.createElement('button');
+  Object.assign(btn.style, {
+    position: 'absolute', bottom: '20px', left: '50%',
+    transform: 'translateX(-50%)', padding: '12px 24px',
+    border: '1px solid #fff', borderRadius: '4px',
+    background: 'rgba(0,0,0,0.55)', color: '#fff', font: '13px sans-serif',
+    cursor: 'pointer', zIndex: 999, opacity: 0.85,
+  });
+  document.body.appendChild(btn);
+  let mode = null;
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    try { if (await navigator.xr.isSessionSupported('immersive-ar')) mode = 'immersive-ar'; } catch {}
+    if (!mode) {
+      try { if (await navigator.xr.isSessionSupported('immersive-vr')) mode = 'immersive-vr'; } catch {}
+    }
+  }
+  if (!mode) {
+    btn.textContent = 'VR NOT SUPPORTED';
+    btn.style.opacity = 0.4;
+    return;
+  }
+  btn.textContent = 'ENTER VR';
+  let session = null;
+  btn.onclick = async () => {
+    if (session) { session.end(); return; }
+    try {
+      session = await navigator.xr.requestSession(mode, {
+        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+      });
+      session.addEventListener('end', () => { session = null; btn.textContent = 'ENTER VR'; });
+      await renderer.xr.setSession(session);
+      btn.textContent = 'EXIT VR';
+    } catch (e) {
+      console.warn('XR session failed', e);
+      btn.textContent = 'VR FAILED - TAP TO RETRY';
+      session = null;
+    }
+  };
+}
+setupXRButton();
+
+const scene = new THREE.Scene();
+
+// image-based lighting from a procedural studio room (three.js RoomEnvironment)
+// - gives PBR materials real reflections without any HDR asset
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const ENV_INTENSITY = 0.35;   // r160: env strength is per-material
+
+// procedural daytime sky (Preetham model via the three.js Sky addon),
+// with the sun placed where the shadow-casting light is
+const SUN_DIR = new THREE.Vector3(6, 12, 4).normalize();
+const sky = new Sky();
+sky.scale.setScalar(4000);
+sky.material.uniforms.turbidity.value = 4;
+sky.material.uniforms.rayleigh.value = 1.2;
+sky.material.uniforms.mieCoefficient.value = 0.004;
+sky.material.uniforms.mieDirectionalG.value = 0.85;
+sky.material.uniforms.sunPosition.value.copy(SUN_DIR);
+scene.add(sky);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 500);
+
+// player rig: dolly holds the camera so VR teleport/turn move the whole player
+const dolly = new THREE.Group();
+dolly.add(camera);
+scene.add(dolly);
+camera.position.set(0, EYE, 0);
+let spawnEyeY = EYE;   // per-plan eye height (measured tours override 1.6m)
+const spawnPose = { x: 0, z: 0, rot: 0 };
+let tourStops = [];    // world-space waypoints for the automated walkthrough
+let planOpeningsWorld = []; // door/window base segments in world XZ
+let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
+let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
+let currentPlanSource = null;               // plan.json "source" block, for notes
+
+// ---------------------------------------------------------------- lights
+scene.add(new THREE.HemisphereLight(0xfff4e2, 0x63594b, 0.75));
+// a warm lamp that follows the player; lit only when the ceiling is on,
+// since the ceiling blocks the sun
+const lamp = new THREE.PointLight(0xffe8c4, 0, 9);
+lamp.position.set(0, 2.2, 0);
+dolly.add(lamp);
+
+const sun = new THREE.DirectionalLight(0xfff1d9, 1.1);
+sun.position.set(6, 12, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const sc = sun.shadow.camera;
+sc.near = 0.5; sc.far = 60; sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom = -20;
+scene.add(sun);
+
+// ---------------------------------------------------------------- materials
+// Everything is generated at runtime - no image assets. The palette is a
+// warm "new-England farmhouse" interior: eggshell walls, semi-gloss white
+// trim, oak plank floor, stainless appliances, porcelain plumbing.
+
+function makeWoodTexture() {
+  // oak planks: rows of staggered boards with tone variation + grain lines
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const ROWS = 8, RH = c.height / ROWS;
+  for (let r = 0; r < ROWS; r++) {
+    let x = -Math.floor(Math.random() * 200);
+    while (x < c.width) {
+      const len = 180 + Math.random() * 220;
+      const light = 34 + Math.random() * 12;
+      g.fillStyle = `hsl(${24 + Math.random() * 8}, ${38 + Math.random() * 10}%, ${light}%)`;
+      g.fillRect(x, r * RH, len, RH);
+      // grain: faint darker streaks along the board
+      g.strokeStyle = `hsla(${20 + Math.random() * 8}, 45%, ${light - 12}%, 0.25)`;
+      g.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const gy = r * RH + 4 + Math.random() * (RH - 8);
+        g.beginPath();
+        g.moveTo(x + 2, gy);
+        g.bezierCurveTo(x + len * 0.3, gy + 2, x + len * 0.6, gy - 2, x + len - 2, gy);
+        g.stroke();
+      }
+      // butt joint between boards
+      g.fillStyle = 'rgba(40, 24, 12, 0.55)';
+      g.fillRect(x + len - 1, r * RH, 2, RH);
+      x += len;
+    }
+    // seam between rows
+    g.fillStyle = 'rgba(40, 24, 12, 0.6)';
+    g.fillRect(0, r * RH, c.width, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+const allMats = [];   // every material, for AR ghost mode
+function std(params) {
+  const m = new THREE.MeshStandardMaterial({ envMapIntensity: ENV_INTENSITY, ...params });
+  allMats.push(m);
+  return m;
+}
+
+function makeGrassTexture() {
+  // mottled lawn: layered green speckle noise
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7a9455';
+  g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 9000; i++) {
+    g.fillStyle = `hsla(${85 + Math.random() * 32}, ${32 + Math.random() * 24}%, ${38 + Math.random() * 22}%, 0.5)`;
+    g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(60, 60);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeTileTexture() {
+  // 12" ceramic tiles with grout, 4x4 per canvas (= one 4 ft repeat)
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const T = 64;
+  for (let ty = 0; ty < 4; ty++) {
+    for (let tx = 0; tx < 4; tx++) {
+      g.fillStyle = `hsl(${40 + Math.random() * 8}, ${8 + Math.random() * 6}%, ${82 + Math.random() * 8}%)`;
+      g.fillRect(tx * T + 2, ty * T + 2, T - 4, T - 4);
+    }
+  }
+  g.strokeStyle = 'rgba(120, 115, 105, 0.9)';
+  g.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) {
+    g.beginPath(); g.moveTo(i * T, 0); g.lineTo(i * T, 256); g.stroke();
+    g.beginPath(); g.moveTo(0, i * T); g.lineTo(256, i * T); g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+function makeStippleTexture() {
+  // fine drywall stipple for ceilings - kills the dead-flat look
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f2efe8';
+  g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = `hsla(45, 10%, ${86 + Math.random() * 10}%, 0.6)`;
+    g.fillRect(Math.random() * 128, Math.random() * 128, 1.5, 1.5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(24, 24);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeSidingTexture() {
+  // horizontal clapboard: rows with a shadow line under each lap
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const ROW = 32;
+  for (let y = 0; y < 256; y += ROW) {
+    g.fillStyle = `hsl(210, 12%, ${78 + Math.random() * 5}%)`;
+    g.fillRect(0, y, 256, ROW);
+    const grad = g.createLinearGradient(0, y + ROW - 7, 0, y + ROW);
+    grad.addColorStop(0, 'rgba(40,50,60,0)');
+    grad.addColorStop(1, 'rgba(40,50,60,0.35)');
+    g.fillStyle = grad;
+    g.fillRect(0, y + ROW - 7, 256, 7);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const floorTex = makeWoodTexture();
+// per-room overlays get UV = position in meters (ShapeGeometry), so their
+// texture repeats are set to world scale here, independent of the slab's
+const roomWoodTex = makeWoodTexture();
+roomWoodTex.repeat.set(1 / 1.22, 1 / 1.22);
+const roomTileTex = makeTileTexture();
+roomTileTex.repeat.set(1 / 1.22, 1 / 1.22);
+const wallMat = std({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
+const trimMat = std({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
+const floorMat = std({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
+const slabMat = std({ color: 0xcfccc3, roughness: 0.92 });   // concrete under/around rooms
+const roomWoodMat = std({ map: roomWoodTex, color: 0xd8b98e, roughness: 0.62 });
+const roomTileMat = std({ map: roomTileTex, color: 0xf1efe9, roughness: 0.28 });
+const ceilMat = std({ map: makeStippleTexture(), color: 0xf6f3ec, roughness: 0.95, side: THREE.DoubleSide });
+const sidingTex = makeSidingTexture();
+sidingTex.repeat.set(1, 2);   // ~15cm clapboard rows on a full-height wall
+const sidingMat = std({ map: sidingTex, color: 0xdfe4e8, roughness: 0.8 });
+const garageDoorMat = std({ color: 0xf0eee8, roughness: 0.5 });
+const lightDiskMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0xfff3dc, emissiveIntensity: 2.2, roughness: 0.4,
+});
+const glassMat = new THREE.MeshStandardMaterial({
+  color: 0x8fb6c6, roughness: 0.03, metalness: 0.35,
+  transparent: true, opacity: 0.32, envMapIntensity: 2.4, side: THREE.DoubleSide,
+});
+const doorMat = std({ color: 0xf7f5ef, roughness: 0.4 });
+
+// fixture stand-ins keyed by what the block name says they are
+const applianceMat = std({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.75 });
+const applianceDarkMat = std({ color: 0x2b2f33, roughness: 0.35, metalness: 0.4 });
+const porcelainMat = std({ color: 0xf4f6f6, roughness: 0.18, metalness: 0.0 });
+const counterMat = std({ color: 0xe8e4da, roughness: 0.35, metalness: 0.0 });
+const fabricMat = std({ color: 0x8d7f6d, roughness: 0.95, metalness: 0.0 });
+const woodMat = std({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
+const neutralMat = std({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
+
+// lawn the house sits on
+const grassTex = makeGrassTexture();
+grassTex.repeat.set(160, 160);
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(240, 48).rotateX(-Math.PI / 2),
+  std({ map: grassTex, color: 0xa8bd85, roughness: 1.0 })
+);
+ground.position.y = -0.025;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// haze toward the horizon so the lawn fades out instead of ending at a rim
+scene.fog = new THREE.Fog(0xdde6ec, 55, 230);
+
+const FIXTURE_MATS = [
+  [/REF|WASHER|DRYER|RANGE|STOVE|CKTOP|OVEN|DW/, applianceMat],
+  [/TOILET|WC|TUB|BATH|SINK|LAV|SHOWER|VANITY/, porcelainMat],
+  [/SOFA|COUCH|CHAIR|BED/, fabricMat],
+  [/TABLE|DESK|CAB|CASE|KIT|ISLAND|COUNTER/, woodMat],
+];
+function fixtureMaterial(name) {
+  const base = name.split('$').pop().toUpperCase();
+  for (const [re, mat] of FIXTURE_MATS) if (re.test(base)) return mat;
+  return neutralMat;
+}
+
+// Build a compound stand-in for a fixture from primitives - recognizable
+// silhouettes (tank + bowl, drum door, burners, counter + basin) rather
+// than featureless boxes. All local: floor at y=0, front toward +z.
+function buildFixture(f) {
+  const w = f.size[0] * IN2M, d = f.size[1] * IN2M, h = (f.height || 30) * IN2M;
+  const name = (f.name || '').split('$').pop().toUpperCase();
+  const g = new THREE.Group();
+  const add = (geo, mat, x, y, z) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  const rbox = (bw, bh, bd, mat, x, y, z, r = 0.02) =>
+    add(new RoundedBoxGeometry(bw, bh, bd, 3, Math.min(r, bw / 3, bh / 3, bd / 3)), mat, x, y, z);
+
+  if (/TOILET|WC/.test(name)) {
+    const tankD = d * 0.3;
+    rbox(w * 0.62, h * 1.9, tankD, porcelainMat, 0, h * 0.95, -(d - tankD) / 2);   // tank
+    const bowl = add(new THREE.CylinderGeometry(w * 0.31, w * 0.26, h * 0.55, 20),
+      porcelainMat, 0, h * 0.7, d * 0.12);
+    bowl.scale.z = (d * 0.7) / (w * 0.62);                                          // oval bowl
+    rbox(w * 0.6, h * 0.12, d * 0.62, porcelainMat, 0, h * 0.99, d * 0.08, 0.015);  // seat
+  } else if (/TUB|BATH/.test(name)) {
+    rbox(w, h, d, porcelainMat, 0, h / 2, 0, 0.04);
+    add(new THREE.BoxGeometry(w * 0.78, h * 0.25, d * 0.72),
+      std({ color: 0xd9e4e8, roughness: 0.15, envMapIntensity: ENV_INTENSITY }),
+      0, h * 0.92, 0);                                                              // basin inset
+  } else if (/WASHER|DRYER/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.015);
+    const door = add(new THREE.CylinderGeometry(Math.min(w, h) * 0.32,
+      Math.min(w, h) * 0.32, 0.02, 24), applianceDarkMat, 0, h * 0.55, d / 2);
+    door.rotation.x = Math.PI / 2;
+    rbox(w * 0.9, h * 0.08, 0.02, applianceDarkMat, 0, h * 0.92, d / 2);            // control panel
+  } else if (/RANGE|STOVE|CKTOP|OVEN/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.015);
+    for (const [bx, bz] of [[-0.25, -0.22], [0.25, -0.22], [-0.25, 0.22], [0.25, 0.22]]) {
+      const b = add(new THREE.CylinderGeometry(w * 0.12, w * 0.12, 0.012, 18),
+        applianceDarkMat, bx * w, h + 0.006, bz * d);
+    }
+  } else if (/REF/.test(name)) {
+    rbox(w, h, d, applianceMat, 0, h / 2, 0, 0.02);
+    rbox(0.015, h * 0.94, 0.015, applianceDarkMat, 0, h / 2, d / 2);                // door seam
+    rbox(0.02, h * 0.25, 0.05, applianceDarkMat, -w * 0.28, h * 0.55, d / 2);       // handle
+  } else if (/SINK|LAV|KIT|VANITY|ISLAND|COUNTER|CAB|CASE/.test(name)) {
+    rbox(w, h * 0.92, d, woodMat, 0, h * 0.46, 0, 0.01);                            // cabinet
+    rbox(w + 0.03, h * 0.06, d + 0.03, counterMat, 0, h * 0.97, 0, 0.008);          // countertop
+    if (/SINK|LAV|KIT/.test(name)) {
+      const basins = /DBL/.test(name) ? [-0.22, 0.22] : [0];
+      for (const bx of basins)
+        add(new THREE.BoxGeometry(w * (basins.length > 1 ? 0.34 : 0.55), 0.02, d * 0.55),
+          applianceDarkMat, bx * w, h * 1.001, 0);
+    }
+  } else if (/SOFA|COUCH/.test(name)) {
+    rbox(w, h * 0.45, d, fabricMat, 0, h * 0.225, 0, 0.04);                         // base
+    rbox(w, h * 0.55, d * 0.25, fabricMat, 0, h * 0.7, -d * 0.375, 0.04);           // back
+    rbox(w * 0.12, h * 0.65, d, fabricMat, -w * 0.44, h * 0.32, 0, 0.03);           // arms
+    rbox(w * 0.12, h * 0.65, d, fabricMat, w * 0.44, h * 0.32, 0, 0.03);
+  } else if (/BED/.test(name)) {
+    rbox(w, h * 0.55, d, woodMat, 0, h * 0.27, 0, 0.02);                            // frame
+    rbox(w * 0.96, h * 0.35, d * 0.96, std({ color: 0xf1efe8, roughness: 0.9, envMapIntensity: ENV_INTENSITY }),
+      0, h * 0.72, 0, 0.05);                                                        // mattress
+  } else if (/TABLE|DESK/.test(name)) {
+    rbox(w, 0.035, d, woodMat, 0, h - 0.018, 0, 0.008);                             // top
+    for (const [lx, lz] of [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]])
+      add(new THREE.BoxGeometry(0.05, h - 0.035, 0.05), woodMat, lx * w, (h - 0.035) / 2, lz * d);
+  } else {
+    rbox(w, h, d, fixtureMaterial(f.name || ''), 0, h / 2, 0, 0.02);
+  }
+  return g;
+}
+
+let planGroup = null;   // holds all generated geometry
+let ceiling = null;
+let fixtureGroup = null;
+let planOverlay = null;      // 2D plan linework, shown in map view
+let underlayMesh = null;     // raster of the source sheet under the model
+let planSizeM = { w: 10, h: 10 };
+let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
+const layerState = { geom: true, lines: false, sheet: false };
+let doorLeaves = [];    // grabbable hinged doors: {pivot, theta0, rotSign, len, head, open}
+let laserTargets = [];  // big drawable surfaces only - keeps the laser
+                        // raycast cheap on Quest (no per-trim-board tests)
+let collisionSegs = []; // {ax, az, bx, bz, hw, top} solid wall spans, world XZ
+let fixtureSegs = [];   // fixture capsules; collide only while fixtures shown
+let stairSteps = [];    // walkable riser tops: {cx,cz,ux,uz,kx,kz,hl,hd,top}
+let roomPolysWorld = []; // room polygons in world XZ, for interior tests
+let footprintWorld = null; // building outline in world XZ, or null
+
+// ray-cast point-in-polygon on the XZ plane
+function pointInPoly(x, z, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if ((zi > z) !== (zj > z) &&
+        x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function insideAnyRoom(x, z) {
+  for (const poly of roomPolysWorld) if (pointInPoly(x, z, poly)) return true;
+  return false;
+}
+
+function outsideBuilding(x, z) {
+  return footprintWorld ? !pointInPoly(x, z, footprintWorld) : false;
+}
+
+// ---------------------------------------------------------------- geometry
+function clearPlan() {
+  if (planGroup) {
+    scene.remove(planGroup);
+    planGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  }
+  planGroup = null; ceiling = null; fixtureGroup = null;
+  roomPolysWorld = [];
+  footprintWorld = null;
+  planOpeningsWorld = [];
+}
+
+// Axis-aligned box placed in wall-local terms: centered at `along` on the
+// centerline, pushed `out` along the wall normal, vertical span via yc/h.
+function boxOnWall(group, worldStart, dir, angle, along, len, yc, h, out, thick, mat) {
+  if (len <= 1e-4 || h <= 1e-4) return;
+  const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, h, thick), mat);
+  mesh.position.set(
+    worldStart.x + dir.x * along + nrm.x * out,
+    yc,
+    worldStart.z + dir.z * along + nrm.z * out
+  );
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+}
+
+// Dress an opening the way a finished house would: flat casing boards around
+// it on both faces, a glass pane + frame for windows, and a door leaf parked
+// open flat against the wall for doors.
+function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallLen) {
+  const CW = 3.5 * IN2M;       // casing width
+  const CT = 0.6 * IN2M;       // casing proudness
+  const mid = (lo + hi) / 2, w = hi - lo;
+  const head = Math.min(op.head, H);
+  const sill = op.sill;
+  const sideBase = sill > 0 ? sill - CW : 0;
+
+  for (const side of [1, -1]) {
+    if (!faceIsInterior(worldStart, dir, angle, lo, hi, depth, side)) continue;
+    const out = side * (depth / 2 + CT / 2);
+    // side casings
+    boxOnWall(group, worldStart, dir, angle, lo - CW / 2, CW,
+      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi + CW / 2, CW,
+      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+    // head casing
+    boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW,
+      head + CW / 2, CW, out, CT, trimMat);
+    if (sill > 0) {
+      // window stool: a small shelf protruding past the casings
+      boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW + 1 * IN2M,
+        sill - 0.4 * IN2M, 0.8 * IN2M, side * (depth / 2 + 0.75 * IN2M), 1.5 * IN2M, trimMat);
+    }
+  }
+
+  if (op.type === 'window') {
+    // frame lining the reveal + a center pane of glass
+    const FT = 1.5 * IN2M;
+    boxOnWall(group, worldStart, dir, angle, mid, w, sill + FT / 2, FT, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - FT / 2, FT, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, (sill + head) / 2, head - sill, 0, depth * 0.6, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, (sill + head) / 2, head - sill, 0, depth * 0.6, trimMat);
+    if (w > 30 * IN2M) {  // center mullion on wide windows
+      boxOnWall(group, worldStart, dir, angle, mid, 1 * IN2M, (sill + head) / 2, head - sill, 0, depth * 0.4, trimMat);
+    }
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(w - 2 * FT, head - sill - 2 * FT, 0.25 * IN2M), glassMat);
+    glass.position.set(
+      worldStart.x + dir.x * mid, (sill + head) / 2, worldStart.z + dir.z * mid);
+    glass.rotation.y = angle;
+    group.add(glass);
+  }
+
+  // jamb boards lining the reveal, so the cut faces of the wall never show
+  if (op.type === 'door' || (op.type === 'opening' && w < 90 * IN2M)) {
+    const JT = 0.75 * IN2M;
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - JT / 2, JT, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
+  }
+
+  if (op.type === 'opening' && w >= 90 * IN2M && openingIsExterior(worldStart, dir, angle, lo, hi, depth)) {
+    // wide EXTERIOR opening: fill with a paneled garage door. Wide interior
+    // pass-throughs stay open.
+    boxOnWall(group, worldStart, dir, angle, mid, w, head / 2, head, 0, 1.5 * IN2M, garageDoorMat);
+    for (let i = 1; i < 4; i++) {   // panel seams
+      boxOnWall(group, worldStart, dir, angle, mid, w, head * i / 4, 0.6 * IN2M,
+        0.8 * IN2M, 0.4 * IN2M, std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY }));
+    }
+  }
+
+  if (op.type === 'door' && w >= 54 * IN2M) {
+    // wide doors are sliders (patio or interior French): two glass panes
+    // in a thin frame, one per track, no swinging leaf
+    const FT = 1.2 * IN2M;
+    const midY = (sill + head) / 2, glassH = head - sill - 2 * FT;
+    boxOnWall(group, worldStart, dir, angle, mid, w, sill + FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, head - FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, 2 * IN2M, midY, glassH, 0, 2.4 * IN2M, trimMat);
+    const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+    for (const [c, off] of [[mid - w / 4, 0.5 * IN2M], [mid + w / 4, -0.5 * IN2M]]) {
+      const pane = new THREE.Mesh(
+        new THREE.BoxGeometry(w / 2 - 2 * FT, glassH - 1 * IN2M, 0.25 * IN2M), glassMat);
+      pane.position.set(
+        worldStart.x + dir.x * c + nrm.x * off,
+        midY,
+        worldStart.z + dir.z * c + nrm.z * off);
+      pane.rotation.y = angle;
+      group.add(pane);
+    }
+  } else if (op.type === 'door') {
+    // a REAL hinged leaf: pivoted on the plan's hinge jamb, opened 90deg
+    // toward the plan's swing side (exactly the arc drawn on the sheet),
+    // and grabbable in VR - squeeze the grip near a door to swing it
+    const LT = 1.75 * IN2M;
+    const hingeLo = (op.hinge || -1) < 0;   // -1: jamb toward wall start
+    const hingeA = hingeLo ? lo : hi;
+    // plan swing +1 opens toward the plan normal, which maps to world
+    // -nrm here (the plan's y axis flips into world -z)
+    let s = op.swing;
+    if (!s) s = faceIsInterior(worldStart, dir, angle, lo, hi, depth, -1) ? 1 : -1;
+    const theta0 = angle + (hingeLo ? 0 : Math.PI);       // closed pose
+    const rotSign = hingeLo ? s : -s;                     // opening sense
+    const lw = w - 0.02;
+    const pivot = new THREE.Group();
+    pivot.position.set(
+      worldStart.x + dir.x * hingeA, 0, worldStart.z + dir.z * hingeA);
+    const leaf = new THREE.Mesh(
+      new THREE.BoxGeometry(lw, head - 0.02, LT), doorMat);
+    leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
+    leaf.castShadow = leaf.receiveShadow = true;
+    pivot.add(leaf);
+    laserTargets.push(leaf);
+    // recessed panels + knobs on both faces so it reads as a door
+    const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
+    for (const zs of [1, -1]) {
+      for (const [yc, yh] of [[head * 0.7, head * 0.35], [head * 0.25, head * 0.28]]) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(lw * 0.7, yh, 0.01), inset);
+        p.position.set(0.01 + lw / 2, yc, zs * (LT / 2 + 0.004));
+        pivot.add(p);
+      }
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), applianceMat);
+      knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
+      pivot.add(knob);
+    }
+    // sheet-drawn position (90deg) unless the plan says the door stays
+    // closed (e.g. it leads somewhere not modeled yet)
+    const open0 = op.shut ? 0 : Math.PI / 2;
+    pivot.rotation.y = theta0 + rotSign * open0;
+    group.add(pivot);
+    doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
+  }
+}
+
+// Trim cross-section profiles, in inches, as [out-from-wall-face, up] pairs.
+// Extruded along each wall piece to make real molding - no assets.
+const BASEBOARD_PROFILE = [
+  [0, 0], [0.7, 0], [0.7, 4.4], [0.35, 5.5], [0, 5.5],
+];
+const CROWN_PROFILE = [           // simple cove: wall at bottom, ceiling at top
+  [0, 0], [0.3, 0.7], [0.9, 2.9], [0.9, 3.5], [0, 3.5],
+];
+const CROWN_H = 3.5 * IN2M;
+
+// Extrude a trim profile along [a0,a1] on BOTH faces of a wall piece.
+// baseY: world height of the profile's y=0 line.
+// Does this opening face the outdoors on either side?
+function openingIsExterior(worldStart, dir, angle, lo, hi, depth) {
+  if (!footprintWorld) return true;   // no footprint data: assume exterior
+  const mid = (lo + hi) / 2;
+  for (const side of [1, -1]) {
+    const off = side * (depth / 2 + 0.15);
+    const x = worldStart.x + dir.x * mid + Math.sin(angle) * off;
+    const z = worldStart.z + dir.z * mid + Math.cos(angle) * off;
+    if (outsideBuilding(x, z)) return true;
+  }
+  return false;
+}
+
+// Is this face of a wall span inside a room? Sample the face midpoint just
+// off the wall surface. With no room data, treat every face as interior.
+function faceIsInterior(worldStart, dir, angle, a0, a1, depth, side) {
+  if (!roomPolysWorld.length) return true;
+  const mid = (a0 + a1) / 2;
+  const off = side * (depth / 2 + 0.06);
+  const x = worldStart.x + dir.x * mid + Math.sin(angle) * off;
+  const z = worldStart.z + dir.z * mid + Math.cos(angle) * off;
+  return insideAnyRoom(x, z);
+}
+
+function addTrim(group, worldStart, dir, angle, a0, a1, depth, baseY, profile) {
+  const len = a1 - a0;
+  if (len <= 0.02) return;
+  for (const side of [1, -1]) {
+    if (!faceIsInterior(worldStart, dir, angle, a0, a1, depth, side)) continue;
+    const pts = profile.map(([px, py]) =>
+      new THREE.Vector2(side * (depth / 2 + px * IN2M), py * IN2M));
+    if (side < 0) pts.reverse();          // keep winding CCW so normals face out
+    const shape = new THREE.Shape(pts);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
+    geo.rotateY(-Math.PI / 2);            // extrusion runs along the wall
+    const mesh = new THREE.Mesh(geo, trimMat);
+    mesh.position.set(
+      worldStart.x + dir.x * a1,
+      baseY,
+      worldStart.z + dir.z * a1
+    );
+    mesh.rotation.y = angle;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+}
+
+// Build a box piece in wall-local terms and add to `group`.
+// worldStart: THREE.Vector3 at the wall's start; dir: unit XZ direction;
+// a0,a1: along-wall extent (m); zb,zt: vertical extent (m); depth: thickness (m).
+// wallH: full wall height (m) - pieces touching floor get baseboard, pieces
+// reaching the top get crown molding, so trim runs under windows and across
+// door lintels automatically.
+function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
+  const len = a1 - a0;
+  if (len <= 1e-4 || zt - zb <= 1e-4) return;
+  const geo = new THREE.BoxGeometry(len, zt - zb, depth);
+  const mesh = new THREE.Mesh(geo, wallMat);
+  const along = (a0 + a1) / 2;
+  mesh.position.set(
+    worldStart.x + dir.x * along,
+    (zb + zt) / 2,
+    worldStart.z + dir.z * along
+  );
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  laserTargets.push(mesh);
+
+  if (zb === 0)
+    addTrim(group, worldStart, dir, angle, a0, a1, depth, 0, BASEBOARD_PROFILE);
+  if (wallH && zt >= wallH - 1e-4 && wallH > 4 * CROWN_H)
+    addTrim(group, worldStart, dir, angle, a0, a1, depth, wallH - CROWN_H, CROWN_PROFILE);
+
+  // exterior faces (outside the footprint, not in any room) get clapboard
+  // siding as a thin shell over the paint
+  if (footprintWorld) {
+    for (const side of [1, -1]) {
+      const midA = (a0 + a1) / 2;
+      const off = side * (depth / 2 + 0.06);
+      const sx = worldStart.x + dir.x * midA + Math.sin(angle) * off;
+      const sz = worldStart.z + dir.z * midA + Math.cos(angle) * off;
+      if (outsideBuilding(sx, sz) && !insideAnyRoom(sx, sz)) {
+        const shell = new THREE.Mesh(
+          new THREE.BoxGeometry(len, zt - zb, 0.012), sidingMat);
+        const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+        const out = side * (depth / 2 + 0.007);
+        shell.position.set(
+          worldStart.x + dir.x * midA + nrm.x * out,
+          (zb + zt) / 2,
+          worldStart.z + dir.z * midA + nrm.z * out);
+        shell.rotation.y = angle;
+        shell.castShadow = shell.receiveShadow = true;
+        group.add(shell);
+      }
+    }
+  }
+}
+
+function buildPlan(plan) {
+  clearPlan();
+  collisionSegs = [];
+  fixtureSegs = [];
+  stairSteps = [];
+  planWallsWorld = [];
+  doorLeaves = [];
+  laserTargets = [];
+  const group = new THREE.Group();
+  const walls = plan.walls || [];
+  const openings = plan.openings || [];
+
+  // bounds (inches) so we can recentre the plan on the origin
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const w of walls) {
+    for (const p of [w.start, w.end]) {
+      minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+      minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+    }
+  }
+  if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 1; }
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+  // plan (x,y) inches -> world (x, -y) metres, recentred
+  const toWorld = (px, py) => new THREE.Vector3((px - cx) * IN2M, 0, -(py - cy) * IN2M);
+  planOffset = { cx, cy };
+
+  // room polygons (from the parser) drive interior-only trim, per-room
+  // floors, and ceiling lights; everything degrades gracefully without them
+  const rooms = plan.rooms || [];
+  roomPolysWorld = rooms.map(r =>
+    r.polygon.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M]));
+  footprintWorld = (plan.footprint && plan.footprint.length >= 4)
+    ? plan.footprint.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M])
+    : null;
+
+  // group openings by wall
+  const byWall = new Map();
+  openings.forEach(o => {
+    if (!byWall.has(o.wall_index)) byWall.set(o.wall_index, []);
+    byWall.get(o.wall_index).push(o);
+  });
+
+  // 2D plan linework for the top-down map view: wall faces plus opening
+  // spans with jamb ticks, colored by type, so the built geometry can be
+  // compared against the source drawing at a glance
+  planSizeM = { w: Math.max(1, (maxX - minX) * IN2M),
+                h: Math.max(1, (maxY - minY) * IN2M) };
+  {
+    const pos = [], col = [];
+    const C = { wall: [1, 0.15, 0.6], door: [1, 0.25, 0.25],
+                window: [0.3, 0.55, 1], opening: [1, 0.65, 0.1] };
+    const push = (ax, az, bx, bz, c) => {
+      pos.push(ax, 0.06, az, bx, 0.06, bz);
+      col.push(...c, ...c);
+    };
+    walls.forEach((w, wi) => {
+      const a = toWorld(w.start[0], w.start[1]);
+      const b = toWorld(w.end[0], w.end[1]);
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const L = Math.hypot(dx, dz) || 1;
+      const nx = -dz / L * w.thickness * IN2M / 2;
+      const nz = dx / L * w.thickness * IN2M / 2;
+      push(a.x + nx, a.z + nz, b.x + nx, b.z + nz, C.wall);
+      push(a.x - nx, a.z - nz, b.x - nx, b.z - nz, C.wall);
+      push(a.x + nx, a.z + nz, a.x - nx, a.z - nz, C.wall);
+      push(b.x + nx, b.z + nz, b.x - nx, b.z - nz, C.wall);
+      for (const o of (byWall.get(wi) || [])) {
+        const ux = dx / L, uz = dz / L;
+        const half = o.width * IN2M / 2;
+        const mx = a.x + dx * o.position, mz = a.z + dz * o.position;
+        const c = C[o.type] || C.opening;
+        push(mx - ux * half, mz - uz * half,
+             mx + ux * half, mz + uz * half, c);
+        for (const s of [-1, 1]) {          // jamb ticks across the wall
+          const jx = mx + ux * half * s, jz = mz + uz * half * s;
+          push(jx + nx * 1.8, jz + nz * 1.8, jx - nx * 1.8, jz - nz * 1.8, c);
+        }
+        if (o.type === 'door' && o.hinge) { // swing arc + open leaf
+          const hx = mx + ux * half * o.hinge;
+          const hz = mz + uz * half * o.hinge;
+          let base = Math.atan2(-uz, ux);   // plan-space angle (y-up)
+          if (o.hinge > 0) base += Math.PI;
+          const sgn = o.swing * (o.hinge < 0 ? 1 : -1);
+          const wm = Math.min(o.leaf || o.width, o.width) * IN2M;
+          let px = hx + wm * Math.cos(base), pz = hz - wm * Math.sin(base);
+          for (let i = 1; i <= 12; i++) {
+            const a2 = base + sgn * (i / 12) * Math.PI / 2;
+            const qx = hx + wm * Math.cos(a2), qz = hz - wm * Math.sin(a2);
+            push(px, pz, qx, qz, C.door);
+            px = qx; pz = qz;
+          }
+          push(hx, hz, px, pz, C.door);     // the leaf, fully open
+        }
+      }
+    });
+    const S = [0, 0.75, 0.85];              // stair runs: outline + treads
+    for (const st of (plan.stairs || [])) {
+      const pw = st.polygon.map(([px, py]) => toWorld(px, py));
+      for (let i = 0; i < pw.length; i++) {
+        const q = pw[(i + 1) % pw.length];
+        push(pw[i].x, pw[i].z, q.x, q.z, S);
+      }
+      for (const t of st.treads) {
+        const a2 = toWorld(t[0][0], t[0][1]);
+        const b2 = toWorld(t[1][0], t[1][1]);
+        push(a2.x, a2.z, b2.x, b2.z, S);
+      }
+      if (st.direction) {               // walk-line arrow
+        let mx = 0, mz = 0;
+        for (const q of pw) { mx += q.x / pw.length; mz += q.z / pw.length; }
+        const dx = st.direction[0], dz = -st.direction[1];
+        const L2 = Math.max(
+          Math.abs(pw[2].x - pw[0].x), Math.abs(pw[2].z - pw[0].z)) / 2;
+        const tx = mx + dx * L2, tz = mz + dz * L2;
+        push(mx - dx * L2, mz - dz * L2, tx, tz, S);
+        for (const sgn of [1, -1]) {
+          const hx = -dz * sgn - dx, hz = dx * sgn - dz;
+          push(tx, tz, tx + hx * 0.18, tz + hz * 0.18, S);
+        }
+      }
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    planOverlay = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+      vertexColors: true, depthTest: false, transparent: true }));
+    planOverlay.renderOrder = 990;
+    planOverlay.visible = false;
+    group.add(planOverlay);
+  }
+
+  // stairs as ascending stepped geometry: each tread becomes a riser
+  // box climbing along the run (toward the walk-line arrow when the plot
+  // has one). A lone flight still caps at hip height, but when a DOWN
+  // run shares the well (the drafter's switchback pair), the flight now
+  // goes somewhere: full height to a landing, a return flight climbing
+  // back over the down-run, and a hole cut in the roof above - no more
+  // stairs dead-ending under a closed ceiling.
+  const roofHoles = [];   // world rects the roof must open over
+  const stripsAdjacent = (pa, pb) => {
+    const bb = p => {
+      const xs = p.map(q => q[0]), ys = p.map(q => q[1]);
+      return { x0: Math.min(...xs), x1: Math.max(...xs),
+               y0: Math.min(...ys), y1: Math.max(...ys) };
+    };
+    const a = bb(pa), b = bb(pb);
+    const ovX = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    const ovY = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+    const gapX = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
+    const gapY = Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1);
+    return (ovX > 30 && gapY > -6 && gapY < 24) ||
+           (ovY > 30 && gapX > -6 && gapX < 24);
+  };
+  if (plan.stairs && plan.stairs.length) {
+    const stMat = std({ color: 0xb9a988, roughness: 0.85,
+                        envMapIntensity: ENV_INTENSITY });
+    const wallHm = ((walls[0] && walls[0].height) || 96) * IN2M;
+    const riserM = 0.17, capM = 1.1;
+    const wellMat = std({ color: 0x14161c, roughness: 1.0,
+                          envMapIntensity: 0 });
+    const railMat = std({ color: 0xcfc8ba, roughness: 0.6,
+                          envMapIntensity: ENV_INTENSITY });
+    for (const st of plan.stairs) {
+      if (st.down) {
+        // a DOWN flight can't descend through the slab; render the well:
+        // a dark pit at floor level with a guard rail around it, which
+        // reads instantly as "stairs going down" without a basement
+        const pw = st.polygon.map(([px, py]) => toWorld(px, py));
+        let cx0 = Math.min(...pw.map(q => q.x)), cx1 = Math.max(...pw.map(q => q.x));
+        let cz0 = Math.min(...pw.map(q => q.z)), cz1 = Math.max(...pw.map(q => q.z));
+        const wellW = cx1 - cx0, wellD = cz1 - cz0;
+        const well = new THREE.Mesh(
+          new THREE.BoxGeometry(wellW, 0.02, wellD), wellMat);
+        well.position.set((cx0 + cx1) / 2, 0.012, (cz0 + cz1) / 2);
+        group.add(well);
+        laserTargets.push(well);
+        // first three treads sink into the dark before it swallows them
+        const dirW = st.direction
+          ? [st.direction[0], -st.direction[1]]
+          : [wellW >= wellD ? 1 : 0, wellW >= wellD ? 0 : 1];
+        for (let i = 0; i < 3; i++) {
+          const t = st.treads[Math.min(i, st.treads.length - 1)];
+          const a2 = toWorld(t[0][0], t[0][1]);
+          const b2 = toWorld(t[1][0], t[1][1]);
+          const len = Math.hypot(b2.x - a2.x, b2.z - a2.z);
+          if (len < 0.2) continue;
+          const dep = 0.26;
+          const m = new THREE.Mesh(
+            new THREE.BoxGeometry(len, 0.02, dep), stMat);
+          m.position.set(
+            (a2.x + b2.x) / 2 + dirW[0] * dep * i,
+            -0.001 - i * 0.004,
+            (a2.z + b2.z) / 2 + dirW[1] * dep * i);
+          m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
+          group.add(m);
+        }
+        // guard rail on the long sides + far end
+        const railH = 0.92;
+        const mkRail = (x, z, len, rotY) => {
+          const r = new THREE.Mesh(
+            new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
+          r.position.set(x, railH, z);
+          r.rotation.y = rotY;
+          group.add(r);
+          const p1 = new THREE.Mesh(
+            new THREE.BoxGeometry(0.04, railH, 0.04), railMat);
+          p1.position.set(x - Math.cos(rotY) * len / 2, railH / 2,
+                          z + Math.sin(rotY) * len / 2);
+          group.add(p1);
+          const p2 = p1.clone();
+          p2.position.set(x + Math.cos(rotY) * len / 2, railH / 2,
+                          z - Math.sin(rotY) * len / 2);
+          group.add(p2);
+          collisionSegs.push({    // guard rails stop the player too
+            ax: x - Math.cos(rotY) * len / 2, az: z + Math.sin(rotY) * len / 2,
+            bx: x + Math.cos(rotY) * len / 2, bz: z - Math.sin(rotY) * len / 2,
+            hw: 0.06, top: railH,
+          });
+        };
+        if (wellW >= wellD) {           // run along x: rails on z sides
+          mkRail((cx0 + cx1) / 2, cz0 + 0.03, wellW, 0);
+          mkRail((cx0 + cx1) / 2, cz1 - 0.03, wellW, 0);
+        } else {
+          mkRail(cx0 + 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
+          mkRail(cx1 - 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
+        }
+        continue;
+      }
+      const treads = st.treads.map(t => {
+        const a2 = toWorld(t[0][0], t[0][1]);
+        const b2 = toWorld(t[1][0], t[1][1]);
+        return { a: a2, b: b2,
+                 mx: (a2.x + b2.x) / 2, mz: (a2.z + b2.z) / 2 };
+      }).filter(t => Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z) > 0.2);
+      if (!treads.length) continue;
+      // climb axis: plan direction if present, else first-to-last tread
+      let cx, cz;
+      if (st.direction) {
+        cx = st.direction[0]; cz = -st.direction[1];
+      } else {
+        cx = treads[treads.length - 1].mx - treads[0].mx;
+        cz = treads[treads.length - 1].mz - treads[0].mz;
+        const n = Math.hypot(cx, cz) || 1; cx /= n; cz /= n;
+      }
+      treads.sort((p1, p2) =>
+        (p1.mx * cx + p1.mz * cz) - (p2.mx * cx + p2.mz * cz));
+      // step depth from median tread spacing
+      const gaps = [];
+      for (let i = 1; i < treads.length; i++) {
+        const d = (treads[i].mx - treads[i - 1].mx) * cx +
+                  (treads[i].mz - treads[i - 1].mz) * cz;
+        if (d > 0.05) gaps.push(d);
+      }
+      gaps.sort((x, y) => x - y);
+      const depth = gaps.length ? gaps[gaps.length >> 1] : 0.26;
+      // a DOWN run sharing the well means this is a switchback pair:
+      // the flight rises full height to a landing and a return flight
+      // climbs back over the down-run to the floor above
+      const partner = (plan.stairs || []).find(o =>
+        o !== st && o.down && stripsAdjacent(st.polygon, o.polygon));
+      const flightTop = treads.length * riserM;
+      const through = !!partner && flightTop < wallHm - 0.15;
+      const cap = through ? Infinity : capM;
+      treads.forEach((t, i) => {
+        const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
+        const h = Math.min((i + 1) * riserM, cap);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(len, h, depth), stMat);
+        m.position.set(t.mx + cx * depth / 2, h / 2, t.mz + cz * depth / 2);
+        m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
+        m.castShadow = m.receiveShadow = true;
+        group.add(m);
+        laserTargets.push(m);
+        // walkable: the riser top is ground under the player's feet
+        stairSteps.push({
+          cx: t.mx + cx * depth / 2, cz: t.mz + cz * depth / 2,
+          ux: (t.b.x - t.a.x) / len, uz: (t.b.z - t.a.z) / len,
+          kx: cx, kz: cz, hl: len / 2, hd: depth / 2, top: h,
+        });
+      });
+      if (through) {
+        // axis-aligned well: combined bbox of both strips, world space
+        const wpts = st.polygon.concat(partner.polygon)
+          .map(([px, py]) => toWorld(px, py));
+        const bx0 = Math.min(...wpts.map(q => q.x)), bx1 = Math.max(...wpts.map(q => q.x));
+        const bz0 = Math.min(...wpts.map(q => q.z)), bz1 = Math.max(...wpts.map(q => q.z));
+        const pw = partner.polygon.map(([px, py]) => toWorld(px, py));
+        const px0 = Math.min(...pw.map(q => q.x)), px1 = Math.max(...pw.map(q => q.x));
+        const pz0 = Math.min(...pw.map(q => q.z)), pz1 = Math.max(...pw.map(q => q.z));
+        const alongX = Math.abs(cx) > 0.5;      // climb axis of the pair
+        const lastT = treads[treads.length - 1];
+        // landing platform past the top tread, spanning BOTH strips
+        const landD = 0.95;
+        const lax = alongX ? lastT.mx + cx * (depth + landD / 2) : (bx0 + bx1) / 2;
+        const laz = alongX ? (bz0 + bz1) / 2 : lastT.mz + cz * (depth + landD / 2);
+        const lw = alongX ? landD : bx1 - bx0;
+        const ld = alongX ? bz1 - bz0 : landD;
+        const land = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.16, ld), stMat);
+        land.position.set(lax, flightTop - 0.08, laz);
+        land.castShadow = land.receiveShadow = true;
+        group.add(land);
+        laserTargets.push(land);
+        stairSteps.push({ cx: lax, cz: laz, ux: 1, uz: 0, kx: 0, kz: 1,
+                          hl: lw / 2, hd: ld / 2, top: flightTop });
+        // return flight over the partner strip, climbing back the
+        // other way from the landing up to the floor above
+        const alongLen = alongX ? px1 - px0 : pz1 - pz0;
+        const wide = alongX ? pz1 - pz0 : px1 - px0;
+        const n = Math.max(3, Math.round((wallHm - flightTop) / riserM));
+        const rise = (wallHm - flightTop) / n;
+        const stepD = alongLen / n;
+        for (let i = 0; i < n; i++) {
+          const h = flightTop + (i + 1) * rise;
+          const a = (i + 0.5) * stepD;     // distance from the landing end
+          const sx = alongX ? (cx < 0 ? px0 + a : px1 - a) : (px0 + px1) / 2;
+          const sz = alongX ? (pz0 + pz1) / 2 : (cz < 0 ? pz0 + a : pz1 - a);
+          const slab = new THREE.Mesh(new THREE.BoxGeometry(
+            alongX ? stepD : wide, 0.16, alongX ? wide : stepD), stMat);
+          slab.position.set(sx, h - 0.08, sz);
+          slab.castShadow = slab.receiveShadow = true;
+          group.add(slab);
+          laserTargets.push(slab);
+          stairSteps.push({ cx: sx, cz: sz,
+            ux: alongX ? 1 : 0, uz: alongX ? 0 : 1,
+            kx: alongX ? -cx : 0, kz: alongX ? 0 : -cz,
+            hl: (alongX ? stepD : wide) / 2, hd: (alongX ? wide : stepD) / 2,
+            top: h });
+        }
+        // the roof opens over the shaft: return strip + landing
+        roofHoles.push({
+          x0: Math.min(px0, lax - lw / 2) - 0.05,
+          z0: Math.min(pz0, laz - ld / 2) - 0.05,
+          x1: Math.max(px1, lax + lw / 2) + 0.05,
+          z1: Math.max(pz1, laz + ld / 2) + 0.05,
+        });
+      }
+    }
+  }
+
+  // the source sheet itself, laid under the model at true scale - the
+  // definitive side-by-side: sheet, linework and geometry in one view
+  underlayMesh = null;
+  if (plan.underlay && plan.underlay.file &&
+      typeof currentPlanKey === 'string' && !currentPlanKey.startsWith('dropped:')) {
+    const base = currentPlanKey.includes('/')
+      ? currentPlanKey.slice(0, currentPlanKey.lastIndexOf('/') + 1) : '';
+    const u = plan.underlay;
+    new THREE.TextureLoader().load(
+        base + u.file + '?v=' + Date.now(), tex => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const wpx = tex.image.width, hpx = tex.image.height;
+      const wM = wpx * u.in_per_px * IN2M, hM = hpx * u.in_per_px * IN2M;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(wM, hM),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true,
+                                      opacity: 0.93, depthWrite: false }));
+      mesh.rotation.x = -Math.PI / 2;
+      const cxIn = u.x0 + wpx * u.in_per_px / 2;
+      const cyIn = u.y1 - hpx * u.in_per_px / 2;
+      const pc = toWorld(cxIn, cyIn);
+      mesh.position.set(pc.x, 0.045, pc.z);
+      mesh.renderOrder = 985;
+      mesh.visible = false;
+      group.add(mesh);
+      underlayMesh = mesh;
+      applyLayers();
+    });
+  }
+
+  // corner closure: a wall endpoint that meets another wall extends by half
+  // its own thickness, so perpendicular boxes fully interpenetrate - no
+  // notches at corners, no hairline seams at T-junctions
+  const endpoints = [];
+  for (const w of walls) endpoints.push(w.start, w.end);
+  const meetsAnother = (pt, self) => {
+    for (const q of endpoints) {
+      if (q === self) continue;
+      const dx = q[0] - pt[0], dy = q[1] - pt[1];
+      if (dx * dx + dy * dy <= 12 * 12) return true;   // within 12 inches
+    }
+    return false;
+  };
+
+  walls.forEach((w, wi) => {
+    const S = w.start, E = w.end;
+    const Lin = Math.hypot(E[0] - S[0], E[1] - S[1]);   // length, inches
+    const H = (w.height || 96) * IN2M;
+    const depth = (w.thickness || 6) * IN2M;
+    const angle = Math.atan2(E[1] - S[1], E[0] - S[0]);
+    const dir = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle)); // world XZ dir
+    const extS = meetsAnother(S, S) ? depth / 2 : 0;    // metres past each end
+    const extE = meetsAnother(E, E) ? depth / 2 : 0;
+    const worldStart = toWorld(S[0], S[1]).addScaledVector(dir, -extS);
+
+    // opening spans in metres along the (corner-extended) wall
+    const ops = (byWall.get(wi) || []).map(o => {
+      const c = o.position * Lin;            // centre, inches
+      return {
+        lo: (c - o.width / 2) * IN2M + extS,
+        hi: (c + o.width / 2) * IN2M + extS,
+        sill: (o.sill || 0) * IN2M,
+        head: Math.min((o.head || 80), w.height || 96) * IN2M,
+        type: o.type || 'opening',
+        hinge: o.hinge || 0, swing: o.swing || 0, shut: !!o.shut,
+      };
+    }).sort((a, b) => a.lo - b.lo);
+
+    const L = Lin * IN2M + extS + extE;
+    planWallsWorld[wi] = {
+      ax: worldStart.x, az: worldStart.z,
+      bx: worldStart.x + dir.x * L, bz: worldStart.z + dir.z * L,
+      h: H, thick: depth,
+    };
+    const solid = (a, b) => {   // blocked span -> collision segment (world XZ)
+      if (b - a < 0.01) return;
+      collisionSegs.push({
+        ax: worldStart.x + dir.x * a, az: worldStart.z + dir.z * a,
+        bx: worldStart.x + dir.x * b, bz: worldStart.z + dir.z * b,
+        hw: depth / 2 + 0.03, top: H,
+      });
+    };
+    let cursor = 0;
+    for (const op of ops) {
+      const lo = Math.max(0, op.lo), hi = Math.min(L, op.hi);
+      if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth, H); // solid
+      if (lo > cursor) solid(cursor, lo);
+      // lintel above the opening
+      if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
+      // sill below a window
+      if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H);
+      // glass is not a doorway: a window blocks movement even at sill 0
+      if (op.type === 'window' || op.sill > 0) solid(lo, hi);
+      // a closed garage door is solid too
+      if (op.type === 'opening' && hi - lo >= 90 * IN2M &&
+          openingIsExterior(worldStart, dir, angle, lo, hi, depth)) solid(lo, hi);
+      // base segment for VR calibration anchoring
+      planOpeningsWorld.push({
+        key: wi + ':' + Math.round(lo / IN2M),
+        type: op.type,
+        ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
+        bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
+        sill: op.sill, head: Math.min(op.head, H), widthIn: (hi - lo) / IN2M, thick: depth,
+      });
+      dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
+      cursor = Math.max(cursor, hi);
+    }
+    if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
+  });
+
+  // floor slab. With a footprint it hugs the building outline (no concrete
+  // apron); with room data it is bare concrete and each room lays its own
+  // finished floor: tile in baths/laundry, concrete in the garage, oak else.
+  const w = (maxX - minX) * IN2M, d = (maxY - minY) * IN2M;
+  floorTex.repeat.set((w + 0.3) / 1.22, (d + 0.3) / 1.22);
+  const footShape = footprintWorld ? new THREE.Shape(
+    footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz))) : null;
+  let floor;
+  if (footShape) {
+    const geo = new THREE.ShapeGeometry(footShape);
+    geo.rotateX(-Math.PI / 2);
+    floor = new THREE.Mesh(geo, rooms.length ? slabMat : floorMat);
+  } else {
+    floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3),
+      rooms.length ? slabMat : floorMat);
+    floor.rotation.x = -Math.PI / 2;
+  }
+  floor.receiveShadow = true;
+  group.add(floor);
+  laserTargets.push(floor, ground);   // lawn included: drawing outside works
+
+  const H0 = ((walls[0] && walls[0].height) || 96) * IN2M;
+  // ceilings live in one group: the footprint roof + any per-room ceiling
+  // planes at their measured heights (ZInD rooms carry real ceilings)
+  const ceilGroup = new THREE.Group();
+  rooms.forEach((r, i) => {
+    // ShapeGeometry point (sx, sy) lands at world (sx, 0, -sy) after
+    // rotateX(-90), matching toWorld's recentred metres
+    const pts = r.polygon.map(([px, py]) =>
+      new THREE.Vector2((px - cx) * IN2M, (py - cy) * IN2M));
+    const geo = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    geo.rotateX(-Math.PI / 2);
+    const kind = r.kind || 'room';
+    const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat
+      : (kind === 'garage') ? slabMat : roomWoodMat;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.004;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    laserTargets.push(mesh);
+
+    // measured per-room ceiling plane, when the plan provides one
+    const roomH = r.ceiling ? r.ceiling * IN2M : H0;
+    if (r.ceiling) {
+      const cgeo = new THREE.ShapeGeometry(new THREE.Shape(pts));
+      cgeo.rotateX(-Math.PI / 2);
+      const cmesh = new THREE.Mesh(cgeo, ceilMat);
+      cmesh.position.y = roomH;
+      ceilGroup.add(cmesh);
+    }
+
+    // one recessed ceiling light per room at the centroid
+    let ax = 0, ay = 0;
+    for (const p of pts) { ax += p.x; ay += p.y; }
+    ax /= pts.length; ay /= pts.length;
+    const disk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.02, 20), lightDiskMat);
+    disk.position.set(ax, roomH - 0.012, -ay);
+    group.add(disk);
+  });
+
+  // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
+  fixtureGroup = new THREE.Group();
+  for (const f of plan.fixtures || []) {
+    const g = buildFixture(f);
+    const pos = toWorld(f.center[0], f.center[1]);
+    g.position.set(pos.x, 0, pos.z);
+    g.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
+    fixtureGroup.add(g);
+    // collision capsule along the long axis (rotation.y maps local +x to
+    // (cos, -sin) and local +z to (sin, cos) in world XZ)
+    const wM = (f.size[0] || 12) * IN2M, dM = (f.size[1] || 12) * IN2M;
+    const rot = (f.rotation || 0) * Math.PI / 180;
+    const half = Math.max(wM, dM) / 2, hw = Math.min(wM, dM) / 2;
+    const u = wM >= dM ? [Math.cos(rot), -Math.sin(rot)]
+                       : [Math.sin(rot), Math.cos(rot)];
+    const ex = half - hw;
+    fixtureSegs.push({
+      ax: pos.x - u[0] * ex, az: pos.z - u[1] * ex,
+      bx: pos.x + u[0] * ex, bz: pos.z + u[1] * ex,
+      hw, top: 1.0,
+    });
+  }
+  group.add(fixtureGroup);
+
+  // roof/ceiling slab (toggle with C). It deliberately does NOT cast
+  // shadows, so sunlight still fills the interior - cheap fake skylighting.
+  // With a footprint it follows the building outline instead of the bbox,
+  // so it never cantilevers over open lawn.
+  const H = walls.reduce((m, ww) => Math.max(m, (ww.height || 96) * IN2M), 0) || 2.44;
+  let roof;
+  if (footShape) {
+    // stairwell shafts punch through: each hole is wound opposite to
+    // the outline so the triangulator treats it as a cutout
+    const outerCCW = THREE.ShapeUtils.area(footShape.getPoints()) > 0;
+    for (const hr of roofHoles) {
+      const pts = [
+        new THREE.Vector2(hr.x0, -hr.z0), new THREE.Vector2(hr.x1, -hr.z0),
+        new THREE.Vector2(hr.x1, -hr.z1), new THREE.Vector2(hr.x0, -hr.z1)];
+      if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
+      const hole = new THREE.Path();
+      hole.setFromPoints(pts);
+      footShape.holes.push(hole);
+    }
+    const geo = new THREE.ExtrudeGeometry(footShape, { depth: 0.14, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);   // extrusion axis -> up
+    roof = new THREE.Mesh(geo, ceilMat);
+    roof.position.y = H;
+  } else {
+    roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, 0.14, d + 0.35), ceilMat);
+    roof.position.y = H + 0.07;
+  }
+  roof.receiveShadow = true;
+  ceilGroup.add(roof);
+  laserTargets.push(roof);
+  ceiling = ceilGroup;           // C toggles roof + room ceilings together
+  ceiling.visible = true;
+  lamp.intensity = rooms.length ? 0 : 0.45;   // room light disks take over
+  group.add(ceiling);
+
+  scene.add(group);
+  planGroup = group;
+
+  // start the player where a real photo was taken if the plan carries
+  // localized cameras (ZInD tours); otherwise at the plan center
+  const cam = (plan.cameras || []).find(c => c.is_primary) || (plan.cameras || [])[0];
+  if (cam) {
+    const p = toWorld(cam.position[0], cam.position[1]);
+    dolly.position.set(p.x, 0, p.z);
+    dolly.rotation.y = (cam.rotation || 0) * Math.PI / 180;
+  } else {
+    dolly.position.set(0, 0, 0);
+    dolly.rotation.y = 0;
+  }
+  // measured camera/eye height when the tour provides one, so views match
+  // the real photos taken at these poses
+  spawnEyeY = (cam && cam.height) ? cam.height * IN2M
+    : (plan.eye_height ? plan.eye_height * IN2M : EYE);
+  spawnPose.x = dolly.position.x;
+  spawnPose.z = dolly.position.z;
+  spawnPose.rot = dolly.rotation.y;
+  groundY = 0; fallV = 0;
+  lastSafe.x = spawnPose.x; lastSafe.z = spawnPose.z;
+  dolly.position.y = groundY + heightOffset;
+
+  // waypoints for the automated tour: real camera poses when the plan has
+  // them, room centroids otherwise, chained nearest-neighbor from spawn
+  const rawStops = (plan.cameras || []).filter(c => c.is_primary).length >= 2
+    ? plan.cameras.filter(c => c.is_primary)
+        .map(c => toWorld(c.position[0], c.position[1]))
+    : roomPolysWorld.map(poly => {
+        let sx = 0, sz = 0;
+        for (const [px, pz] of poly) { sx += px; sz += pz; }
+        return new THREE.Vector3(sx / poly.length, 0, sz / poly.length);
+      });
+  tourStops = [];
+  let cur = new THREE.Vector3(spawnPose.x, 0, spawnPose.z);
+  const pool = [...rawStops];
+  while (pool.length) {
+    let bi = 0, bd = Infinity;
+    pool.forEach((p, i) => {
+      const d = cur.distanceToSquared(p);
+      if (d < bd) { bd = d; bi = i; }
+    });
+    cur = pool.splice(bi, 1)[0];
+    tourStops.push(cur);
+  }
+  stopTour();
+  camera.rotation.set(0, 0, 0);
+  camera.position.set(0, spawnEyeY, 0);
+
+  // HUD
+  const hud = document.getElementById('hud');
+  hud.hidden = false;
+  document.getElementById('hud-walls').textContent = walls.length;
+  document.getElementById('hud-openings').textContent = openings.length;
+  document.getElementById('hud-fixtures').textContent = (plan.fixtures || []).length;
+  document.getElementById('hud-rooms').textContent = rooms.length;
+  const warnBox = document.getElementById('hud-warn');
+  const warns = plan.warnings || [];
+  warnBox.innerHTML = warns.length
+    ? '&#9888; ' + warns.length + ' parser warning(s):' +
+      warns.slice(0, 4).map(x => '<div>· ' + x + '</div>').join('')
+    : '';
+}
+
+// ---------------------------------------------------------------- desktop controls
+const IS_TOUCH = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const controls = new PointerLockControls(camera, renderer.domElement);
+const overlay = document.getElementById('overlay');
+if (IS_TOUCH) {
+  document.getElementById('overlay-title').textContent = 'Tap to enter walkthrough';
+  const touchHelp =
+    '<b>move your phone</b> to look around · <b>2-finger pan</b> move · ' +
+    '<b>pinch</b> walk forward/back · <b>double-tap</b> auto walkthrough · ' +
+    '<b>long-press</b> return to start';
+  document.getElementById('overlay-help').innerHTML = touchHelp;
+  document.querySelector('#hud .keys').innerHTML = touchHelp;
+}
+overlay.addEventListener('click', () => {
+  if (renderer.xr.isPresenting) return;
+  if (IS_TOUCH) {
+    overlay.style.display = 'none';   // no pointer lock on touch
+    enableGyro();                     // must happen inside a user gesture (iOS)
+  } else controls.lock();
+});
+controls.addEventListener('lock', () => overlay.style.display = 'none');
+controls.addEventListener('unlock', () => {
+  if (!renderer.xr.isPresenting && !mapMode) overlay.style.display = 'flex';
+});
+
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyC' && ceiling) {
+    ceiling.visible = !ceiling.visible;
+    lamp.intensity = ceiling.visible ? 0.45 : 0;
+  }
+  if (e.code === 'KeyF' && fixtureGroup) fixtureGroup.visible = !fixtureGroup.visible;
+  if (e.code === 'KeyM') toggleMap();
+  if (e.code === 'KeyV' && !e.repeat) { initVoiceNotes(); startVoiceNote(); }
+  if (e.code === 'Digit1') { layerState.geom = !layerState.geom; applyLayers(); }
+  if (e.code === 'Digit2') { layerState.lines = !layerState.lines; applyLayers(); }
+  if (e.code === 'Digit3') { layerState.sheet = !layerState.sheet; applyLayers(); }
+  if (e.code === 'KeyT') toggleTour();
+  else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
+});
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'KeyV') stopVoiceNote();
+});
+
+// ------------------------------------------------------------- VR drawing
+// The RIGHT trigger is a LASER POINTER: touch it lightly to aim (red
+// beam + a dot on whatever surface it hits), squeeze to ink a stroke
+// onto that surface at the dot. Strokes fade out slowly after release
+// and several can fade at once. Points are captured in plan coordinates,
+// and any strokes drawn during (or just before) a voice note are saved
+// with it - so a spoken comment plus a scribble pins exactly what it
+// refers to.
+const draw = {
+  active: false, pts: [], line: null, fading: [], recent: [],
+};
+const drawMat = () => new THREE.LineBasicMaterial({
+  color: 0xff3d6e, transparent: true, opacity: 0.95, depthTest: false });
+
+const laserBeamPos = new THREE.BufferAttribute(new Float32Array(6), 3);
+laserBeamPos.setUsage(THREE.DynamicDrawUsage);
+const laserBeam = new THREE.Line(
+  new THREE.BufferGeometry().setAttribute('position', laserBeamPos),
+  new THREE.LineBasicMaterial({ color: 0xff3d6e, transparent: true,
+                                opacity: 0.7 }));
+laserBeam.visible = false;
+laserBeam.frustumCulled = false;
+scene.add(laserBeam);
+const laserDot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.014, 12, 8),
+  new THREE.MeshBasicMaterial({ color: 0xff3d6e, depthTest: false }));
+laserDot.renderOrder = 998;
+laserDot.visible = false;
+scene.add(laserDot);
+
+const _ray = new THREE.Raycaster();
+_ray.far = 12;
+const _visUp = ob => {   // raycaster ignores the visible flag; we don't
+  for (let o = ob; o; o = o.parent) if (o.visible === false) return false;
+  return true;
+};
+// cast the pointer from the right controller, update the beam + dot
+// visuals, and return what it hit (walls, floors, stairs, lawn ...)
+const _lo = new THREE.Vector3(), _lq = new THREE.Quaternion();
+const _ld = new THREE.Vector3();
+function laserCast() {
+  ctrlR.getWorldPosition(_lo);
+  ctrlR.getWorldQuaternion(_lq);
+  _ld.set(0, 0, -1).applyQuaternion(_lq);
+  _ray.set(_lo, _ld);
+  // explicit flat target list (walls, floors, stairs, doors, lawn) -
+  // testing every trim board recursively cost whole frames on Quest
+  const hit = _ray.intersectObjects(laserTargets, false)
+    .find(h => _visUp(h.object)) || null;
+  const ex = hit ? hit.point.x : _lo.x + _ld.x * 6;
+  const ey = hit ? hit.point.y : _lo.y + _ld.y * 6;
+  const ez = hit ? hit.point.z : _lo.z + _ld.z * 6;
+  laserBeamPos.setXYZ(0, _lo.x, _lo.y, _lo.z);
+  laserBeamPos.setXYZ(1, ex, ey, ez);
+  laserBeamPos.needsUpdate = true;
+  laserBeam.visible = true;
+  laserDot.visible = !!hit;
+  if (hit) laserDot.position.copy(hit.point);
+  return { hit, origin: _lo, dir: _ld };
+}
+function laserOff() { laserBeam.visible = false; laserDot.visible = false; }
+
+function drawSample() {
+  const { hit, dir } = laserCast();
+  if (!hit) return;    // beam in the air: keep the stroke open, keep aiming
+  // ink floats a touch off the surface so it never z-fights the wall
+  const v = hit.point.clone().addScaledVector(dir, -0.012);
+  const last = draw.pts[draw.pts.length - 1];
+  if (last && v.distanceTo(last) < 0.008) return;
+  // a HUGE jump means the laser slid onto a far surface: break the stroke
+  // there rather than streaking a line across the room. (0.6m proved too
+  // eager - fast sweeps at distance jump farther than that per frame and
+  // shredded gestures into confetti)
+  if (last && v.distanceTo(last) > 1.4) { drawFinish(); draw.active = true; }
+  draw.pts.push(v.clone());
+  if (!draw.line) {
+    // preallocated, growable position buffer: rebuilding the geometry on
+    // every sample caused GC hitches in the headset
+    const cap = 512;
+    const attr = new THREE.BufferAttribute(new Float32Array(cap * 3), 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', attr);
+    g.setDrawRange(0, 0);
+    draw.line = new THREE.Line(g, drawMat());
+    draw.line.frustumCulled = false;
+    draw.line.renderOrder = 997;
+    scene.add(draw.line);
+  }
+  let attr = draw.line.geometry.getAttribute('position');
+  if (draw.pts.length > attr.count) {        // grow ×2, keep what's drawn
+    const bigger = new THREE.BufferAttribute(
+      new Float32Array(attr.count * 6), 3);
+    bigger.setUsage(THREE.DynamicDrawUsage);
+    bigger.array.set(attr.array);
+    draw.line.geometry.setAttribute('position', bigger);
+    attr = bigger;
+  }
+  attr.setXYZ(draw.pts.length - 1, v.x, v.y, v.z);
+  attr.needsUpdate = true;
+  draw.line.geometry.setDrawRange(0, draw.pts.length);
+}
+
+function drawFinish() {
+  draw.active = false;
+  if (draw.line && draw.pts.length > 1) {
+    draw.fading.push({ line: draw.line, life: 8.0 });
+    const stroke = {
+      t: Date.now(),
+      // plan inches (+ height in metres): maps straight onto the sheet
+      pts: draw.pts.map(v => [
+        +(planOffset.cx + v.x / IN2M).toFixed(1),
+        +(planOffset.cy - v.z / IN2M).toFixed(1),
+        +v.y.toFixed(3)]),
+    };
+    draw.recent.push(stroke);
+    if (draw.recent.length > 24) draw.recent.shift();
+    if (noteRec.active) noteRec.strokes.push(stroke);
+  } else if (draw.line) {
+    scene.remove(draw.line);
+  }
+  draw.line = null;
+  draw.pts = [];
+}
+
+function drawTick(dt) {
+  for (let i = draw.fading.length - 1; i >= 0; i--) {
+    const f = draw.fading[i];
+    f.life -= dt;
+    if (f.life <= 0) {
+      scene.remove(f.line);
+      f.line.geometry.dispose();
+      draw.fading.splice(i, 1);
+    } else {
+      f.line.material.opacity = 0.95 * Math.min(1, f.life / 8.0);
+    }
+  }
+}
+
+// ---------------------------------------------------------- voice notes
+// Hold the left trigger in VR (or V on the desktop) to record a voice
+// memo pinned to where you stand; notes persist in IndexedDB and are
+// playable/downloadable from the mic button, so walkthrough feedback
+// can be captured in place and shared afterwards.
+const noteRec = { active: false, media: null, rec: null, chunks: [], strokes: [] };
+const NOTES_SESSION = Date.now();   // one id per page load = one "session"
+
+function notesDB() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open('plan2vr-notes', 1);
+    rq.onupgradeneeded = () =>
+      rq.result.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function notesAll() {
+  const db = await notesDB();
+  return new Promise(res => {
+    const out = [];
+    const cur = db.transaction('notes').objectStore('notes').openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (c) { out.push(c.value); c.continue(); } else res(out);
+    };
+  });
+}
+async function refreshNotesBadge() {
+  const n = (await notesAll()).length;
+  document.getElementById('notes-btn').textContent = '🎤 ' + n;
+}
+function initVoiceNotes() {
+  if (noteRec.media || !navigator.mediaDevices) return;
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(st => { noteRec.media = st; })
+    .catch(() => {});
+}
+
+// live client-side transcription while a note records (Web Speech API,
+// where the browser has it); the text lands in the note's metadata and
+// the GitHub issue body so notes are readable without playing audio
+function startTranscript() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  try {
+    const r = new SR();
+    r.continuous = true;
+    r.interimResults = false;
+    r.lang = 'en-US';
+    const out = { text: '', rec: r, done: null };
+    out.ended = new Promise(res => { out.done = res; });
+    r.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++)
+        if (e.results[i].isFinal) out.text += e.results[i][0].transcript + ' ';
+    };
+    r.onend = () => out.done();
+    r.onerror = () => out.done();
+    r.start();
+    return out;
+  } catch (e) { return null; }
+}
+async function finishTranscript(stt) {
+  if (!stt) return '';
+  try { stt.rec.stop(); } catch (e) {}
+  // final results can trail the stop by a moment
+  await Promise.race([stt.ended, new Promise(r => setTimeout(r, 1200))]);
+  return stt.text.trim();
+}
+// The video track is pulled from a canvas with captureStream(0) and
+// EXPLICIT requestFrame() calls after each spectator blit: during an
+// immersive session the browser never composites the page canvas, so
+// fps-based auto capture delivers ZERO frames and the webm muxer sits
+// waiting for the first one - swallowing the audio with it (that is
+// exactly how a note once reached GitHub as a 110-byte husk). A
+// parallel audio-only recorder always runs, so even if the video
+// starves, the note survives.
+let specVideoTrack = null;
+function requestSpecFrame() {
+  try {
+    if (specVideoTrack && specVideoTrack.requestFrame) specVideoTrack.requestFrame();
+  } catch (e) {}
+}
+function startVoiceNote() {
+  if (noteRec.active) return;
+  if (!noteRec.media) { initVoiceNotes(); return; }
+  noteRec.chunksA = [];
+  noteRec.chunksV = [];
+  // adopt strokes drawn in the 6s before recording started
+  const t0 = Date.now() - 6000;
+  noteRec.strokes = draw.recent.filter(st => st.t >= t0);
+  try {
+    noteRec.recA = new MediaRecorder(noteRec.media);
+  } catch (e) { return; }
+  noteRec.recA.ondataavailable = e => { if (e.data.size) noteRec.chunksA.push(e.data); };
+  noteRec.recA.start(1000);
+  noteRec.videoOn = false;
+  noteRec.recV = null;
+  specVideoTrack = null;
+  try {
+    if (renderer.xr.isPresenting) ensureSpecRenderer();
+    const srcCanvas = renderer.xr.isPresenting ? specCanvas : renderer.domElement;
+    const cs = srcCanvas.captureStream(0);       // frames only when asked
+    specVideoTrack = cs.getVideoTracks()[0] || null;
+    const mt = ['video/webm;codecs=vp8,opus', 'video/webm'].find(
+      t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+    if (specVideoTrack && mt) {
+      noteRec.recV = new MediaRecorder(
+        new MediaStream([specVideoTrack, ...noteRec.media.getAudioTracks()]),
+        { mimeType: mt, videoBitsPerSecond: 2500000 });
+      noteRec.recV.ondataavailable = e => { if (e.data.size) noteRec.chunksV.push(e.data); };
+      noteRec.recV.start(1000);
+      noteRec.videoOn = true;
+      if (renderer.xr.isPresenting) renderSpectator();
+      requestSpecFrame();                        // prime the first frame
+    }
+  } catch (e) { noteRec.recV = null; noteRec.videoOn = false; }
+  noteRec.stt = startTranscript();
+  noteRec.active = true;
+  document.getElementById('notes-btn').classList.add('rec');
+  if (renderer.xr.isPresenting)
+    vrMsg([noteRec.videoOn ? '● Recording view + voice'
+                           : '● Recording voice'], 1.6);
+}
+function stopVoiceNote() {
+  if (!noteRec.active) return;
+  noteRec.active = false;
+  document.getElementById('notes-btn').classList.remove('rec');
+  if (renderer.xr.isPresenting) vrPanelTimer = 0.1;
+  finalizeNote();
+}
+async function finalizeNote() {
+  const stopOne = r => new Promise(res => {
+    if (!r || r.state === 'inactive') return res();
+    r.onstop = () => res();
+    try { r.stop(); } catch (e) { res(); }
+  });
+  await Promise.all([stopOne(noteRec.recA), stopOne(noteRec.recV)]);
+  const audioBlob = new Blob(noteRec.chunksA,
+    { type: (noteRec.recA && noteRec.recA.mimeType) || 'audio/webm' });
+  const videoBlob = noteRec.recV
+    ? new Blob(noteRec.chunksV, { type: noteRec.recV.mimeType || 'video/webm' })
+    : null;
+  // a starved video mux is just a header; only trust real payload
+  const blob = (videoBlob && videoBlob.size > 65536) ? videoBlob : audioBlob;
+  specVideoTrack = null;
+  const transcript = await finishTranscript(noteRec.stt);
+  noteRec.stt = null;
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  const rec = {
+    t: Date.now(), plan: currentPlanKey, sess: NOTES_SESSION,
+    x: +(planOffset.cx + cam.x / IN2M).toFixed(1),
+    y: +(planOffset.cy - cam.z / IN2M).toFixed(1),
+    yaw: +dolly.rotation.y.toFixed(2), blob,
+    strokes: noteRec.strokes.slice(),
+    transcript,
+  };
+  const db = await notesDB();
+  db.transaction('notes', 'readwrite').objectStore('notes').add(rec);
+  if (feedbackCfg()) pushNote(rec, blob);   // straight to Claude's repo
+  noteRec.strokes = [];
+  setTimeout(refreshNotesBadge, 200);
+  if (renderer.xr.isPresenting)
+    vrMsg([blob === videoBlob ? 'Note saved (view + voice)'
+                              : 'Note saved (voice)'], 3);
+}
+// minimal store-only ZIP writer, so one click bundles every note (audio
+// + a notes.json of positions/headings/strokes) into a single download
+const _crcTable = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++)
+    c = _crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function makeZip(files) {   // files: [{name, data: Uint8Array}]
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const crc = crc32(f.data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0x0800, true);        // UTF-8 names
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, f.data.length, true);
+    lh.setUint32(22, f.data.length, true);
+    lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true);
+    ch.setUint16(4, 20, true);
+    ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0x0800, true);
+    ch.setUint32(16, crc, true);
+    ch.setUint32(20, f.data.length, true);
+    ch.setUint32(24, f.data.length, true);
+    ch.setUint16(28, name.length, true);
+    ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + f.data.length;
+  }
+  const cdSize = central.reduce((s, a) => s + a.length, 0);
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0, 0x06054b50, true);
+  eo.setUint16(8, files.length, true);
+  eo.setUint16(10, files.length, true);
+  eo.setUint32(12, cdSize, true);
+  eo.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(eo.buffer)],
+                  { type: 'application/zip' });
+}
+async function downloadNotesZip(notes, label) {
+  if (!notes.length) return;
+  const files = [];
+  const meta = [];
+  for (const n of notes) {
+    const file = `note-${n.id}.webm`;
+    meta.push({ id: n.id, t: n.t, when: new Date(n.t).toISOString(),
+                plan: n.plan, x: n.x, y: n.y ?? n.z, yaw: n.yaw,
+                strokes: n.strokes || [], file });
+    files.push({ name: file, data: new Uint8Array(await n.blob.arrayBuffer()) });
+  }
+  files.unshift({ name: 'notes.json', data: new TextEncoder().encode(
+    JSON.stringify({ exported: new Date().toISOString(),
+                     coordinate_system: 'plan inches; strokes [x,y,heightM]',
+                     notes: meta }, null, 1)) });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(makeZip(files));
+  a.download = `plan2vr-notes-${label}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+// ------------------------------------------------- push notes to Claude
+// The headset pushes feedback straight into a GitHub repo over the REST
+// API (api.github.com allows browser calls), so nothing needs downloading
+// or moving between devices - Claude Code pulls the repo on the other
+// side. Connect ONCE by opening the viewer with a URL fragment:
+//     https://<viewer-url>/#feedback=TOKEN@owner/repo[@branch]
+// (fine-grained PAT, Contents read/write on ONE repo - use a PRIVATE
+// repo so voice audio stays private). The token lives only in this
+// browser's localStorage; the fragment never reaches any server and is
+// stripped from the URL immediately.
+function feedbackCfg() {
+  try { return JSON.parse(localStorage.getItem('plan2vr-feedback')); }
+  catch (e) { return null; }
+}
+function initFeedbackFromHash() {
+  const m = location.hash.match(
+    /feedback=([^@#&]+)@([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?(?:[#&]|$)/);
+  if (!m) return false;
+  localStorage.setItem('plan2vr-feedback', JSON.stringify({
+    token: m[1], owner: m[2], repo: m[3], branch: m[4] || 'main' }));
+  history.replaceState(null, '', location.pathname + location.search);
+  toast(`Feedback connected: ${m[2]}/${m[3]}`);
+  return true;
+}
+async function ghPut(path, bytes, msg) {
+  const c = feedbackCfg();
+  if (!c) return false;
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const r = await fetch(
+    `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + c.token,
+                 Accept: 'application/vnd.github+json' },
+      body: JSON.stringify({ message: msg, content: btoa(s),
+                             branch: c.branch }),
+    });
+  return r.ok;
+}
+async function ghIssue(title, body) {
+  const c = feedbackCfg();
+  if (!c) return null;
+  const r = await fetch(
+    `https://api.github.com/repos/${c.owner}/${c.repo}/issues`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + c.token,
+                 Accept: 'application/vnd.github+json' },
+      body: JSON.stringify({ title, body }),
+    });
+  if (!r.ok) return null;
+  try { return (await r.json()).number || true; } catch (e) { return true; }
+}
+
+// file a GitHub issue from wherever you're standing: a screenshot of
+// exactly what you see (spectator-rendered in VR), your position and
+// heading, and any strokes drawn in the last two minutes. X in VR,
+// the flag button on the 2D page.
+let issueBusy = false;
+async function fileIssueFromHere(text) {
+  const c = feedbackCfg();
+  const say = lines => renderer.xr.isPresenting ? vrMsg(lines, 4)
+                                                : toast(lines.join(' '));
+  if (!c) { say(['Connect feedback first (🎤 panel)']); return null; }
+  if (issueBusy) return null;
+  issueBusy = true;
+  try {
+    say(['Filing issue...']);
+    // fresh render THIS task so toDataURL sees pixels; in VR use the
+    // cheap spectator path (shadows frozen, 640x360) to avoid a hitch
+    let shotCanvas = renderer.domElement;
+    if (renderer.xr.isPresenting) {
+      renderSpectator();
+      shotCanvas = specCanvas;
+    } else {
+      renderer.render(scene, mapMode ? mapCam : camera);
+    }
+    const jpeg = shotCanvas.toDataURL('image/jpeg', 0.85);
+    const bin = atob(jpeg.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const cam = new THREE.Vector3();
+    camera.getWorldPosition(cam);
+    const px = +(planOffset.cx + cam.x / IN2M).toFixed(1);
+    const py = +(planOffset.cy - cam.z / IN2M).toFixed(1);
+    const planName = (typeof currentPlanKey === 'string'
+      ? currentPlanKey.split('/').pop() : 'plan').replace('.json', '');
+    const tag = new Date().toISOString().replace(/[:.]/g, '-');
+    const okShot = await ghPut(`vr-notes/issues/shot-${tag}.jpg`, bytes,
+                               `VR issue screenshot ${tag}`);
+    const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}`;
+    const recent = draw.recent.filter(s => s.t >= Date.now() - 120000);
+    let strokesBlock = '';
+    if (recent.length) {
+      const js = JSON.stringify(recent);
+      if (js.length < 30000)
+        strokesBlock = `\n<details><summary>Laser strokes from the last 2 min` +
+          ` (${recent.length}), plan-inch [x, y, heightM]</summary>\n\n` +
+          '```json\n' + js + '\n```\n</details>\n';
+    }
+    const num = await ghIssue(
+      `[VR issue] ${planName} @ (${px}, ${py})`,
+      `**Plan:** \`${planName}\` · **standing at** (${px}, ${py}) ` +
+      `plan-inches · **facing** ${dolly.rotation.y.toFixed(2)} rad\n\n` +
+      (text ? text + '\n\n' : '') +
+      (okShot ? `**What I'm looking at:** ` +
+        `[shot-${tag}.jpg](${base}/vr-notes/issues/shot-${tag}.jpg)\n` : '') +
+      strokesBlock +
+      `\n_Filed from the VR walkthrough._`);
+    say([num ? `Issue ${typeof num === 'number' ? '#' + num + ' ' : ''}filed` :
+               'Issue failed - check the connection']);
+    return num;
+  } catch (e) {
+    say(['Issue failed - check the connection']);
+    return null;
+  } finally {
+    issueBusy = false;
+  }
+}
+document.getElementById('issue-btn').addEventListener('click', () => {
+  const text = prompt('Describe the issue (optional):') || '';
+  fileIssueFromHere(text);
+});
+let pushBusy = false;
+async function pushNote(rec, blob) {
+  if (pushBusy) { setTimeout(() => pushNote(rec, blob), 1500); return; }
+  pushBusy = true;
+  try {
+    const tag = new Date(rec.t).toISOString().replace(/[:.]/g, '-');
+    const dir = `vr-notes/${new Date(NOTES_SESSION).toISOString().slice(0, 10)}`;
+    const kind = (blob.type || '').startsWith('video') ? 'video' : 'audio';
+    const meta = { t: rec.t, when: new Date(rec.t).toISOString(),
+                   app: APP_VERSION,
+                   session: new Date(NOTES_SESSION).toISOString(),
+                   plan: rec.plan, plan_source: currentPlanSource,
+                   x: rec.x, y: rec.y, yaw: rec.yaw,
+                   transcript: rec.transcript || '',
+                   strokes: rec.strokes || [],
+                   audio: `note-${tag}.webm`, kind,
+                   coords: 'plan inches; strokes [x,y,heightM]' };
+    const ok1 = await ghPut(`${dir}/note-${tag}.json`,
+      new TextEncoder().encode(JSON.stringify(meta, null, 1)),
+      `VR note ${tag} (${rec.plan.split('/').pop()})`);
+    const ok2 = await ghPut(`${dir}/note-${tag}.webm`,
+      new Uint8Array(await blob.arrayBuffer()), `VR note media ${tag}`);
+    // THE ISSUE IS THE NOTE: recording linked (the API has no true
+    // issue-attachment upload), full metadata, transcript when the
+    // browser could produce one, and the strokes inline
+    const c = feedbackCfg();
+    const base = `https://github.com/${c.owner}/${c.repo}/blob/${c.branch}/${dir}`;
+    const planName = rec.plan.split('/').pop().replace('.json', '');
+    const strokes = rec.strokes || [];
+    let strokesBlock = '';
+    if (strokes.length) {
+      const js = JSON.stringify(strokes);
+      strokesBlock = js.length < 30000
+        ? `\n<details><summary>Laser strokes (${strokes.length}), ` +
+          `plan-inch [x, y, heightM]</summary>\n\n\`\`\`json\n${js}\n\`\`\`\n</details>\n`
+        : `\n**Laser strokes:** ${strokes.length} (too large inline - see the JSON)\n`;
+    }
+    const src = currentPlanSource
+      ? ` (${currentPlanSource.kind || '?'}${currentPlanSource.page !== undefined
+          ? ', sheet page ' + currentPlanSource.page : ''})` : '';
+    await ghIssue(
+      `[VR note] ${planName} @ (${rec.x}, ${rec.y}) — ` +
+        new Date(rec.t).toLocaleString(),
+      `**When:** ${meta.when} · **app:** ${APP_VERSION} · ` +
+      `**session:** ${meta.session}\n` +
+      `**Plan:** \`${planName}\`${src} · **standing at** ` +
+      `(${rec.x}, ${rec.y}) plan-inches · **facing** ${rec.yaw} rad\n\n` +
+      (rec.transcript ? `> ${rec.transcript}\n\n` : '') +
+      (ok2 ? `**${kind === 'video' ? 'View + voice recording' : 'Voice recording'}:** ` +
+             `[note-${tag}.webm](${base}/note-${tag}.webm)\n` : '') +
+      (ok1 ? `**Full metadata:** [note-${tag}.json](${base}/note-${tag}.json)\n` : '') +
+      strokesBlock +
+      `\n_Recorded in the VR walkthrough` +
+      (rec.transcript ? '; transcript is client-side speech recognition' : '') +
+      `. Strokes map directly onto the sheets._`
+    ).catch(() => {});
+    const ok = ok1 && ok2;
+    if (renderer.xr.isPresenting)
+      vrMsg([ok ? 'Note pushed to Claude' : 'Push failed - note kept locally'], 3);
+    else toast(ok ? 'Note pushed to Claude' : 'Push failed - note kept locally');
+    return ok;
+  } catch (e) {
+    if (renderer.xr.isPresenting) vrMsg(['Push failed - note kept locally'], 3);
+    return false;
+  } finally {
+    pushBusy = false;
+  }
+}
+async function pushSessionZip(notes) {
+  const files = [];
+  const meta = [];
+  for (const n of notes) {
+    const file = `note-${n.id}.webm`;
+    meta.push({ id: n.id, t: n.t, when: new Date(n.t).toISOString(),
+                plan: n.plan, x: n.x, y: n.y ?? n.z, yaw: n.yaw,
+                strokes: n.strokes || [], file });
+    files.push({ name: file, data: new Uint8Array(await n.blob.arrayBuffer()) });
+  }
+  files.unshift({ name: 'notes.json', data: new TextEncoder().encode(
+    JSON.stringify({ exported: new Date().toISOString(),
+                     coordinate_system: 'plan inches; strokes [x,y,heightM]',
+                     notes: meta }, null, 1)) });
+  const zip = new Uint8Array(await makeZip(files).arrayBuffer());
+  const tag = new Date().toISOString().replace(/[:.]/g, '-');
+  return ghPut(`vr-notes/bundles/session-${tag}.zip`, zip,
+               `VR session bundle (${notes.length} notes)`);
+}
+setTimeout(initFeedbackFromHash, 0);   // after toast/DOM wiring exists
+
+async function renderNotesPanel() {
+  const panel = document.getElementById('notes-panel');
+  const notes = await notesAll();
+  panel.innerHTML = notes.length ? '' :
+    '<div>No notes yet. Hold <b>V</b> (or the left trigger in VR) to record.</div>';
+  if (notes.length) {
+    const sess = notes.filter(n => n.sess === NOTES_SESSION);
+    const head = document.createElement('div');
+    head.className = 'note';
+    const mk = (label, list, tag) => {
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = label;
+      a.onclick = e => { e.preventDefault(); downloadNotesZip(list, tag); };
+      head.appendChild(a);
+    };
+    mk(`⬇ this session (${sess.length})`, sess,
+       'session-' + new Date(NOTES_SESSION).toISOString().slice(0, 19).replace(/[T:]/g, '-'));
+    mk(`⬇ everything (${notes.length})`, notes, 'all');
+    panel.appendChild(head);
+    // direct-to-Claude push (GitHub) - no downloads, no device shuffle
+    const cfg = feedbackCfg();
+    const claude = document.createElement('div');
+    claude.className = 'note';
+    if (cfg) {
+      claude.innerHTML = `→ Claude: connected to <b>${cfg.owner}/${cfg.repo}</b>` +
+        ' (new notes push files + open an issue) · ';
+      const all = document.createElement('a');
+      all.href = '#';
+      all.textContent = `push this session (${sess.length})`;
+      all.onclick = async e => {
+        e.preventDefault();
+        all.textContent = 'pushing…';
+        const ok = await pushSessionZip(sess.length ? sess : notes);
+        all.textContent = ok ? 'pushed ✓' : 'push failed';
+      };
+      claude.appendChild(all);
+      claude.appendChild(document.createTextNode(' · '));
+      const off = document.createElement('a');
+      off.href = '#';
+      off.textContent = 'disconnect';
+      off.onclick = e => {
+        e.preventDefault();
+        localStorage.removeItem('plan2vr-feedback');
+        renderNotesPanel();
+      };
+      claude.appendChild(off);
+    } else {
+      // ~OAuth-ish two-click connect: GitHub can't do a real browser
+      // OAuth without a secret-holding server (and its device flow has
+      // no CORS), so step 1 opens a PRE-FILLED token page - just press
+      // "Generate token" there - and step 2 pastes it here once
+      claude.innerHTML = '→ Claude: not connected.<br>';
+      const open = document.createElement('a');
+      open.href = 'https://github.com/settings/tokens/new' +
+        '?scopes=repo&description=plan2vr%20VR%20notes';
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = '1) Create the token (pre-filled - just press Generate)';
+      claude.appendChild(open);
+      const form = document.createElement('div');
+      form.style.cssText = 'display:flex;gap:4px;margin-top:6px;flex-wrap:wrap';
+      const tok = document.createElement('input');
+      tok.type = 'password';
+      tok.placeholder = '2) paste token';
+      tok.style.cssText = 'flex:1 1 90px;min-width:90px';
+      const repo = document.createElement('input');
+      repo.value = 'onlinegeek101/vrmatics';
+      repo.title = 'owner/repo the notes go to';
+      repo.style.cssText = 'flex:1 1 130px;min-width:130px';
+      const go = document.createElement('button');
+      go.textContent = 'Connect';
+      go.onclick = () => {
+        const mm = repo.value.trim().match(/^([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?$/);
+        if (!tok.value.trim() || !mm) { go.textContent = 'Check inputs'; return; }
+        localStorage.setItem('plan2vr-feedback', JSON.stringify(
+          { token: tok.value.trim(), owner: mm[1], repo: mm[2],
+            branch: mm[3] || 'main' }));
+        renderNotesPanel();
+      };
+      form.append(tok, repo, go);
+      claude.appendChild(form);
+    }
+    panel.appendChild(claude);
+  }
+  for (const n of notes.reverse()) {
+    const div = document.createElement('div');
+    div.className = 'note';
+    const when = new Date(n.t).toLocaleString();
+    const nStrokes = (n.strokes || []).length;
+    div.innerHTML = `<div>${when} — ${n.plan.split('/').pop()} @ plan-in (${n.x}, ${n.y ?? n.z})` +
+      (nStrokes ? ` · ✏ ${nStrokes} stroke${nStrokes > 1 ? 's' : ''}` : '') + `</div>` +
+      (n.transcript ? `<div style="color:#9fb4d8">“${n.transcript}”</div>` : '');
+    const isVid = ((n.blob && n.blob.type) || '').startsWith('video');
+    const media = document.createElement(isVid ? 'video' : 'audio');
+    media.controls = true;
+    if (isVid) { media.width = 300; media.playsInline = true; }
+    media.src = URL.createObjectURL(n.blob);
+    div.appendChild(media);
+    const row = document.createElement('div');
+    const dl = document.createElement('a');
+    dl.href = media.src;
+    dl.download = `note-${n.id}-${n.plan.split('/').pop().replace('.json','')}.webm`;
+    dl.textContent = 'download';
+    const dj = document.createElement('a');
+    const meta = { t: n.t, plan: n.plan, x: n.x, y: n.y ?? n.z,
+                   yaw: n.yaw, strokes: n.strokes || [] };
+    dj.href = URL.createObjectURL(new Blob(
+      [JSON.stringify(meta, null, 1)], { type: 'application/json' }));
+    dj.download = `note-${n.id}-data.json`;
+    dj.textContent = 'data';
+    const del = document.createElement('a');
+    del.href = '#';
+    del.textContent = 'delete';
+    del.onclick = async e => {
+      e.preventDefault();
+      const db = await notesDB();
+      db.transaction('notes', 'readwrite').objectStore('notes').delete(n.id);
+      setTimeout(() => { renderNotesPanel(); refreshNotesBadge(); }, 150);
+    };
+    row.appendChild(dl); row.appendChild(dj); row.appendChild(del);
+    div.appendChild(row);
+    panel.appendChild(div);
+  }
+}
+window.PLAN2VR_NOTES = { makeZip, downloadNotesZip, notesAll, NOTES_SESSION,
+  feedbackCfg, initFeedbackFromHash, ghPut, ghIssue, pushNote, pushSessionZip,
+  fileIssueFromHere };
+document.getElementById('notes-btn').addEventListener('click', () => {
+  const panel = document.getElementById('notes-panel');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) renderNotesPanel();
+});
+refreshNotesBadge();
+
+// ------------------------------------------------------------- map view
+// Top-down orthographic "floor plan" mode (M / the ▦ button): ceilings
+// off, the 2D plan linework drawn over the built geometry, so the model
+// outline can be compared against the source drawing side by side.
+let mapMode = false;
+let mapCam = null;
+let mapSavedCeil = true;
+
+function fitMapCam() {
+  const aspect = innerWidth / innerHeight;
+  let hw = planSizeM.w / 2 * 1.12, hh = planSizeM.h / 2 * 1.12;
+  if (hw / hh > aspect) hh = hw / aspect; else hw = hh * aspect;
+  if (!mapCam) {
+    mapCam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 0.1, 200);
+    mapCam.position.set(0, 60, 0);
+    mapCam.up.set(0, 0, -1);            // plan north = screen up
+    mapCam.lookAt(0, 0, 0);
+  } else {
+    mapCam.left = -hw; mapCam.right = hw; mapCam.top = hh; mapCam.bottom = -hh;
+  }
+  mapCam.updateProjectionMatrix();
+}
+
+function applyLayers() {
+  if (planOverlay) planOverlay.visible = layerState.lines;
+  if (underlayMesh) underlayMesh.visible = layerState.sheet;
+  if (planGroup) {
+    for (const ch of planGroup.children) {
+      if (ch === planOverlay || ch === underlayMesh) continue;
+      ch.visible = layerState.geom;
+    }
+    if (layerState.geom && ceiling)
+      ceiling.visible = mapMode ? false : mapSavedCeil;
+  }
+  for (const b of document.querySelectorAll('#map-layers button'))
+    b.classList.toggle('on', !!layerState[b.dataset.layer]);
+}
+for (const b of document.querySelectorAll('#map-layers button')) {
+  b.addEventListener('click', () => {
+    layerState[b.dataset.layer] = !layerState[b.dataset.layer];
+    applyLayers();
+  });
+}
+
+function toggleMap(on) {
+  const want = on !== undefined ? on : !mapMode;
+  if (want === mapMode) return;
+  mapMode = want;
+  if (mapMode) {
+    if (tour.active) stopTour();
+    fitMapCam();
+    mapCam.zoom = 1;
+    mapCam.position.x = 0; mapCam.position.z = 0;
+    mapCam.updateProjectionMatrix();
+    mapSavedCeil = ceiling ? ceiling.visible : true;
+    if (ceiling) ceiling.visible = false;
+    layerState.lines = true;
+    if (controls.isLocked) controls.unlock();
+    overlay.style.display = 'none';
+  } else {
+    if (ceiling && layerState.geom) ceiling.visible = mapSavedCeil;
+    layerState.lines = false;
+    if (!renderer.xr.isPresenting && !IS_TOUCH) overlay.style.display = 'flex';
+  }
+  applyLayers();
+  document.getElementById('map-btn').classList.toggle('on', mapMode);
+  document.getElementById('map-layers').hidden = !mapMode;
+}
+document.getElementById('map-btn').addEventListener('click', () => toggleMap());
+
+addEventListener('wheel', e => {
+  if (!mapMode) return;
+  mapCam.zoom = Math.min(12, Math.max(0.4,
+    mapCam.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  mapCam.updateProjectionMatrix();
+}, { passive: true });
+
+let mapDrag = null;
+addEventListener('pointerdown', e => {
+  if (mapMode && e.target.id !== 'map-btn' && e.target.tagName !== 'SELECT')
+    mapDrag = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointermove', e => {
+  if (!mapMode || !mapDrag) return;
+  const sx = (mapCam.right - mapCam.left) / mapCam.zoom / innerWidth;
+  const sz = (mapCam.top - mapCam.bottom) / mapCam.zoom / innerHeight;
+  mapCam.position.x -= (e.clientX - mapDrag.x) * sx;
+  mapCam.position.z -= (e.clientY - mapDrag.y) * sz;
+  mapDrag = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointerup', () => mapDrag = null);
+
+function mapMove(dt) {                   // WASD pans the map too
+  const s = (mapCam.right - mapCam.left) / mapCam.zoom * dt * 0.6;
+  if (keys['KeyW']) mapCam.position.z -= s;
+  if (keys['KeyS']) mapCam.position.z += s;
+  if (keys['KeyA']) mapCam.position.x -= s;
+  if (keys['KeyD']) mapCam.position.x += s;
+}
+
+function desktopMove(dt) {
+  if (!controls.isLocked) return;
+  const speed = 3.0 * dt;               // m/s
+  if (keys['KeyW']) controls.moveForward(speed);
+  if (keys['KeyS']) controls.moveForward(-speed);
+  if (keys['KeyA']) controls.moveRight(-speed);
+  if (keys['KeyD']) controls.moveRight(speed);
+}
+
+// ---------------------------------------------------------------- auto tour
+// Double-tap (touch) or T (desktop) glides through every room: walk to a
+// waypoint facing the travel direction, dwell with a slow look-around,
+// move on. Any input stops it. Collision is skipped while touring.
+const tour = { active: false, i: 0, phase: 'move', dwell: 0, yaw0: 0, yawBase: 0 };
+const TOUR_SPEED = 1.1;        // m/s
+const TOUR_DWELL = 3.2;        // s at each stop
+const TOUR_TURN = 1.6;         // rad/s max heading turn
+
+function startTour() {
+  if (!tourStops.length) { toast('No rooms to tour'); return; }
+  tour.active = true;
+  tour.i = 0;
+  tour.phase = 'move';
+  tour.yawBase = dolly.rotation.y;   // head stays world-anchored to this
+  camera.rotation.set(0, 0, 0);
+  toast(gyro.enabled && gyro.seen
+    ? 'Auto walkthrough — move your phone to look, tap to stop'
+    : 'Auto walkthrough — tap to stop');
+}
+function stopTour(silent) {
+  if (tour.active && !silent) toast('Walkthrough stopped');
+  tour.active = false;
+}
+function toggleTour() { tour.active ? stopTour() : startTour(); }
+
+function angleLerp(a, b, t) {
+  let d = (b - a + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+  return a + d * t;
+}
+
+function tourStep(dt) {
+  const target = tourStops[tour.i];
+  if (!target) { stopTour(true); return; }
+  const dx = target.x - dolly.position.x;
+  const dz = target.z - dolly.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (tour.phase === 'move') {
+    if (dist < 0.12) {
+      tour.phase = 'dwell';
+      tour.dwell = 0;
+      tour.yaw0 = dolly.rotation.y;
+      return;
+    }
+    const want = Math.atan2(-dx, -dz);            // face travel direction
+    dolly.rotation.y = angleLerp(dolly.rotation.y, want,
+      Math.min(1, TOUR_TURN * dt * 2));
+    const step = Math.min(dist, TOUR_SPEED * dt);
+    dolly.position.x += (dx / dist) * step;
+    dolly.position.z += (dz / dist) * step;
+  } else {
+    tour.dwell += dt;
+    // gentle sweep while dwelling - unless the phone is the head, in which
+    // case the user looks around themselves and the body holds still
+    if (!(gyro.enabled && gyro.seen)) {
+      const k = tour.dwell / TOUR_DWELL;
+      dolly.rotation.y = tour.yaw0 + Math.sin(k * Math.PI * 2) * 1.2;
+    }
+    if (tour.dwell >= TOUR_DWELL) {
+      tour.i += 1;
+      if (tour.i >= tourStops.length) {
+        stopTour(true);
+        toast('Walkthrough complete');
+      } else {
+        tour.phase = 'move';
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- gyro look
+// "Magic window": the phone's orientation drives the camera, so looking
+// around means physically moving the phone. Classic DeviceOrientationControls
+// math (alpha/beta/gamma -> quaternion, corrected for screen rotation).
+// Touch drag then only adjusts a heading offset; pan/pinch still walk.
+const gyro = {
+  enabled: false, seen: false, yawOffset: 0,
+  quat: new THREE.Quaternion(),
+};
+{
+  const zee = new THREE.Vector3(0, 0, 1);
+  const euler = new THREE.Euler();
+  const q0 = new THREE.Quaternion();
+  const qX = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90deg X
+  const D2R = Math.PI / 180;
+  addEventListener('deviceorientation', e => {
+    if (e.alpha === null || e.beta === null) return;
+    const orient = ((screen.orientation && screen.orientation.angle) ||
+                    window.orientation || 0) * D2R;
+    euler.set(e.beta * D2R, e.alpha * D2R, -e.gamma * D2R, 'YXZ');
+    gyro.quat.setFromEuler(euler);
+    gyro.quat.multiply(qX);
+    gyro.quat.multiply(q0.setFromAxisAngle(zee, -orient));
+    if (!gyro.seen && gyro.enabled) toast('Motion look on — move your phone');
+    gyro.seen = true;
+  });
+}
+
+function enableGyro() {
+  // iOS requires an explicit permission request from a user gesture
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(state => { if (state === 'granted') gyro.enabled = true; })
+      .catch(() => {});
+  } else {
+    gyro.enabled = true;
+  }
+}
+
+const _yawQuat = new THREE.Quaternion();
+const _yAxis = new THREE.Vector3(0, 1, 0);
+const _worldQuat = new THREE.Quaternion();
+const _dollyInv = new THREE.Quaternion();
+function applyGyro() {
+  if (!gyro.enabled || !gyro.seen) return false;
+  _yawQuat.setFromAxisAngle(_yAxis, gyro.yawOffset);
+  camera.quaternion.copy(_yawQuat).multiply(gyro.quat);
+  return true;
+}
+
+// During the auto walkthrough the tour steers the body (dolly), so the
+// head is composed in WORLD frame and the dolly's turning is cancelled -
+// hold the phone still and the view holds still, even mid-turn.
+function applyGyroTour() {
+  if (!gyro.enabled || !gyro.seen) return false;
+  _yawQuat.setFromAxisAngle(_yAxis, tour.yawBase + gyro.yawOffset);
+  _worldQuat.copy(_yawQuat).multiply(gyro.quat);
+  _dollyInv.copy(dolly.quaternion).invert();
+  camera.quaternion.copy(_dollyInv).multiply(_worldQuat);
+  return true;
+}
+
+// ---------------------------------------------------------------- touch controls
+// 1 finger: look · 2-finger pan: move · pinch: walk forward/back ·
+// long-press: return to the start position
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.style.opacity = 0, 1400);
+}
+
+function resetToStart() {
+  groundY = 0; fallV = 0;
+  lastSafe.x = spawnPose.x; lastSafe.z = spawnPose.z;
+  dolly.position.set(spawnPose.x, groundY + heightOffset, spawnPose.z);
+  dolly.rotation.set(0, spawnPose.rot, 0);
+  camera.rotation.set(0, 0, 0);
+  camera.position.set(0, spawnEyeY, 0);
+  gyro.yawOffset = 0;
+  toast('Back at start');
+}
+
+const touch = {
+  pts: new Map(),          // pointerId -> {x, y}
+  lastCentroid: null,
+  lastDist: null,
+  longPress: null,         // timer
+  startXY: null,           // long-press anchor
+};
+camera.rotation.order = 'YXZ';           // yaw/pitch look without roll
+
+const LOOK_SPEED = 0.0035;               // rad per px
+const PAN_SPEED = 0.011;                 // m per px
+const PINCH_SPEED = 0.014;               // m per px of pinch
+
+function groundBasis() {
+  // camera heading projected onto the floor
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  fwd.y = 0; fwd.normalize();
+  const right = new THREE.Vector3(fwd.z, 0, -fwd.x).negate();
+  return { fwd, right };
+}
+
+function cancelLongPress() {
+  if (touch.longPress) { clearTimeout(touch.longPress); touch.longPress = null; }
+}
+
+const el = renderer.domElement;
+let lastTap = { t: 0, x: 0, y: 0 };
+el.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch' || renderer.xr.isPresenting) return;
+  touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touch.lastCentroid = null;
+  touch.lastDist = null;
+  if (touch.pts.size === 1) {
+    // double-tap starts the automated walkthrough; any tap stops it
+    const now = performance.now();
+    if (tour.active) {
+      stopTour();
+    } else if (now - lastTap.t < 350 &&
+               Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 50) {
+      lastTap.t = 0;
+      startTour();
+      return;
+    }
+    lastTap = { t: now, x: e.clientX, y: e.clientY };
+    touch.startXY = { x: e.clientX, y: e.clientY };
+    touch.longPress = setTimeout(() => { touch.longPress = null; resetToStart(); }, 650);
+  } else {
+    cancelLongPress();
+  }
+});
+
+el.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'touch' || !touch.pts.has(e.pointerId)) return;
+  const prev = touch.pts.get(e.pointerId);
+  touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (touch.pts.size === 1) {
+    if (touch.startXY && Math.hypot(e.clientX - touch.startXY.x,
+                                    e.clientY - touch.startXY.y) > 12) {
+      cancelLongPress();                 // moved too far: it's a look, not a press
+    }
+    if (gyro.enabled && gyro.seen) {
+      // phone motion owns pitch/roll; a drag just re-aims the heading
+      gyro.yawOffset -= (e.clientX - prev.x) * LOOK_SPEED;
+    } else {
+      camera.rotation.y -= (e.clientX - prev.x) * LOOK_SPEED;
+      camera.rotation.x = Math.max(-1.3, Math.min(1.3,
+        camera.rotation.x - (e.clientY - prev.y) * LOOK_SPEED));
+    }
+    return;
+  }
+
+  if (touch.pts.size === 2) {
+    cancelLongPress();
+    const [a, b] = [...touch.pts.values()];
+    const centroid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (touch.lastCentroid) {
+      const { fwd, right } = groundBasis();
+      const dx = centroid.x - touch.lastCentroid.x;
+      const dy = centroid.y - touch.lastCentroid.y;
+      // joystick-style pan: drag up walks forward, drag right strafes right
+      dolly.position.addScaledVector(right, dx * PAN_SPEED);
+      dolly.position.addScaledVector(fwd, -dy * PAN_SPEED);
+      // pinch out walks forward, pinch in walks back
+      dolly.position.addScaledVector(fwd, (dist - touch.lastDist) * PINCH_SPEED);
+    }
+    touch.lastCentroid = centroid;
+    touch.lastDist = dist;
+  }
+});
+
+function touchEnd(e) {
+  if (e.pointerType !== 'touch') return;
+  touch.pts.delete(e.pointerId);
+  touch.lastCentroid = null;
+  touch.lastDist = null;
+  cancelLongPress();
+}
+el.addEventListener('pointerup', touchEnd);
+el.addEventListener('pointercancel', touchEnd);
+
+// ---------------------------------------------------------------- VR calibration
+// Walk up to a real door/window that exists in the plan, enter calibration
+// mode (B), hold the RIGHT trigger and trace its base edge with the
+// controller. Each trace becomes an anchor pairing the real edge (XR
+// reference space) with the plan feature (world space). All anchors solve
+// one rigid alignment (2D Kabsch) that places the whole model in your real
+// house; more anchors = longer baselines = better accuracy. Anchors persist
+// in localStorage per plan. A deletes the nearest anchor; X (left) pressed
+// twice clears all.
+const calib = {
+  mode: false,
+  stage: 'off',          // 'off' | 'select' (B held, laser aims) | 'trace'
+  target: null,          // the opening chosen in the select stage
+  bPrev: false,          // B button state, for press/release edges
+  anchors: [],           // {key, planA:[x,z], planB:[x,z], realA, realB, widthRealIn, widthPlanIn, sillRealIn}
+  tracing: false,
+  samples: [],
+  clearArmed: 0,
+  aligned: false,
+  ar: false,             // passthrough session active
+};
+
+// In an AR session, opaque rendering covers the camera feed entirely, so
+// "VR" and "passthrough" are just render states of one session - which is
+// how B can flip between them instantly (WebXR can't switch session modes).
+let savedFog = null;
+function passthroughOff() {
+  sky.visible = true;
+  ground.visible = true;
+  if (savedFog) scene.fog = savedFog;
+  renderer.setClearColor(0x000000, 1);
+  applyLayers();
+}
+
+// fit a straight segment to trace samples via 2D PCA; returns endpoints
+// at the 2nd/98th percentile projections plus the mean height
+function fitTraceSegment(samples) {
+  const n = samples.length;
+  let mx = 0, mz = 0, my = 0;
+  for (const s of samples) { mx += s.x; mz += s.z; my += s.y; }
+  mx /= n; mz /= n; my /= n;
+  let sxx = 0, sxz = 0, szz = 0;
+  for (const s of samples) {
+    const dx = s.x - mx, dz = s.z - mz;
+    sxx += dx * dx; sxz += dx * dz; szz += dz * dz;
+  }
+  const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);   // principal axis
+  const ux = Math.cos(ang), uz = Math.sin(ang);
+  const ts = samples.map(s => (s.x - mx) * ux + (s.z - mz) * uz).sort((a, b) => a - b);
+  const lo = ts[Math.floor(0.02 * (n - 1))], hi = ts[Math.ceil(0.98 * (n - 1))];
+  return {
+    a: [mx + ux * lo, mz + uz * lo],
+    b: [mx + ux * hi, mz + uz * hi],
+    y: my,
+    len: hi - lo,
+  };
+}
+
+// 2D Kabsch over anchor endpoint pairs -> rigid transform phys->plan.
+// Endpoint order per anchor is ambiguous, so seed both orderings of the
+// first anchor and let each anchor pick its best order under the current
+// estimate, twice. Returns {theta(dolly yaw), tx, tz, scale, residIn}.
+function solveAlignment(anchors) {
+  if (!anchors.length) return null;
+  const fitPairs = (pairs) => {
+    let pcx = 0, pcz = 0, qcx = 0, qcz = 0;
+    for (const [p, q] of pairs) { pcx += p[0]; pcz += p[1]; qcx += q[0]; qcz += q[1]; }
+    const n = pairs.length;
+    pcx /= n; pcz /= n; qcx /= n; qcz /= n;
+    let a = 0, b = 0, pp = 0, qq = 0;
+    for (const [p, q] of pairs) {
+      const px = p[0] - pcx, pz = p[1] - pcz, qx = q[0] - qcx, qz = q[1] - qcz;
+      a += px * qx + pz * qz;
+      b += px * qz - pz * qx;
+      pp += px * px + pz * pz;
+      qq += qx * qx + qz * qz;
+    }
+    const phi = Math.atan2(b, a);            // standard CCW in (x,z)
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const T = {
+      phi,
+      tx: qcx - (c * pcx - s * pcz),
+      tz: qcz - (s * pcx + c * pcz),
+      scale: pp > 0 ? Math.sqrt(a * a + b * b) / pp : 1,
+    };
+    let resid = 0;
+    for (const [p, q] of pairs) {
+      const rx = c * p[0] - s * p[1] + T.tx - q[0];
+      const rz = s * p[0] + c * p[1] + T.tz - q[1];
+      resid += rx * rx + rz * rz;
+    }
+    T.resid = Math.sqrt(resid / n);
+    return T;
+  };
+  const apply = (T, p) => {
+    const c = Math.cos(T.phi), s = Math.sin(T.phi);
+    return [c * p[0] - s * p[1] + T.tx, s * p[0] + c * p[1] + T.tz];
+  };
+  const orderedPairs = (an, flip) => flip
+    ? [[an.realA, an.planB], [an.realB, an.planA]]
+    : [[an.realA, an.planA], [an.realB, an.planB]];
+
+  // a single anchor is 180-degree ambiguous (endpoint order); the player's
+  // head position at trace time breaks the tie - the correct alignment
+  // puts the tracer inside a room, the flipped one outside/next door
+  const headPenalty = (T) => {
+    let pen = 0;
+    for (const an of anchors) {
+      if (!an.headReal) continue;
+      const h = apply(T, an.headReal);
+      if (!insideAnyRoom(h[0], h[1])) pen += 1;
+    }
+    return pen;
+  };
+  let best = null, bestPen = Infinity;
+  for (const seedFlip of [false, true]) {
+    let T = fitPairs(orderedPairs(anchors[0], seedFlip));
+    for (let iter = 0; iter < 2; iter++) {
+      const pairs = [];
+      for (const an of anchors) {
+        let bestFlip = false, bestD = Infinity;
+        for (const flip of [false, true]) {
+          let d = 0;
+          for (const [p, q] of orderedPairs(an, flip)) {
+            const w = apply(T, p);
+            d += (w[0] - q[0]) ** 2 + (w[1] - q[1]) ** 2;
+          }
+          if (d < bestD) { bestD = d; bestFlip = flip; }
+        }
+        pairs.push(...orderedPairs(an, bestFlip));
+      }
+      T = fitPairs(pairs);
+    }
+    const pen = headPenalty(T);
+    if (!best || pen < bestPen || (pen === bestPen && T.resid < best.resid)) {
+      best = T;
+      bestPen = pen;
+    }
+  }
+  return {
+    theta: -best.phi,          // three.js R_y(theta) == standard CCW by -theta
+    tx: best.tx, tz: best.tz,
+    scale: best.scale,
+    residIn: best.resid / IN2M,
+  };
+}
+
+function anchorStorageKey() { return 'plan2vr-anchors:' + currentPlanKey; }
+
+function saveAnchors() {
+  try { localStorage.setItem(anchorStorageKey(), JSON.stringify(calib.anchors)); }
+  catch (e) { /* private mode etc. */ }
+}
+function loadAnchors() {
+  try { calib.anchors = JSON.parse(localStorage.getItem(anchorStorageKey())) || []; }
+  catch (e) { calib.anchors = []; }
+}
+
+function applyAlignment() {
+  const T = solveAlignment(calib.anchors);
+  if (!T) { calib.aligned = false; return null; }
+  dolly.position.set(T.tx, 0, T.tz);
+  dolly.rotation.set(0, T.theta, 0);
+  calib.aligned = true;
+  return T;
+}
+
+// amber frame outline previewing where the plan currently believes the
+// target door/window sits - in passthrough you compare it against the
+// real frame, and it snaps onto reality as anchors improve the fit.
+// Drawn depth-test-off so it shows through ghosted walls. Fragments near
+// the tracing hand are discarded (a circular cutout follows the
+// controller) so the outline never hides the edge being traced.
+const calibTargetMat = new THREE.MeshBasicMaterial({
+  color: 0xffb020, depthTest: false, transparent: true, opacity: 0.95 });
+calibTargetMat.onBeforeCompile = sh => {
+  sh.uniforms.uHand = { value: new THREE.Vector3(1e9, 1e9, 1e9) };
+  sh.uniforms.uHandR = { value: 0.15 };
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vCutWorld;')
+    .replace('#include <fog_vertex>',
+      '#include <fog_vertex>\nvCutWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>',
+      '#include <common>\nvarying vec3 vCutWorld;\nuniform vec3 uHand;\nuniform float uHandR;')
+    .replace('#include <dithering_fragment>',
+      '#include <dithering_fragment>\nif (distance(vCutWorld, uHand) < uHandR) discard;');
+  calibTargetMat.userData.shader = sh;
+};
+const calibTarget = new THREE.Group();
+{
+  const bar = () => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), calibTargetMat);
+    m.renderOrder = 998;
+    calibTarget.add(m);
+    return m;
+  };
+  calibTarget.userData.bottom = bar();
+  calibTarget.userData.top = bar();
+  calibTarget.userData.left = bar();
+  calibTarget.userData.right = bar();
+}
+calibTarget.visible = false;
+scene.add(calibTarget);
+
+function updateCalibTarget(op) {
+  if (op === undefined) {              // legacy: nearest to the controller
+    const cp = new THREE.Vector3();
+    ctrlR.getWorldPosition(cp);
+    op = nearestOpening(cp, 2.5);
+  }
+  if (!op) { calibTarget.visible = false; return; }
+  const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
+  const sill = op.sill || 0;
+  const head = op.head || 2.03;
+  const hgt = Math.max(0.1, head - sill);
+  const T = 0.012;                     // slim bars: the real frame stays visible
+  const u = calibTarget.userData;
+  u.bottom.scale.set(len + T, T, T);
+  u.bottom.position.set(0, sill + T / 2, 0);
+  u.top.scale.set(len + T, T, T);
+  u.top.position.set(0, head - T / 2, 0);
+  u.left.scale.set(T, hgt, T);
+  u.left.position.set(-len / 2, sill + hgt / 2, 0);
+  u.right.scale.set(T, hgt, T);
+  u.right.position.set(len / 2, sill + hgt / 2, 0);
+  calibTarget.position.set((op.ax + op.bx) / 2, 0, (op.az + op.bz) / 2);
+  calibTarget.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
+  calibTarget.visible = true;
+}
+
+// live trace preview: the right-trigger samples drawn as a cyan line
+// while tracing (in dolly space, where the XR samples live)
+const traceLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color: 0x2ee6d6, transparent: true,
+                                opacity: 0.95, depthTest: false }));
+traceLine.renderOrder = 999;
+traceLine.frustumCulled = false;
+traceLine.visible = false;
+dolly.add(traceLine);
+
+// trace-stage isolation: hide the entire model except a faint ghost of
+// the wall that carries the selected opening, so passthrough shows the
+// real room with just the amber indicator floating on it
+let calibWallGhost = null;
+function isolationOn(op) {
+  if (calibWallGhost) { scene.remove(calibWallGhost); calibWallGhost = null; }
+  const w = planWallsWorld[parseInt(op.key)];
+  if (w) {
+    const L = Math.hypot(w.bx - w.ax, w.bz - w.az);
+    calibWallGhost = new THREE.Mesh(
+      new THREE.BoxGeometry(L, w.h, w.thick),
+      new THREE.MeshBasicMaterial({ color: 0x8fb7ff, transparent: true,
+                                    opacity: 0.1, depthWrite: false }));
+    calibWallGhost.position.set((w.ax + w.bx) / 2, w.h / 2, (w.az + w.bz) / 2);
+    calibWallGhost.rotation.y = Math.atan2(-(w.bz - w.az), w.bx - w.ax);
+    scene.add(calibWallGhost);
+  }
+  if (planGroup) planGroup.visible = false;
+  sky.visible = false;
+  ground.visible = false;
+  if (scene.fog) { savedFog = scene.fog; scene.fog = null; }
+  renderer.setClearColor(0x000000, 0);   // camera feed everywhere else
+}
+function isolationOff() {
+  if (calibWallGhost) { scene.remove(calibWallGhost); calibWallGhost = null; }
+  if (planGroup) planGroup.visible = true;
+  passthroughOff();
+}
+
+// select stage (B held): the laser picks the door/window to calibrate
+function calibSelectTick() {
+  const { hit, origin, dir } = laserCast();
+  const probe = hit ? hit.point : origin.clone().addScaledVector(dir, 2.2);
+  const op = nearestOpening(probe, 1.6);
+  calib.target = op || null;
+  updateCalibTarget(op || null);
+  calibHandTick();
+}
+
+// keep the hand-cutout uniform and the trace preview current
+const _handPos = new THREE.Vector3();
+function calibHandTick() {
+  ctrlR.getWorldPosition(_handPos);
+  const sh = calibTargetMat.userData.shader;
+  if (sh) sh.uniforms.uHand.value.copy(_handPos);
+  if (calib.tracing && calib.samples.length > 1) {
+    traceLine.geometry.setFromPoints(
+      calib.samples.map(s => new THREE.Vector3(s.x, s.y, s.z)));
+    traceLine.visible = true;
+  } else if (!calib.tracing) {
+    traceLine.visible = false;
+  }
+}
+
+// B is hold-to-select: press shows the laser, aim at a door or window,
+// release drops into passthrough tracing on that target. Pressing B
+// again while tracing goes back to selection; releasing over nothing
+// exits calibration entirely.
+function calibBDown() {
+  if (calib.stage === 'trace') isolationOff();   // world back while re-aiming
+  calib.stage = 'select';
+  calib.mode = true;
+  calib.tracing = false;
+  calib.samples = [];
+  anchorMarkers.visible = true;
+  refreshAnchorMarkers();
+  applyAlignment();
+  vrMsg(['Point the laser at a door or window ...',
+         '... release B to calibrate it (release on nothing: exit)'], true);
+}
+function calibBUp() {
+  if (calib.stage !== 'select') return;
+  if (calib.target) {
+    calib.stage = 'trace';
+    laserOff();
+    if (calib.ar) isolationOn(calib.target);
+    vrMsg(calibStatusLines(), true);
+  } else {
+    exitCalib();
+  }
+}
+function exitCalib() {
+  calib.stage = 'off';
+  calib.mode = false;
+  calib.tracing = false;
+  calib.samples = [];
+  calib.target = null;
+  isolationOff();
+  laserOff();
+  calibTarget.visible = false;
+  anchorMarkers.visible = false;
+  traceLine.visible = false;
+  vrPanel.visible = false;
+  vrMsg(['Calibration ' + (calib.aligned ? 'active' : 'off')]);
+}
+
+// cyan markers on anchored features, visible in calibration mode
+const anchorMarkers = new THREE.Group();
+anchorMarkers.visible = false;
+scene.add(anchorMarkers);
+const anchorMat = new THREE.MeshBasicMaterial({ color: 0x2ee6d6 });
+function refreshAnchorMarkers() {
+  while (anchorMarkers.children.length) {
+    const m = anchorMarkers.children.pop();
+    if (m.geometry) m.geometry.dispose();
+  }
+  for (const an of calib.anchors) {
+    const op = planOpeningsWorld.find(o => o.key === an.key);
+    if (!op) continue;
+    const len = Math.hypot(op.bx - op.ax, op.bz - op.az);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.03, 0.03), anchorMat);
+    bar.position.set((op.ax + op.bx) / 2, 0.05 + (op.sill || 0), (op.az + op.bz) / 2);
+    bar.rotation.y = Math.atan2(-(op.bz - op.az), op.bx - op.ax);
+    anchorMarkers.add(bar);
+  }
+}
+
+// in-headset text panel (DOM toasts are invisible in VR)
+const vrPanelCanvas = document.createElement('canvas');
+vrPanelCanvas.width = 1024; vrPanelCanvas.height = 256;
+const vrPanelTex = new THREE.CanvasTexture(vrPanelCanvas);
+const vrPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.9, 0.225),
+  new THREE.MeshBasicMaterial({ map: vrPanelTex, transparent: true, depthTest: false }));
+vrPanel.position.set(0, -0.32, -1.1);
+vrPanel.renderOrder = 999;
+vrPanel.visible = false;
+vrPanel.layers.set(2);          // HUD layer: never captured in recordings
+camera.add(vrPanel);
+camera.layers.enable(2);
+// recording indicator: a small pulsing red dot low in the view - the
+// old sticky "Recording..." panel blocked half the scene AND got baked
+// into every recording
+const recDot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.0065, 10, 8),
+  new THREE.MeshBasicMaterial({ color: 0xff2a2a, depthTest: false,
+                                transparent: true }));
+recDot.position.set(0.115, -0.085, -0.55);
+recDot.renderOrder = 999;
+recDot.visible = false;
+recDot.layers.set(2);
+camera.add(recDot);
+let vrPanelTimer = 0;
+function vrMsg(lines, sticky) {
+  const g = vrPanelCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 256);
+  g.fillStyle = 'rgba(14,17,26,0.82)';
+  g.fillRect(0, 0, 1024, 256);
+  g.strokeStyle = 'rgba(46,230,214,0.8)';
+  g.lineWidth = 4;
+  g.strokeRect(4, 4, 1016, 248);
+  g.fillStyle = '#eaf2ff';
+  g.font = '44px system-ui, sans-serif';
+  lines.slice(0, 4).forEach((ln, i) => g.fillText(ln, 28, 66 + i * 56));
+  vrPanelTex.needsUpdate = true;
+  vrPanel.visible = true;
+  vrPanelTimer = sticky === true ? Infinity : (sticky || 4);
+}
+function vrPanelTick(dt) {
+  if (vrPanel.visible && vrPanelTimer !== Infinity) {
+    vrPanelTimer -= dt;
+    if (vrPanelTimer <= 0) vrPanel.visible = false;
+  }
+}
+
+function calibStatusLines() {
+  const T = calib.anchors.length ? solveAlignment(calib.anchors) : null;
+  const hint = calib.anchors.length === 1
+    ? 'add a 2nd anchor (a window works best) to lock orientation'
+    : 'A: delete anchor - X twice: clear all - B: pick another / exit';
+  return [
+    'CALIBRATION - amber outline = where the plan thinks that door is.',
+    'RIGHT trigger: trace the OPEN doorway, jamb to jamb, on YOUR side',
+    `${calib.anchors.length} anchor(s)` +
+      (T ? ` - fit residual ${T.residIn.toFixed(1)}"` +
+           ` - scale delta ${((T.scale - 1) * 100).toFixed(1)}%` : '') +
+      ' - ' + hint,
+  ];
+}
+
+function nearestOpening(worldPos, maxDist) {
+  let best = null, bd = maxDist;
+  for (const op of planOpeningsWorld) {
+    const mx = (op.ax + op.bx) / 2, mz = (op.az + op.bz) / 2;
+    const d = Math.hypot(worldPos.x - mx, worldPos.z - mz);
+    if (d < bd) { bd = d; best = op; }
+  }
+  return best;
+}
+
+function finishTrace() {
+  calib.tracing = false;
+  traceLine.visible = false;
+  const s = calib.samples;
+  calib.samples = [];
+  if (s.length < 12) { vrMsg(['Trace too short - hold trigger and', 'slide along the full base edge']); return; }
+  const seg = fitTraceSegment(s);
+  if (seg.len < 0.25) { vrMsg(['Trace too short - cover the whole edge']); return; }
+  // the selected target takes the trace; fall back to the plan feature
+  // nearest the trace midpoint (in world space) for legacy flows
+  const midRef = new THREE.Vector3((seg.a[0] + seg.b[0]) / 2, 0, (seg.a[1] + seg.b[1]) / 2);
+  const midWorld = midRef.clone().applyMatrix4(dolly.matrixWorld);
+  const op = calib.target || nearestOpening(midWorld, 2.5);
+  if (!op) { vrMsg(['No door/window near you in the plan -', 'walk up to one and trace again']); return; }
+
+  // the canonical gesture traces the threshold on YOUR side of the wall,
+  // which sits half a wall-thickness off the centerline our anchors use -
+  // shift the fitted segment away from your head to the centerline
+  const head = [camera.position.x, camera.position.z];
+  {
+    const dx = seg.b[0] - seg.a[0], dz = seg.b[1] - seg.a[1];
+    const L = Math.hypot(dx, dz) || 1;
+    let nx = -dz / L, nz = dx / L;                    // trace normal
+    const mx = (seg.a[0] + seg.b[0]) / 2, mz = (seg.a[1] + seg.b[1]) / 2;
+    if ((head[0] - mx) * nx + (head[1] - mz) * nz > 0) { nx = -nx; nz = -nz; }
+    const off = (op.thick || 0.11) / 2;               // toward far side
+    seg.a = [seg.a[0] + nx * off, seg.a[1] + nz * off];
+    seg.b = [seg.b[0] + nx * off, seg.b[1] + nz * off];
+  }
+
+  const an = {
+    key: op.key,
+    planA: [op.ax, op.az], planB: [op.bx, op.bz],
+    realA: seg.a, realB: seg.b,
+    headReal: head,                                    // breaks 180deg ambiguity
+    widthRealIn: seg.len / IN2M,
+    widthPlanIn: op.widthIn,
+    sillRealIn: seg.y / IN2M,
+  };
+  // retracing the same feature replaces its anchor
+  calib.anchors = calib.anchors.filter(x => x.key !== an.key);
+  calib.anchors.push(an);
+  saveAnchors();
+  const T = applyAlignment();
+  refreshAnchorMarkers();
+  const dW = an.widthRealIn - an.widthPlanIn;
+  vrMsg([
+    `Anchor saved: measured ${an.widthRealIn.toFixed(1)}"` +
+      ` (plan ${an.widthPlanIn.toFixed(1)}", ${dW >= 0 ? '+' : ''}${dW.toFixed(1)}")`,
+    ...calibStatusLines().slice(1),
+  ], calib.mode);
+}
+
+// exposed for automated testing of the solver + anchor lifecycle
+window.PLAN2VR_DRAW = { draw, drawSample, drawFinish, drawTick, resetHeight, noteRec,
+  laserCast, laserOff, laserBeam, laserDot, renderSpectator,
+  get specCanvas() { return specCanvas; },
+  get planOffset() { return planOffset; }, get ctrlR() { return ctrlR; } };
+window.PLAN2VR_CALIB = {
+  fitTraceSegment, solveAlignment, calib,
+  applyAlignment, saveAnchors, loadAnchors,
+  insideRoom: (x, z) => insideAnyRoom(x, z),
+  updateCalibTarget, calibTarget, toggleCalib,
+  calibBDown, calibBUp, exitCalib, calibSelectTick, calibHandTick,
+  finishTrace, calibTargetMat, traceLine,
+  get wallGhost() { return calibWallGhost; },
+  get planGroup() { return planGroup; },
+  probes: { get sky() { return sky; }, get ground() { return ground; },
+            get fog() { return scene.fog; }, get wallOpacity() { return wallMat.opacity; } },
+  get openings() { return planOpeningsWorld; },
+  get dolly() { return dolly; },
+};
+
+// legacy toggle (kept for tests/automation): enters the trace stage on
+// the opening nearest the controller, or exits calibration
+function toggleCalib() {
+  if (calib.stage !== 'off') { exitCalib(); return; }
+  calibBDown();
+  const cp = new THREE.Vector3();
+  ctrlR.getWorldPosition(cp);
+  calib.target = nearestOpening(cp, 2.5);
+  if (calib.target) updateCalibTarget(calib.target);
+  calibBUp();
+}
+
+function deleteNearestAnchor() {
+  if (!calib.anchors.length) { vrMsg(['No anchors to delete', ...calibStatusLines().slice(2)], true); return; }
+  const cp = new THREE.Vector3();
+  ctrlR.getWorldPosition(cp);
+  let bi = -1, bd = Infinity;
+  calib.anchors.forEach((an, i) => {
+    const op = planOpeningsWorld.find(o => o.key === an.key);
+    if (!op) return;
+    const d = Math.hypot(cp.x - (op.ax + op.bx) / 2, cp.z - (op.az + op.bz) / 2);
+    if (d < bd) { bd = d; bi = i; }
+  });
+  if (bi < 0) bi = calib.anchors.length - 1;
+  calib.anchors.splice(bi, 1);
+  saveAnchors();
+  applyAlignment();
+  refreshAnchorMarkers();
+  vrMsg(['Anchor deleted', ...calibStatusLines().slice(1)], true);
+}
+
+function clearAllAnchors() {
+  if (calib.clearArmed > 0) {
+    calib.anchors = [];
+    saveAnchors();
+    calib.aligned = false;
+    calib.clearArmed = 0;
+    refreshAnchorMarkers();
+    vrMsg(['All anchors cleared', ...calibStatusLines().slice(2)], true);
+  } else {
+    calib.clearArmed = 3;
+    vrMsg(['Press X again to clear ALL anchors'], true);
+  }
+}
+
+// ---------------------------------------------------------------- VR locomotion
+// left thumbstick: arc-teleport   ·   right thumbstick: 45deg snap turn
+const marker = new THREE.Mesh(
+  new THREE.RingGeometry(0.18, 0.25, 24).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x53d0ff })
+);
+marker.visible = false;
+scene.add(marker);
+
+const arcMat = new THREE.LineBasicMaterial({ color: 0x53d0ff });
+const arc = new THREE.Line(new THREE.BufferGeometry(), arcMat);
+arc.visible = false;
+scene.add(arc);
+
+// controllers ride the dolly: XR poses are in reference space, so their
+// world pose must include the rig's transform (teleports, calibration)
+const ctrlL = renderer.xr.getController(0);
+const ctrlR = renderer.xr.getController(1);
+dolly.add(ctrlL, ctrlR);
+
+let teleAiming = false, teleTarget = null, snapReady = true;
+const prevBtns = { left: [], right: [] };
+function btnEdge(hand, gp, idx) {
+  const now = !!(gp.buttons[idx] && gp.buttons[idx].pressed);
+  const was = !!prevBtns[hand][idx];
+  prevBtns[hand][idx] = now;
+  return now && !was;
+}
+
+function computeArc(controller) {
+  // parabola from controller along its forward (-z), gravity down
+  const origin = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  controller.getWorldPosition(origin);
+  controller.getWorldQuaternion(quat);
+  const v = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).multiplyScalar(6.0);
+  const g = -9.8;
+  const pts = [];
+  let hit = null;
+  for (let i = 0; i <= 30; i++) {
+    const t = i * 0.06;
+    const y = origin.y + v.y * t + 0.5 * g * t * t;
+    const p = new THREE.Vector3(origin.x + v.x * t, y, origin.z + v.z * t);
+    if (i > 0) {                          // walls stop the beam (midpoint
+      const q = pts[pts.length - 1];      // too: samples are ~0.36m apart)
+      const mid = q.clone().add(p).multiplyScalar(0.5);
+      if (arcBlocked(mid) || arcBlocked(p)) break;
+    }
+    pts.push(p);
+    const gnd = groundHeightAt(p.x, p.z);
+    if (y <= gnd && i > 0) { p.y = gnd; hit = p.clone(); break; }
+  }
+  return { pts, hit };
+}
+
+// a teleport beam sample inside a wall span (below its top) is blocked,
+// so you can't teleport through walls, windows, doors or furniture
+function arcBlocked(p) {
+  const lists = [collisionSegs];
+  if (doorLeaves.length) lists.push(doorSegs());
+  if (fixtureGroup && fixtureGroup.visible) lists.push(fixtureSegs);
+  for (const list of lists) {
+    for (const s of list) {
+      if (p.y >= s.top) continue;
+      const dx = s.bx - s.ax, dz = s.bz - s.az;
+      const len2 = dx * dx + dz * dz;
+      const t = len2
+        ? Math.max(0, Math.min(1, ((p.x - s.ax) * dx + (p.z - s.az) * dz) / len2))
+        : 0;
+      const ox = p.x - (s.ax + t * dx), oz = p.z - (s.az + t * dz);
+      if (ox * ox + oz * oz < (s.hw + 0.05) * (s.hw + 0.05)) return true;
+    }
+  }
+  return false;
+}
+
+function teleportTo(target) {
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  dolly.position.x += target.x - cam.x;
+  dolly.position.z += target.z - cam.z;
+  groundY = groundHeightAt(target.x, target.z);   // land on stair tops too
+  fallV = 0;
+  lastSafe.x = target.x; lastSafe.z = target.z;
+  dolly.position.y = groundY + heightOffset;
+}
+
+function rotatePlayer(angle) {
+  const cam = new THREE.Vector3();
+  camera.getWorldPosition(cam);
+  dolly.position.sub(cam);
+  dolly.position.applyAxisAngle(Y_AXIS, angle);
+  dolly.position.add(cam);
+  dolly.rotation.y += angle;
+}
+
+function handleVRInput() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const ax = gp.axes;
+    const stickX = ax.length >= 4 ? ax[2] : ax[0];
+    const stickY = ax.length >= 4 ? ax[3] : ax[1];
+
+    // calibration controls (hold B to laser-select a door/window, release
+    // to trace it in passthrough; see the VR calibration section)
+    if (src.handedness === 'right') {
+      const bNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
+      if (bNow && !calib.bPrev) calibBDown();
+      if (!bNow && calib.bPrev) calibBUp();
+      calib.bPrev = bNow;
+      if (calib.stage === 'select') {
+        calibSelectTick();
+      } else if (calib.stage === 'trace') {
+        updateCalibTarget(calib.target);
+        calibHandTick();
+        if (btnEdge('right', gp, 4)) deleteNearestAnchor();
+        const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
+        if (trig) {
+          calib.tracing = true;
+          const p = ctrlR.position;   // XR reference space (dolly-local)
+          const last = calib.samples[calib.samples.length - 1];
+          if (!last || Math.hypot(p.x - last.x, p.y - last.y, p.z - last.z) > 0.004)
+            calib.samples.push({ x: p.x, y: p.y, z: p.z });
+        } else if (calib.tracing) {
+          finishTrace();
+        }
+      }
+    }
+    if (src.handedness === 'left') {
+      if (btnEdge('left', gp, 4)) {
+        if (calib.mode) clearAllAnchors();       // X in calibration
+        else fileIssueFromHere();                // X: issue from right here
+      }
+    }
+    // voice notes: hold the left trigger to record, release to save
+    if (src.handedness === 'left') {
+      const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
+      if (trig && !noteRec.active) startVoiceNote();
+      else if (!trig && noteRec.active) stopVoiceNote();
+      if (btnEdge('left', gp, 5)) showVRHelp();      // Y: help
+    }
+    if (calib.mode) continue;   // walking pauses while calibrating
+
+    // grip squeeze near a door grabs its leaf (either hand)
+    handleDoorGrip(src.handedness,
+      src.handedness === 'left' ? ctrlL : ctrlR,
+      !!(gp.buttons[1] && gp.buttons[1].value > 0.6));
+
+    if (src.handedness === 'left') {
+      // smooth, head-relative walking (FPS style)
+      const dx = Math.abs(stickX) > 0.12 ? stickX : 0;
+      const dy = Math.abs(stickY) > 0.12 ? stickY : 0;
+      if (dx || dy) {
+        const fwd = new THREE.Vector3();
+        camera.getWorldDirection(fwd);
+        fwd.y = 0; fwd.normalize();
+        const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+        const sp = 2.4 * vrDt;
+        dolly.position.addScaledVector(fwd, -dy * sp);
+        dolly.position.addScaledVector(side, dx * sp);
+      }
+    } else if (src.handedness === 'right') {
+      // laser pointer: light touch aims, squeeze inks onto the surface.
+      // Hysteresis (start >0.6, keep until <0.4) stops trigger jitter
+      // from chopping one gesture into many little strokes
+      const trigV = gp.buttons[0] ? gp.buttons[0].value : 0;
+      const inking = draw.active ? trigV > 0.4 : trigV > 0.6;
+      if (inking) { draw.active = true; drawSample(); }
+      else {
+        if (draw.active) drawFinish();
+        if (trigV > 0.05 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
+        else laserOff();
+      }
+      if (btnEdge('right', gp, 3)) resetHeight();   // stick click
+      if (stickY < -0.6) {                 // push forward -> teleport aim
+        teleAiming = true;
+        const { pts, hit } = computeArc(ctrlR);
+        arc.geometry.setFromPoints(pts);
+        arc.visible = true;
+        if (hit) { marker.position.copy(hit); marker.visible = true; teleTarget = hit; }
+        else { marker.visible = false; teleTarget = null; }
+      } else if (teleAiming) {             // released -> teleport
+        teleAiming = false; arc.visible = false; marker.visible = false;
+        if (teleTarget) teleportTo(teleTarget);
+        teleTarget = null;
+      } else if (Math.abs(stickX) > 0.15) {
+        // smooth turn, ramped by deflection (think FPS mouse-look)
+        const rate = 2.2 * stickX * Math.abs(stickX);
+        rotatePlayer(-rate * vrDt);
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------- door grab
+// squeeze the grip near a door leaf to grab it; while held, the leaf
+// swings to follow the hand around its hinge, clamped door-realistically
+const doorGrab = { hand: null, idx: -1 };
+const DOOR_MAX = 1.83;          // ~105 degrees
+function nearestDoorLeaf(p) {
+  let bi = -1, bd = 0.45;
+  doorLeaves.forEach((d, i) => {
+    const th = d.theta0 + d.rotSign * d.open;
+    const tx = Math.cos(th), tz = -Math.sin(th);   // hinge -> tip direction
+    const rx = p.x - d.pivot.position.x, rz = p.z - d.pivot.position.z;
+    const t = Math.max(0, Math.min(d.len, rx * tx + rz * tz));
+    const dist = Math.hypot(rx - tx * t, rz - tz * t);
+    if (p.y > d.head + 0.3 || dist >= bd) return;
+    bd = dist; bi = i;
+  });
+  return bi;
+}
+function doorGrabUpdate(ctrl) {
+  const d = doorLeaves[doorGrab.idx];
+  if (!d) return;
+  const p = new THREE.Vector3();
+  ctrl.getWorldPosition(p);
+  const rx = p.x - d.pivot.position.x, rz = p.z - d.pivot.position.z;
+  if (rx * rx + rz * rz < 0.01) return;          // too close to the hinge
+  const th = Math.atan2(-rz, rx);
+  let delta = (th - d.theta0) * d.rotSign;
+  delta = ((delta + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  d.open = Math.max(0, Math.min(DOOR_MAX, delta));
+  d.pivot.rotation.y = d.theta0 + d.rotSign * d.open;
+}
+function handleDoorGrip(handedness, ctrl, grip) {
+  if (grip) {
+    if (doorGrab.hand === null) {
+      const p = new THREE.Vector3();
+      ctrl.getWorldPosition(p);
+      const bi = nearestDoorLeaf(p);
+      if (bi >= 0) { doorGrab.hand = handedness; doorGrab.idx = bi; }
+    }
+    if (doorGrab.hand === handedness) doorGrabUpdate(ctrl);
+  } else if (doorGrab.hand === handedness) {
+    doorGrab.hand = null;
+    doorGrab.idx = -1;
+  }
+}
+window.PLAN2VR_DOORS = {
+  leaves: () => doorLeaves, nearestDoorLeaf, doorGrabUpdate,
+  handleDoorGrip, doorGrab,
+};
+
+let vrDt = 0.016;
+function showVRHelp() {
+  vrMsg([
+    'Sticks: walk/turn · push R: teleport · grip: doors',
+    'R trigger: laser draw · L trigger: record note',
+    'X: file issue here · click R stick: height',
+    'Hold B on a door: calibrate · Y: this help',
+  ], 14);
+}
+
+// Seated play: a stationary guardian puts the floor origin at head
+// height, sinking the camera to y~0. Lift the rig so the eye lands at
+// standing height; the right-stick click redoes it any time.
+function resetHeight() {
+  const y = camera.position.y;      // XR local space eye height
+  heightOffset = spawnEyeY - y;     // kept apart from terrain height, so
+  dolly.position.y = groundY + heightOffset;   // stairs still work seated
+  vrMsg([`Height reset (eye ${(y + heightOffset).toFixed(2)}m)`], 3);
+}
+
+renderer.xr.addEventListener('sessionstart', () => {
+  overlay.style.display = 'none';
+  toggleMap(false);            // map view is a flat-screen affair
+  setTimeout(showVRHelp, 800);
+  initVoiceNotes();
+  // warm the spectator renderer now: its one-time shader compile would
+  // otherwise hitch the first seconds of the first recording
+  setTimeout(() => { if (renderer.xr.isPresenting) renderSpectator(); }, 2500);
+  setTimeout(() => {
+    if (renderer.xr.isPresenting && camera.position.y < 0.95) resetHeight();
+  }, 1600);
+  const session = renderer.xr.getSession();
+  // AR-capable session: starts rendered as full VR; B flips passthrough
+  calib.ar = !!(session.environmentBlendMode && session.environmentBlendMode !== 'opaque');
+  passthroughOff();
+  if (calib.anchors.length) {
+    const T = applyAlignment();
+    if (T && !calib.mode) vrMsg([`Alignment restored from ${calib.anchors.length} anchor(s)`,
+                  `fit residual ${T.residIn.toFixed(1)}" - B: calibrate (passthrough)`]);
+  }
+});
+renderer.xr.addEventListener('sessionend', () => {
+  heightOffset = 0; groundY = 0; fallV = 0;
+  dolly.position.y = 0;
+  arc.visible = false; marker.visible = false;
+  laserOff();
+  if (calib.stage === 'trace') isolationOff();
+  else if (calib.ar) passthroughOff();
+  calib.ar = false;
+  calib.mode = false; calib.aligned = false;
+  calib.stage = 'off'; calib.target = null; calib.bPrev = false;
+  calib.tracing = false; calib.samples = [];
+  traceLine.visible = false;
+  anchorMarkers.visible = false;
+  calibTarget.visible = false;
+  vrPanel.visible = false;
+  dolly.position.set(spawnPose.x, 0, spawnPose.z);
+  dolly.rotation.set(0, spawnPose.rot, 0);
+  camera.position.set(0, spawnEyeY, 0);
+  if (!controls.isLocked) overlay.style.display = 'flex';
+});
+
+// ---------------------------------------------------------------- collision
+// classic circle-vs-segment push-out against the solid wall spans, so the
+// player can pass through doorways but not through walls or windows
+const PLAYER_R = 0.22;
+const _cpos = new THREE.Vector3();
+function pushOut(segs) {
+  for (const s of segs) {
+    const dx = s.bx - s.ax, dz = s.bz - s.az;
+    const len2 = dx * dx + dz * dz;
+    const t = len2
+      ? Math.max(0, Math.min(1,
+          ((_cpos.x - s.ax) * dx + (_cpos.z - s.az) * dz) / len2))
+      : 0;                       // zero-length capsule = circle
+    const ox = _cpos.x - (s.ax + t * dx), oz = _cpos.z - (s.az + t * dz);
+    const d = Math.hypot(ox, oz);
+    const min = s.hw + PLAYER_R;
+    if (d < min) {
+      let px, pz;
+      if (d > 1e-6) { px = ox / d; pz = oz / d; }
+      else {                       // dead centre: eject along the normal
+        const L = Math.sqrt(len2) || 1;
+        px = -dz / L; pz = dx / L;
+      }
+      const push = min - d;
+      _cpos.x += px * push; _cpos.z += pz * push;
+      dolly.position.x += px * push;
+      dolly.position.z += pz * push;
+    }
+  }
+}
+// door leaves are moving obstacles: collision segments at their current
+// swing angle, so a door blocks you until you grab it out of the way
+function doorSegs() {
+  return doorLeaves.map(d => {
+    const th = d.theta0 + d.rotSign * d.open;
+    const tx = Math.cos(th), tz = -Math.sin(th);
+    return {
+      ax: d.pivot.position.x, az: d.pivot.position.z,
+      bx: d.pivot.position.x + tx * d.len,
+      bz: d.pivot.position.z + tz * d.len,
+      hw: 0.045, top: d.head,
+    };
+  });
+}
+function resolveCollision() {
+  const fixOn = fixtureGroup && fixtureGroup.visible && fixtureSegs.length;
+  if (!collisionSegs.length && !fixOn && !doorLeaves.length) return;
+  camera.getWorldPosition(_cpos);
+  for (let iter = 0; iter < 2; iter++) {
+    pushOut(collisionSegs);
+    if (doorLeaves.length) pushOut(doorSegs());
+    if (fixOn) pushOut(fixtureSegs);
+  }
+}
+
+// ---------------------------------------------------------------- terrain
+// stairs are walkable ground: the floor height under the player follows
+// the riser tops, gravity pulls the rig down when the ground drops away
+// (walk off the open end of a flight and you land back on the slab), and
+// a ledge too tall to step up behaves like a wall.
+let heightOffset = 0;   // seated-play eye-height calibration
+let groundY = 0;        // terrain height under the player's feet
+let fallV = 0;          // downward speed while airborne
+const STEP_MAX = 0.35;  // tallest ledge the player steps up (m)
+const lastSafe = { x: 0, z: 0 };
+
+function groundHeightAt(x, z) {
+  let g = 0;
+  for (const s of stairSteps) {
+    const lx = (x - s.cx) * s.ux + (z - s.cz) * s.uz;   // along the tread
+    const lz = (x - s.cx) * s.kx + (z - s.cz) * s.kz;   // along the climb
+    if (Math.abs(lx) <= s.hl + 0.06 && Math.abs(lz) <= s.hd + 0.06 &&
+        s.top > g) g = s.top;
+  }
+  return g;
+}
+
+function applyTerrain(dt) {
+  camera.getWorldPosition(_cpos);
+  let target = groundHeightAt(_cpos.x, _cpos.z);
+  if (target - groundY > STEP_MAX) {
+    // too tall to climb: shove the player back where they came from
+    dolly.position.x += lastSafe.x - _cpos.x;
+    dolly.position.z += lastSafe.z - _cpos.z;
+    target = groundHeightAt(lastSafe.x, lastSafe.z);
+  } else {
+    lastSafe.x = _cpos.x; lastSafe.z = _cpos.z;
+  }
+  if (target >= groundY) {         // stepping up: glide onto the tread
+    fallV = 0;
+    groundY += (target - groundY) * Math.min(1, dt * 10);
+    if (target - groundY < 0.004) groundY = target;
+  } else {                         // ground fell away: fall
+    fallV += 9.8 * dt;
+    groundY = Math.max(target, groundY - fallV * dt);
+    if (groundY === target) fallV = 0;
+  }
+  dolly.position.y = groundY + heightOffset;
+}
+window.PLAN2VR_PHYS = {
+  groundHeightAt, applyTerrain, dolly, camera, teleportTo,
+  steps: () => stairSteps, segs: () => collisionSegs,
+  state: () => ({ groundY, heightOffset, fallV, steps: stairSteps.length,
+                  segs: collisionSegs.length, fix: fixtureSegs.length }),
+};
+
+// ---------------------------------------------------------------- loop
+// spectator camera: mirrors the headset view while a note records, so
+// notes capture what the wearer sees. It renders on a SECOND renderer
+// with its own small canvas and GL context - sharing the XR context
+// corrupted the in-flight XR frame and the headset flashed into
+// passthrough on every capture frame. An isolated context cannot
+// touch the XR frame by construction. Shadows off, own IBL env.
+const specCam = new THREE.PerspectiveCamera(75, 16 / 9, 0.05, 500);
+const SPEC_W = 640, SPEC_H = 360;
+const specCanvas = document.createElement('canvas');
+specCanvas.width = SPEC_W;
+specCanvas.height = SPEC_H;
+let specRenderer = null;
+let specEnv = null;
+function ensureSpecRenderer() {
+  if (specRenderer) return true;
+  try {
+    specRenderer = new THREE.WebGLRenderer({
+      canvas: specCanvas, antialias: false, powerPreference: 'low-power' });
+    specRenderer.setSize(SPEC_W, SPEC_H, false);
+    specRenderer.setPixelRatio(1);
+    specRenderer.shadowMap.enabled = false;
+    specRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    specRenderer.toneMappingExposure = 0.9;
+    const pm = new THREE.PMREMGenerator(specRenderer);
+    specEnv = pm.fromScene(new RoomEnvironment(specRenderer), 0.04).texture;
+    return true;
+  } catch (e) {
+    specRenderer = null;
+    return false;
+  }
+}
+let specFrame = 0;
+function renderSpectator() {
+  if (!ensureSpecRenderer()) return;
+  camera.getWorldPosition(specCam.position);
+  camera.getWorldQuaternion(specCam.quaternion);
+  // textures re-upload to the second context automatically, but the
+  // PMREM env is a render-target texture and is context-bound: swap in
+  // this context's own copy for the pass
+  const envMain = scene.environment;
+  scene.environment = specEnv;
+  try { specRenderer.render(scene, specCam); }
+  finally { scene.environment = envMain; }
+}
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (renderer.xr.isPresenting) { vrDt = dt; handleVRInput(); }
+  else if (tour.active) { tourStep(dt); applyGyroTour(); }
+  else if (mapMode) mapMove(dt);
+  else { desktopMove(dt); applyGyro(); }
+  // collision + gravity apply everywhere except the auto-tour and while
+  // actively calibrating (a stale alignment must never disable them)
+  if (!tour.active && !calib.mode) {
+    resolveCollision();
+    applyTerrain(dt);
+  }
+  if (calib.clearArmed > 0) calib.clearArmed -= dt;
+  drawTick(dt);
+  vrPanelTick(dt);
+  recDot.visible = noteRec.active;
+  if (noteRec.active)
+    recDot.material.opacity = 0.55 + 0.45 * Math.sin(clock.elapsedTime * 5);
+  renderer.render(scene,
+    mapMode && !renderer.xr.isPresenting ? mapCam : camera);
+  // in-headset recording: every 3rd frame, re-render the scene from the
+  // head pose into the page canvas (the canvas is what captureStream
+  // records - the XR framebuffer itself is not capturable)
+  if (noteRec.active && noteRec.videoOn) {
+    specFrame = (specFrame + 1) % 3;
+    if (specFrame === 0) {
+      if (renderer.xr.isPresenting) renderSpectator();
+      requestSpecFrame();   // explicit capture: auto-fps gets no frames in XR
+    }
+  }
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  specCam.aspect = innerWidth / innerHeight;
+  specCam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (mapMode) fitMapCam();
+});
+
+// ---------------------------------------------------------------- load plan
+function showError(msg) {
+  const el = document.getElementById('err');
+  el.style.display = 'flex';
+  el.textContent = msg;
+}
+
+function loadPlan(plan) {
+  document.getElementById('err').style.display = 'none';
+  currentPlanSource = plan.source || null;   // stamped into VR-note issues
+  buildPlan(plan);
+  if (mapMode) {               // keep map view across plan switches
+    if (ceiling) ceiling.visible = false;
+    fitMapCam();
+    mapCam.position.x = 0; mapCam.position.z = 0;
+    mapCam.zoom = 1; mapCam.updateProjectionMatrix();
+  }
+  applyLayers();
+  loadAnchors();               // per-plan persisted calibration anchors
+  calib.aligned = false;
+  if (calib.mode) { refreshAnchorMarkers(); vrMsg(calibStatusLines(), true); }
+  if (renderer.xr.isPresenting && calib.anchors.length) applyAlignment();
+}
+
+function fetchPlan(url) {
+  // no-store: GitHub Pages (and browsers) otherwise keep serving a stale
+  // plan.json under a freshly deployed page - the model looks "old"
+  fetch(url, { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(plan => { currentPlanKey = url; loadPlan(plan); })
+    .catch(() => {
+      // file:// or missing plan.json - fall back to the embedded copy
+      if (window.PLAN_TO_VR_EMBEDDED) loadPlan(window.PLAN_TO_VR_EMBEDDED);
+      else showError(
+        'Could not fetch ' + url + ' from this folder. ' +
+        'Serve the viewer next to a plan.json (python -m http.server), ' +
+        'or drag-and-drop a plan.json onto the page.'
+      );
+    });
+}
+
+fetchPlan('plans/home-l1.json');
+document.getElementById('plan-select').addEventListener('change', e => {
+  fetchPlan(e.target.value);
+});
+
+// drag-and-drop a plan.json
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      currentPlanKey = 'dropped:' + file.name;
+      loadPlan(JSON.parse(reader.result));
+    }
+    catch (err) { showError('Invalid JSON: ' + err.message); }
+  };
+  reader.readAsText(file);
+});
+</script>

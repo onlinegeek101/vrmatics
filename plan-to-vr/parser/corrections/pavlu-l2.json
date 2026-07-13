@@ -1,0 +1,71 @@
+{
+ "_source": "homeowner walkthrough review 2026-07-13 (16-snapshot audit)",
+ "stairs": [
+  {
+   "near": [
+    779,
+    348
+   ],
+   "split_y": 348,
+   "south": {
+    "down": true,
+    "direction": [
+     -1,
+     0
+    ]
+   },
+   "north": {
+    "direction": [
+     -1,
+     0
+    ]
+   },
+   "_note": "#15: down-to-Floor-1 flight in the south strip, attic flight in the north strip, both running west"
+  }
+ ],
+ "openings": [
+  {
+   "near": [
+    1043.9,
+    661.9
+   ],
+   "remove": true,
+   "_note": "#16: primary-bath north wall is solid; fixture linework broke the strokes"
+  },
+  {
+   "near": [
+    1060.6,
+    504.1
+   ],
+   "remove": true,
+   "_note": "#16: vanity wall is solid"
+  },
+  {
+   "near": [
+    692.6,
+    460.9
+   ],
+   "width": 38,
+   "_note": "#14: a 38-inch door into the living space over the garage"
+  },
+  {
+   "near": [
+    692.6,
+    431.9
+   ],
+   "remove": true,
+   "_note": "#14: leftover of the split door is plain wall (interior), not a sidelite"
+  },
+  {
+   "near": [
+    692.6,
+    493.4
+   ],
+   "remove": true,
+   "_note": "#14: leftover of the split door is plain wall (interior), not a sidelite"
+  }
+ ],
+ "fixtures": {
+  "remove_chimneys": true
+ }
+}

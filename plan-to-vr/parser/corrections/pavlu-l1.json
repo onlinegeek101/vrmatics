@@ -1,0 +1,62 @@
+{
+ "_source": "homeowner walkthrough review 2026-07-13 (16-snapshot audit); facts no geometry rule can infer",
+ "stairs": [
+  {
+   "near": [
+    616,
+    436
+   ],
+   "down": true,
+   "_note": "#1: 4 treads DOWN into the garage; the main floor sits ~4 risers above the garage slab"
+  },
+  {
+   "near": [
+    636,
+    610
+   ],
+   "down": true,
+   "direction": [
+    1,
+    0
+   ],
+   "_note": "#2: garage-to-basement run, bottom at the EAST end"
+  }
+ ],
+ "openings": [
+  {
+   "near": [
+    692.6,
+    692.2
+   ],
+   "remove": true,
+   "_note": "#11: solid interior wall by the play room; the glazing strokes are shelving/railing"
+  },
+  {
+   "near": [
+    984.8,
+    663.0
+   ],
+   "width": 104,
+   "_note": "#9: sheet label reads 8'8\" cased opening - trust the label over the measured jambs"
+  },
+  {
+   "near": [
+    895.5,
+    825.3
+   ],
+   "shut": true,
+   "_note": "#10: door to the (not yet modeled) sunroom - keep it closed"
+  }
+ ],
+ "fixtures": {
+  "remove_chimneys": true,
+  "_note": "#12/#13: both rect+rung masses are exterior steps / the sunroom connection; the real chimney gets added later"
+ },
+ "camera": {
+  "near": [
+   870,
+   294
+  ],
+  "_note": "spawn at the FRONT door (with sidelites), not the widest back door"
+ }
+}
