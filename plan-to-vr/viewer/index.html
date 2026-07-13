@@ -712,7 +712,9 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
       knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
       pivot.add(knob);
     }
-    const open0 = Math.PI / 2;      // matches the sheet's drawn position
+    // sheet-drawn position (90deg) unless the plan says the door stays
+    // closed (e.g. it leads somewhere not modeled yet)
+    const open0 = op.shut ? 0 : Math.PI / 2;
     pivot.rotation.y = theta0 + rotSign * open0;
     group.add(pivot);
     doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
@@ -1148,7 +1150,7 @@ function buildPlan(plan) {
         sill: (o.sill || 0) * IN2M,
         head: Math.min((o.head || 80), w.height || 96) * IN2M,
         type: o.type || 'opening',
-        hinge: o.hinge || 0, swing: o.swing || 0,
+        hinge: o.hinge || 0, swing: o.swing || 0, shut: !!o.shut,
       };
     }).sort((a, b) => a.lo - b.lo);
 

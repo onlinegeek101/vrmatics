@@ -330,14 +330,15 @@
  "openings": [
   {
    "wall_index": 0,
-   "position": 0.3112,
-   "width": 76.64,
+   "position": 0.318,
+   "width": 38,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": -1,
    "swing": 1,
-   "leaf": 46.2
+   "leaf": 46.2,
+   "hinge_at": 143.6
   },
   {
    "wall_index": 0,
@@ -452,23 +453,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 42.3
-  },
-  {
-   "wall_index": 7,
-   "position": 0.4878,
-   "width": 141.36,
-   "type": "opening",
-   "sill": 0.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 8,
-   "position": 0.377,
-   "width": 138.88,
-   "type": "opening",
-   "sill": 0.0,
-   "head": 80.0
+   "leaf": 42.3,
+   "hinge_at": 134.8
   },
   {
    "wall_index": 8,
@@ -479,7 +465,8 @@
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 42.2
+   "leaf": 42.2,
+   "hinge_at": 191.3
   },
   {
    "wall_index": 11,
@@ -506,7 +493,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 33.6
+   "leaf": 33.6,
+   "hinge_at": 145.2
   },
   {
    "wall_index": 12,
@@ -533,7 +521,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 42.1
+   "leaf": 42.1,
+   "hinge_at": 199.5
   },
   {
    "wall_index": 14,
@@ -568,7 +557,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": 1,
-   "leaf": 42.2
+   "leaf": 42.2,
+   "hinge_at": 84.7
   }
  ],
  "fixtures": [],
@@ -851,6 +841,7 @@
   ]
  ],
  "warnings": [
+  "1 over-wide door(s) split at the drawn leaf; leftover spans became sidelites (exterior) or wall",
   "orphan line not paired into a wall: (841.6,426.4)->(845.6,426.9)",
   "orphan line not paired into a wall: (766.1,422.6)->(766.1,427.2)",
   "orphan line not paired into a wall: (830.6,422.6)->(830.6,427.2)",
@@ -883,7 +874,8 @@
   "orphan line not paired into a wall: (845.3,671.5)->(695.5,675.5)",
   "orphan line not paired into a wall: (695.5,675.5)->(841.6,671.5)",
   "orphan line not paired into a wall: (689.4,444.6)->(689.4,484.2)",
-  "orphan line not paired into a wall: (845.5,800.3)->(845.5,735.8)"
+  "orphan line not paired into a wall: (845.5,800.3)->(845.5,735.8)",
+  "homeowner corrections applied: pavlu-l2.json"
  ],
  "stairs": [
   {
@@ -898,11 +890,11 @@
     ],
     [
      804.8,
-     397.6
+     345.28
     ],
     [
      752.8,
-     397.6
+     345.28
     ]
    ],
    "treads": [
@@ -965,7 +957,34 @@
       804.8,
       345.28
      ]
+    ]
+   ],
+   "down": true,
+   "direction": [
+    -1,
+    0
+   ]
+  },
+  {
+   "polygon": [
+    [
+     752.8,
+     348.96
     ],
+    [
+     804.8,
+     348.96
+    ],
+    [
+     804.8,
+     397.6
+    ],
+    [
+     752.8,
+     397.6
+    ]
+   ],
+   "treads": [
     [
      [
       752.8,
@@ -1028,8 +1047,8 @@
     ]
    ],
    "direction": [
-    1.0,
-    0.0
+    -1,
+    0
    ]
   }
  ],
@@ -1037,7 +1056,7 @@
   {
    "position": [
     719.98,
-    460.88
+    464.44
    ],
    "rotation": -90.0,
    "is_primary": true

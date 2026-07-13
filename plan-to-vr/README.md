@@ -224,9 +224,23 @@ layers and arcs don't survive plotting, so it works from what does:
   the footprint arbitrates window-vs-cased-opening calls afterwards
 
 ```bash
-python parser/pdf2plan.py binder.pdf --page 0 -o viewer/plans/home-l1.json
+python parser/pdf2plan.py binder.pdf --page 0 -o viewer/plans/home-l1.json \
+    --fix parser/corrections/pavlu-l1.json
 python parser/audit_pavlu.py viewer/plans/home-l1.json viewer/plans/home-l2.json
 ```
+
+`--fix` folds in **homeowner ground truth** collected from a
+snapshot-by-snapshot review (see `parser/corrections/README.md`): which
+stair runs descend and where they lead, fused double-flight wells split
+into their real halves, sheet-labeled dimensions, walls whose linework
+breaks but reality doesn't, doors that stay shut because they lead
+somewhere not modeled yet. The corrections match by location, apply
+after all rule-based extraction, and are logged line by line - the
+parser itself stays generic. A rule that came out of the same review:
+a door gap much wider than its drawn swing-arc leaf splits into the
+leaf at the arc's hinge plus sidelite glass (exterior) or wall
+(interior), which is how the front entry renders as door + flanking
+lites instead of one oversized slab.
 
 Beyond the weight classes, walls drawn at symbol weight (sunroom window
 bands, glazed bays) are recovered by pairing merged line runs behind

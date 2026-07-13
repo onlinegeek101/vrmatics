@@ -648,6 +648,7 @@ def classify_openings(walls, hints, tol):
 
             hinge = swing = 0
             leaf_r = 0.0
+            hinge_at = None
             if best is not None and hints[best[1]]["prio"] == 0:
                 # door orientation from the swing arc: the hinge is the
                 # jamb nearest the arc center, the swing side is where
@@ -655,6 +656,7 @@ def classify_openings(walls, hints, tol):
                 h = hints[best[1]]
                 along = dot(sub(h["pt"], (wall.c0[0], wall.c0[1])), axis)
                 hinge = -1 if along < center else 1
+                hinge_at = along          # arc centre along the wall, inches
                 leaf_r = h["r"]
                 if "a0" in h:
                     a0, a1 = math.radians(h["a0"]), math.radians(h["a1"])
@@ -709,8 +711,89 @@ def classify_openings(walls, hints, tol):
                 entry["hinge"] = hinge   # -1: jamb toward wall start
                 entry["swing"] = swing   # +1: opens toward wall normal
                 entry["leaf"] = round(leaf_r, 1)  # leaf length (arc radius)
+                if hinge_at is not None:
+                    entry["hinge_at"] = round(hinge_at, 1)
             openings.append(entry)
     return openings, pass_through, filled
+
+
+# --------------------------------------------------------------------------
+# 5b. entry doors with sidelites
+# --------------------------------------------------------------------------
+DOOR_SPLIT_EXTRA = 16.0   # gap must exceed the leaf by this to split
+SIDELITE_MIN = 8.0        # leftover narrower than this is jamb slop
+
+
+def split_door_sidelites(walls, openings, footprint, warnings):
+    """The drawn swing arc measures the actual leaf; when a classified door
+    gap is much wider than that leaf, the gap is really a door plus fixed
+    flanking panels (entry sidelites) or plain wall the drafter bridged.
+    Shrink the door to the leaf, anchored where the arc says the hinge is;
+    each leftover side span becomes a sidelite window if the wall is
+    exterior, or reverts to solid wall (no opening entry) inside."""
+    fp_poly = None
+    try:
+        from shapely.geometry import Point, Polygon
+        if footprint and len(footprint) >= 4:
+            fp_poly = Polygon(footprint)
+            if not fp_poly.is_valid:
+                fp_poly = fp_poly.buffer(0)
+    except Exception:
+        fp_poly = None
+    out = []
+    n_split = 0
+    for o in openings:
+        leaf = o.get("leaf") or 0.0
+        if (o["type"] != "door" or not o.get("hinge") or leaf < 18.0
+                or o["width"] - leaf < DOOR_SPLIT_EXTRA):
+            out.append(o)
+            continue
+        w = walls[o["wall_index"]]
+        wall_len = math.dist(w.c0, w.c1) or 1.0
+        axis = w.axis
+        center = o["position"] * wall_len
+        lo, hi = center - o["width"] / 2, center + o["width"] / 2
+        # leaf sits at the hinge (arc centre) extending toward the gap's
+        # far side; fall back to the hinge-sign jamb without an arc pos
+        ha = o.get("hinge_at")
+        if ha is None:
+            ha = lo if o["hinge"] < 0 else hi
+        ha = max(lo, min(hi, ha))
+        sign = 1.0 if (center - ha) >= 0 else -1.0
+        dlo, dhi = sorted((ha, ha + sign * leaf))
+        dlo = max(lo, dlo)
+        dhi = min(hi, dhi)
+        door = dict(o)
+        door["width"] = round(dhi - dlo, 2)
+        door["position"] = round(((dlo + dhi) / 2) / wall_len, 4)
+        out.append(door)
+        n_split += 1
+        exterior = True
+        if fp_poly is not None:
+            gx = w.c0[0] + axis[0] * center
+            gy = w.c0[1] + axis[1] * center
+            off = w.thickness / 2 + 8.0
+            nx, ny = -axis[1] * off, axis[0] * off
+            exterior = not (fp_poly.contains(Point(gx + nx, gy + ny))
+                            and fp_poly.contains(Point(gx - nx, gy - ny)))
+        for s_lo, s_hi in ((lo, dlo), (dhi, hi)):
+            if s_hi - s_lo < SIDELITE_MIN:
+                continue
+            if exterior:
+                out.append({
+                    "wall_index": o["wall_index"],
+                    "position": round(((s_lo + s_hi) / 2) / wall_len, 4),
+                    "width": round(s_hi - s_lo, 2),
+                    "type": "window",
+                    "sill": 12.0,
+                    "head": o["head"],
+                })
+            # interior leftover: no entry -> the span rebuilds as wall
+    if n_split:
+        warnings.append(
+            f"{n_split} over-wide door(s) split at the drawn leaf; "
+            f"leftover spans became sidelites (exterior) or wall")
+    openings[:] = out
 
 
 # add an axis property to Wall (used above)
@@ -1001,6 +1084,7 @@ def extract(path, wall_layers, door_layers, window_layers, tol, max_wall,
     rooms = detect_rooms(walls, fixtures, warnings)
     footprint = compute_footprint(walls, warnings)
     classify_garages(rooms, walls, openings, warnings, footprint)
+    split_door_sidelites(walls, openings, footprint, warnings)
 
     for s in orphans:
         warnings.append(

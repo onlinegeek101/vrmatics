@@ -438,14 +438,6 @@
   },
   {
    "wall_index": 0,
-   "position": 0.7401,
-   "width": 90.88,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 0,
    "position": 0.9112,
    "width": 74.56,
    "type": "window",
@@ -485,7 +477,9 @@
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 46.0
+   "leaf": 46.0,
+   "hinge_at": 176.7,
+   "shut": true
   },
   {
    "wall_index": 7,
@@ -536,7 +530,8 @@
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 46.3
+   "leaf": 46.3,
+   "hinge_at": 14.5
   },
   {
    "wall_index": 9,
@@ -580,14 +575,31 @@
   },
   {
    "wall_index": 10,
-   "position": 0.7151,
-   "width": 66.56,
+   "position": 0.715,
+   "width": 37.5,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 37.5
+   "leaf": 37.5,
+   "hinge_at": 418.5
+  },
+  {
+   "wall_index": 10,
+   "position": 0.6725,
+   "width": 14.48,
+   "type": "window",
+   "sill": 12.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 10,
+   "position": 0.7576,
+   "width": 14.58,
+   "type": "window",
+   "sill": 12.0,
+   "head": 80.0
   },
   {
    "wall_index": 11,
@@ -606,7 +618,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 42.1
+   "leaf": 42.1,
+   "hinge_at": 49.8
   },
   {
    "wall_index": 13,
@@ -619,7 +632,7 @@
   {
    "wall_index": 13,
    "position": 0.6032,
-   "width": 109.44,
+   "width": 104,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
@@ -633,7 +646,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 42.3
+   "leaf": 42.3,
+   "hinge_at": 151.5
   },
   {
    "wall_index": 16,
@@ -676,7 +690,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": 1,
-   "leaf": 42.1
+   "leaf": 42.1,
+   "hinge_at": 422.1
   },
   {
    "wall_index": 19,
@@ -687,7 +702,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 46.0
+   "leaf": 46.0,
+   "hinge_at": 566.2
   },
   {
    "wall_index": 20,
@@ -714,7 +730,8 @@
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 42.2
+   "leaf": 42.2,
+   "hinge_at": 123.8
   },
   {
    "wall_index": 24,
@@ -725,7 +742,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 40.2
+   "leaf": 40.2,
+   "hinge_at": 103.7
   },
   {
    "wall_index": 25,
@@ -736,7 +754,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": 1,
-   "leaf": 36.0
+   "leaf": 36.0,
+   "hinge_at": 35.7
   },
   {
    "wall_index": 29,
@@ -763,7 +782,8 @@
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 46.3
+   "leaf": 46.3,
+   "hinge_at": 51.2
   },
   {
    "wall_index": 30,
@@ -774,34 +794,7 @@
    "head": 80.0
   }
  ],
- "fixtures": [
-  {
-   "name": "CHIMNEY",
-   "center": [
-    1193.6,
-    539.2
-   ],
-   "rotation": 0.0,
-   "size": [
-    49.92,
-    70.08
-   ],
-   "height": 96.0
-  },
-  {
-   "name": "CHIMNEY",
-   "center": [
-    896.48,
-    863.68
-   ],
-   "rotation": 0.0,
-   "size": [
-    49.92,
-    70.08
-   ],
-   "height": 96.0
-  }
- ],
+ "fixtures": [],
  "rooms": [
   {
    "polygon": [
@@ -1133,6 +1126,7 @@
   ]
  ],
  "warnings": [
+  "1 over-wide door(s) split at the drawn leaf; leftover spans became sidelites (exterior) or wall",
   "orphan line not paired into a wall: (696.0,651.4)->(696.0,675.2)",
   "orphan line not paired into a wall: (696.0,402.2)->(696.0,484.6)",
   "orphan line not paired into a wall: (835.8,452.6)->(835.8,489.3)",
@@ -1236,7 +1230,8 @@
   "orphan line not paired into a wall: (1039.1,232.2)->(1039.1,232.2)",
   "orphan line not paired into a wall: (1039.1,232.2)->(1040.4,235.5)",
   "orphan line not paired into a wall: (1040.4,235.5)->(1040.4,235.5)",
-  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "5 wide gap(s) had no door/window evidence; kept as full-height cased openings",
+  "homeowner corrections applied: pavlu-l1.json"
  ],
  "stairs": [
   {
@@ -1303,7 +1298,8 @@
    "direction": [
     0.0,
     -1.0
-   ]
+   ],
+   "down": true
   },
   {
    "polygon": [
@@ -1425,6 +1421,11 @@
       634.72
      ]
     ]
+   ],
+   "down": true,
+   "direction": [
+    1,
+    0
    ]
   },
   {
@@ -1624,7 +1625,7 @@
  "cameras": [
   {
    "position": [
-    870.22,
+    870.28,
     321.76
    ],
    "rotation": -0.0,

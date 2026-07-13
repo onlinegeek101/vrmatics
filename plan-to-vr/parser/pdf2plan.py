@@ -680,19 +680,21 @@ def recover_symbol_walls(symbol_segs, wall_segs):
     return lines, panels
 
 
-def default_camera(plan):
+def default_camera(plan, prefer=None):
     """Spawn the walkthrough just inside the main entry.
 
-    The main entry is taken as the widest exterior hinged door (footprint
-    probe: one side in, one side out). The camera stands two feet inside
-    it, facing into the house - the view a visitor gets stepping in.
+    The main entry is the widest exterior hinged door (footprint probe:
+    one side in, one side out) - or, when `prefer` gives a plan-inch
+    point, the exterior door nearest it (homeowner-pinned entry). Doors
+    marked shut never win. The camera stands two feet inside, facing
+    into the house - the view a visitor gets stepping in.
     """
     fp = plan.get("footprint") or []
     if len(fp) < 3:
         return None
     best = None
     for o in plan["openings"]:
-        if o["type"] != "door":
+        if o["type"] != "door" or o.get("shut"):
             continue
         w = plan["walls"][o["wall_index"]]
         dx = w["end"][0] - w["start"][0]
@@ -707,14 +709,16 @@ def default_camera(plan):
         if in1 == in2:
             continue                       # interior door
         sgn = 1.0 if in1 else -1.0         # inward normal
-        if best is None or o["width"] > best[0]:
+        score = (-math.hypot(gx - prefer[0], gy - prefer[1]) if prefer
+                 else o["width"])
+        if best is None or score > best[0]:
             ux, uy = -dy / L * sgn, dx / L * sgn
             px = gx + ux * (w["thickness"] / 2 + 24.0)
             py = gy + uy * (w["thickness"] / 2 + 24.0)
             # viewer yaw: 0 faces plan north (+y); positive per
             # dolly.rotation.y, forward = (-sin yaw, +cos yaw)
             yaw = math.degrees(math.atan2(-ux, uy))
-            best = (o["width"], px, py, yaw)
+            best = (score, px, py, yaw)
     if best is None:
         return None
     return {
@@ -734,6 +738,90 @@ def point_in_poly(px, py, poly):
             if x > px:
                 hit = not hit
     return hit
+
+
+def _op_center(plan, o):
+    w = plan["walls"][o["wall_index"]]
+    ax, ay = w["start"]
+    bx, by = w["end"]
+    return (ax + (bx - ax) * o["position"], ay + (by - ay) * o["position"])
+
+
+def apply_corrections(plan, fixes):
+    """Fold in homeowner ground truth that no geometry rule can infer:
+    which stair runs descend, sheet ambiguities (a band that is really
+    window-wall-door), labeled dimensions, walls the linework breaks but
+    reality doesn't. Matching is by proximity in plan inches so the fixes
+    survive regeneration; every application (or miss) is logged."""
+    for fx in fixes.get("stairs") or []:
+        tx, ty = fx["near"]
+        best, bd = None, 1e9
+        for st in plan.get("stairs") or []:
+            xs = [p[0] for p in st["polygon"]]
+            ys = [p[1] for p in st["polygon"]]
+            d = math.hypot((min(xs) + max(xs)) / 2 - tx,
+                           (min(ys) + max(ys)) / 2 - ty)
+            if d < bd:
+                bd, best = d, st
+        if best is None or bd > 90:
+            print(f"fix: stair near {fx['near']}: NO MATCH ({bd:.0f}\" off)")
+            continue
+        if "split_y" in fx:
+            y0 = fx["split_y"]
+            halves = []
+            for key in ("south", "north"):
+                props = fx.get(key)
+                if props is None:
+                    continue
+                treads = [t for t in best["treads"]
+                          if ((t[0][1] + t[1][1]) / 2 < y0) == (key == "south")]
+                if not treads:
+                    continue
+                xs = [q[0] for t in treads for q in t]
+                ys = [q[1] for t in treads for q in t]
+                st2 = {"polygon": [[min(xs), min(ys)], [max(xs), min(ys)],
+                                   [max(xs), max(ys)], [min(xs), max(ys)]],
+                       "treads": treads}
+                st2.update(props)
+                halves.append(st2)
+            plan["stairs"].remove(best)
+            plan["stairs"].extend(halves)
+            print(f"fix: stair near {fx['near']}: split at y={y0} "
+                  f"into {len(halves)} runs")
+        else:
+            for k in ("down", "direction"):
+                if k in fx:
+                    best[k] = fx[k]
+            print(f"fix: stair near {fx['near']}: "
+                  + ", ".join(f"{k}={fx[k]}" for k in ("down", "direction")
+                              if k in fx))
+    for fx in fixes.get("openings") or []:
+        tx, ty = fx["near"]
+        best, bd = None, 1e9
+        for o in plan["openings"]:
+            cx, cy = _op_center(plan, o)
+            d = math.hypot(cx - tx, cy - ty)
+            if d < bd:
+                bd, best = d, o
+        if best is None or bd > 30:
+            print(f"fix: opening near {fx['near']}: NO MATCH ({bd:.0f}\" off)")
+            continue
+        if fx.get("remove"):
+            plan["openings"].remove(best)
+            print(f"fix: opening near {fx['near']}: removed "
+                  f"({best['type']} {best['width']}\")")
+            continue
+        applied = []
+        if "width" in fx:
+            best["width"] = fx["width"]
+            applied.append(f"width={fx['width']}")
+        if "type" in fx:
+            best["type"] = fx["type"]
+            applied.append(f"type={fx['type']}")
+        if fx.get("shut"):
+            best["shut"] = True
+            applied.append("shut")
+        print(f"fix: opening near {fx['near']}: " + ", ".join(applied))
 
 
 def fix_window_sides(plan, panels=()):
@@ -1297,6 +1385,9 @@ def main():
     ap.add_argument("--debug-png", default="")
     ap.add_argument("--underlay", default="",
                     help="save a sheet raster crop for the viewer underlay")
+    ap.add_argument("--fix", default="",
+                    help="ground-truth corrections JSON (homeowner review); "
+                         "see corrections/README")
     args = ap.parse_args()
 
     doc = fitz.open(args.input)
@@ -1360,7 +1451,14 @@ def main():
     for w in plan["walls"]:
         w["height"] = args.wall_height
     plan["stairs"] = stairs
-    chimneys = find_chimneys(symbol_segs, wall_segs)
+    fixes = json.load(open(args.fix)) if args.fix else {}
+    if (fixes.get("fixtures") or {}).get("remove_chimneys"):
+        # homeowner review: the rect+rungs masses on these sheets are
+        # exterior steps / a sunroom connection, not chimneys
+        chimneys = []
+        print("fix: chimney detector disabled for this sheet")
+    else:
+        chimneys = find_chimneys(symbol_segs, wall_segs)
     fp = plan.get("footprint") or []
     if len(fp) >= 3:
         # a chimney bumps out of the building; appliance stacks and
@@ -1374,10 +1472,6 @@ def main():
     for c in chimneys:
         c["height"] = args.wall_height
     plan["fixtures"] = (plan.get("fixtures") or []) + chimneys
-
-    spawn = default_camera(plan)
-    if spawn:
-        plan["cameras"] = [spawn]
 
     n_dem, n_pro = fix_window_sides(plan, panels)
     if n_dem or n_pro:
@@ -1400,6 +1494,14 @@ def main():
                 r["kind"] = "room"
         X.classify_garages(plan["rooms"], adapters, plan["openings"],
                            plan["warnings"], plan["footprint"])
+    if fixes:
+        apply_corrections(plan, fixes)
+        plan.setdefault("warnings", []).append(
+            "homeowner corrections applied: " + os.path.basename(args.fix))
+    # camera last: shut doors and corrected openings change the entry pick
+    spawn = default_camera(plan, (fixes.get("camera") or {}).get("near"))
+    if spawn:
+        plan["cameras"] = [spawn]
     plan["source"] = {
         "kind": "pdf", "page": args.page,
         "inches_per_point": round(ips, 4),
