@@ -112,6 +112,18 @@
   },
   {
    "start": [
+    -188.548,
+    -45.167
+   ],
+   "end": [
+    -188.548,
+    223.986
+   ],
+   "thickness": 6.16,
+   "height": 96.0
+  },
+  {
+   "start": [
     252.56,
     -78.035
    ],
@@ -454,6 +466,22 @@
   },
   {
    "wall_index": 9,
+   "position": 0.3686,
+   "width": 33.89,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 9,
+   "position": 0.8408,
+   "width": 71.83,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 10,
    "position": 0.3893,
    "width": 33.99,
    "type": "door",
@@ -465,7 +493,7 @@
    "hinge_at": 33.9
   },
   {
-   "wall_index": 13,
+   "wall_index": 14,
    "position": 0.2263,
    "width": 33.99,
    "type": "opening",
@@ -473,7 +501,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 13,
+   "wall_index": 14,
    "position": 0.8233,
    "width": 33.99,
    "type": "door",
@@ -485,7 +513,7 @@
    "hinge_at": 188.4
   },
   {
-   "wall_index": 15,
+   "wall_index": 16,
    "position": 0.295,
    "width": 62.0,
    "type": "door",
@@ -497,7 +525,7 @@
    "hinge_at": 71.3
   },
   {
-   "wall_index": 16,
+   "wall_index": 17,
    "position": 0.1268,
    "width": 33.98,
    "type": "door",
@@ -509,7 +537,7 @@
    "hinge_at": 56.7
   },
   {
-   "wall_index": 16,
+   "wall_index": 17,
    "position": 0.5173,
    "width": 31.91,
    "type": "opening",
@@ -517,7 +545,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 16,
+   "wall_index": 17,
    "position": 0.8235,
    "width": 64.75,
    "type": "door",
@@ -529,7 +557,7 @@
    "hinge_at": 296.2
   },
   {
-   "wall_index": 17,
+   "wall_index": 18,
    "position": 0.4269,
    "width": 30.25,
    "type": "opening",
@@ -537,7 +565,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 17,
+   "wall_index": 18,
    "position": 0.8919,
    "width": 34.0,
    "type": "door",
@@ -549,7 +577,7 @@
    "hinge_at": 341.6
   },
   {
-   "wall_index": 19,
+   "wall_index": 20,
    "position": 0.5222,
    "width": 62.0,
    "type": "door",
@@ -561,7 +589,7 @@
    "hinge_at": 82.0
   },
   {
-   "wall_index": 20,
+   "wall_index": 21,
    "position": 0.362,
    "width": 123.5,
    "type": "opening",
@@ -569,7 +597,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 20,
+   "wall_index": 21,
    "position": 0.755,
    "width": 101.07,
    "type": "window",
@@ -577,7 +605,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 24,
+   "wall_index": 25,
    "position": 0.6631,
    "width": 36.13,
    "type": "opening",
@@ -585,7 +613,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 25,
+   "wall_index": 26,
    "position": 0.5258,
    "width": 34.0,
    "type": "opening",
@@ -593,7 +621,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 9,
+   "wall_index": 10,
    "position": 0.703,
    "width": 40.0,
    "type": "door",
@@ -605,7 +633,7 @@
    "hinge_at": 89.9
   },
   {
-   "wall_index": 19,
+   "wall_index": 20,
    "position": 0.221,
    "width": 40.0,
    "type": "door",
@@ -617,7 +645,7 @@
    "hinge_at": 22.0
   },
   {
-   "wall_index": 16,
+   "wall_index": 17,
    "position": 0.0623,
    "width": 40.0,
    "type": "door",
@@ -629,7 +657,7 @@
    "hinge_at": -0.9
   },
   {
-   "wall_index": 18,
+   "wall_index": 19,
    "position": 0.49,
    "width": 20.32,
    "type": "door",
@@ -1097,7 +1125,7 @@
   "orphan line not paired into a wall: (223.2,53.5)->(223.2,60.2)",
   "11 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
   "6 wide gap(s) had no door/window evidence; kept as full-height cased openings",
-  "3 disconnected wall fragment(s) dropped"
+  "2 disconnected wall fragment(s) dropped"
  ],
  "stairs": [
   {

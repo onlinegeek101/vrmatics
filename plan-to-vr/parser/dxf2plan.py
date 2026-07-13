@@ -85,11 +85,17 @@ def assign_names(plan, labels):
                 r["kind"] = k
 
 
-def filter_disconnected(plan, snap=6.0, min_component=3):
+def filter_disconnected(plan, snap=6.0, min_component=3, min_keep_len=72.0):
     """Drop walls in tiny disconnected components (stray fragments a CAD
     file leaves floating - a lone bay-window wall west of the house).
     Keeps the main wall network and any substantial sub-structure;
-    reindexes openings and recomputes the footprint so nothing dangles."""
+    reindexes openings and recomputes the footprint so nothing dangles.
+
+    A component is only droppable if ALL its walls are short: a stray
+    fragment is a couple of feet of linework, while a long wall is real
+    even when the graph says it is isolated (the L2 west perimeter wall
+    merges with a corner gap just over snap and would otherwise vanish,
+    taking the bedrooms' exterior wall with it)."""
     walls = plan["walls"]
     n = len(walls)
     parent = list(range(n))
@@ -129,10 +135,16 @@ def filter_disconnected(plan, snap=6.0, min_component=3):
         comp.setdefault(find(i), []).append(i)
     if not comp:
         return 0
+    def wall_len(i):
+        w = walls[i]
+        return math.hypot(w["end"][0] - w["start"][0],
+                          w["end"][1] - w["start"][1])
+
     keep = set()
     biggest = max(comp.values(), key=len)
     for members in comp.values():
-        if members is biggest or len(members) >= min_component:
+        if (members is biggest or len(members) >= min_component
+                or any(wall_len(i) >= min_keep_len for i in members)):
             keep.update(members)
     dropped = n - len(keep)
     if not dropped:
