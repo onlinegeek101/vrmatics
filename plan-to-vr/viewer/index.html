@@ -166,6 +166,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const IN2M = 0.0254;                 // inches -> meters (1 unit = 1 meter)
+const GRADE_M = 4 * 7 * IN2M;        // yard sits 4 risers below the floor (VR note #9)
 const EYE = 1.6;                     // standing eye height (m)
 const APP_VERSION = 'plan2vr 2026-07-13';   // stamped into VR-note issues
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -561,6 +562,8 @@ let fixtureSegs = [];   // fixture capsules; collide only while fixtures shown
 let stairSteps = [];    // walkable riser tops: {cx,cz,ux,uz,kx,kz,hl,hd,top}
 let roomPolysWorld = []; // room polygons in world XZ, for interior tests
 let footprintWorld = null; // building outline in world XZ, or null
+let gradeM = 0;          // exterior grade below the finished floor (m)
+let lowPolysWorld = [];  // room polys (garage) whose slab sits at -gradeM
 
 // ray-cast point-in-polygon on the XZ plane
 function pointInPoly(x, z, poly) {
@@ -591,6 +594,7 @@ function clearPlan() {
   planGroup = null; ceiling = null; fixtureGroup = null;
   roomPolysWorld = [];
   footprintWorld = null;
+  lowPolysWorld = [];
   planOpeningsWorld = [];
 }
 
@@ -668,8 +672,21 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
 
   if (op.type === 'opening' && w >= 90 * IN2M && openingIsExterior(worldStart, dir, angle, lo, hi, depth)) {
     // wide EXTERIOR opening: fill with a paneled garage door. Wide interior
-    // pass-throughs stay open.
-    boxOnWall(group, worldStart, dir, angle, mid, w, head / 2, head, 0, 1.5 * IN2M, garageDoorMat);
+    // pass-throughs stay open. With split levels the door runs all the way
+    // down to the (dropped) garage slab, not just to the finished floor.
+    let bot = 0;
+    if (gradeM) {
+      const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+      for (const side of [1, -1]) {
+        const off = side * (depth / 2 + 0.15);
+        if (baseGroundAt(worldStart.x + dir.x * mid + nrm.x * off,
+                         worldStart.z + dir.z * mid + nrm.z * off) < -0.05) {
+          bot = -gradeM;
+          break;
+        }
+      }
+    }
+    boxOnWall(group, worldStart, dir, angle, mid, w, (head + bot) / 2, head - bot, 0, 1.5 * IN2M, garageDoorMat);
     for (let i = 1; i < 4; i++) {   // panel seams
       boxOnWall(group, worldStart, dir, angle, mid, w, head * i / 4, 0.6 * IN2M,
         0.8 * IN2M, 0.4 * IN2M, std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY }));
@@ -890,6 +907,16 @@ function buildPlan(plan) {
     ? plan.footprint.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M])
     : null;
 
+  // Split ground levels (VR note #9): with a real footprint the yard drops
+  // GRADE_M below the finished floor - the owner's main floor rides ~4
+  // risers above grade - and garage-kind rooms carry their slab down at
+  // grade level. Plans without a footprint stay single-level.
+  gradeM = footprintWorld ? GRADE_M : 0;
+  lowPolysWorld = gradeM
+    ? roomPolysWorld.filter((p, i) => (rooms[i].kind || '') === 'garage')
+    : [];
+  ground.position.y = -gradeM - 0.025;
+
   // group openings by wall
   const byWall = new Map();
   openings.forEach(o => {
@@ -1019,16 +1046,65 @@ function buildPlan(plan) {
                           envMapIntensity: ENV_INTENSITY });
     for (const st of plan.stairs) {
       if (st.down) {
-        // a DOWN flight can't descend through the slab; render the well:
-        // a dark pit at floor level with a guard rail around it, which
-        // reads instantly as "stairs going down" without a basement
         const pw = st.polygon.map(([px, py]) => toWorld(px, py));
         let cx0 = Math.min(...pw.map(q => q.x)), cx1 = Math.max(...pw.map(q => q.x));
         let cz0 = Math.min(...pw.map(q => q.z)), cz1 = Math.max(...pw.map(q => q.z));
         const wellW = cx1 - cx0, wellD = cz1 - cz0;
+        const baseY = baseGroundAt((cx0 + cx1) / 2, (cz0 + cz1) / 2);
+        if (baseY < -0.05 && (st.treads.length + 1) * riserM <= -baseY + 0.25) {
+          // this short DOWN run lands on a slab that is genuinely modeled
+          // below the floor now (the garage at grade): build the flight
+          // for real - treads descending from the finished floor to it
+          const treads = st.treads.map(t => {
+            const a2 = toWorld(t[0][0], t[0][1]);
+            const b2 = toWorld(t[1][0], t[1][1]);
+            return { a: a2, b: b2, mx: (a2.x + b2.x) / 2, mz: (a2.z + b2.z) / 2 };
+          }).filter(t => Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z) > 0.2);
+          if (treads.length) {
+            let ddx, ddz;                       // descend direction
+            if (st.direction) { ddx = st.direction[0]; ddz = -st.direction[1]; }
+            else {
+              ddx = treads[treads.length - 1].mx - treads[0].mx;
+              ddz = treads[treads.length - 1].mz - treads[0].mz;
+              const n = Math.hypot(ddx, ddz) || 1; ddx /= n; ddz /= n;
+            }
+            treads.sort((p1, p2) =>
+              (p1.mx * ddx + p1.mz * ddz) - (p2.mx * ddx + p2.mz * ddz));
+            const dgaps = [];
+            for (let i = 1; i < treads.length; i++) {
+              const d = (treads[i].mx - treads[i - 1].mx) * ddx +
+                        (treads[i].mz - treads[i - 1].mz) * ddz;
+              if (d > 0.05) dgaps.push(d);
+            }
+            dgaps.sort((x, y) => x - y);
+            const tdep = dgaps.length ? dgaps[dgaps.length >> 1] : 0.26;
+            const rise = -baseY / (treads.length + 1);
+            treads.forEach((t, i) => {
+              const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
+              const top = -(i + 1) * rise;
+              const m = new THREE.Mesh(
+                new THREE.BoxGeometry(len, top - baseY, tdep), stMat);
+              m.position.set(t.mx + ddx * tdep / 2, (top + baseY) / 2,
+                             t.mz + ddz * tdep / 2);
+              m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
+              m.castShadow = m.receiveShadow = true;
+              group.add(m);
+              laserTargets.push(m);
+              stairSteps.push({
+                cx: t.mx + ddx * tdep / 2, cz: t.mz + ddz * tdep / 2,
+                ux: (t.b.x - t.a.x) / len, uz: (t.b.z - t.a.z) / len,
+                kx: ddx, kz: ddz, hl: len / 2, hd: tdep / 2, top,
+              });
+            });
+            continue;
+          }
+        }
+        // a DOWN flight can't descend through its slab; render the well:
+        // a dark pit at slab level with a guard rail around it, which
+        // reads instantly as "stairs going down" without a basement
         const well = new THREE.Mesh(
           new THREE.BoxGeometry(wellW, 0.02, wellD), wellMat);
-        well.position.set((cx0 + cx1) / 2, 0.012, (cz0 + cz1) / 2);
+        well.position.set((cx0 + cx1) / 2, baseY + 0.012, (cz0 + cz1) / 2);
         group.add(well);
         laserTargets.push(well);
         // first three treads sink into the dark before it swallows them
@@ -1046,7 +1122,7 @@ function buildPlan(plan) {
             new THREE.BoxGeometry(len, 0.02, dep), stMat);
           m.position.set(
             (a2.x + b2.x) / 2 + dirW[0] * dep * i,
-            -0.001 - i * 0.004,
+            baseY - 0.001 - i * 0.004,
             (a2.z + b2.z) / 2 + dirW[1] * dep * i);
           m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
           group.add(m);
@@ -1056,22 +1132,22 @@ function buildPlan(plan) {
         const mkRail = (x, z, len, rotY) => {
           const r = new THREE.Mesh(
             new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
-          r.position.set(x, railH, z);
+          r.position.set(x, baseY + railH, z);
           r.rotation.y = rotY;
           group.add(r);
           const p1 = new THREE.Mesh(
             new THREE.BoxGeometry(0.04, railH, 0.04), railMat);
-          p1.position.set(x - Math.cos(rotY) * len / 2, railH / 2,
+          p1.position.set(x - Math.cos(rotY) * len / 2, baseY + railH / 2,
                           z + Math.sin(rotY) * len / 2);
           group.add(p1);
           const p2 = p1.clone();
-          p2.position.set(x + Math.cos(rotY) * len / 2, railH / 2,
+          p2.position.set(x + Math.cos(rotY) * len / 2, baseY + railH / 2,
                           z - Math.sin(rotY) * len / 2);
           group.add(p2);
           collisionSegs.push({    // guard rails stop the player too
             ax: x - Math.cos(rotY) * len / 2, az: z + Math.sin(rotY) * len / 2,
             bx: x + Math.cos(rotY) * len / 2, bz: z - Math.sin(rotY) * len / 2,
-            hw: 0.06, top: railH,
+            hw: 0.06, top: baseY + railH,
           });
         };
         if (wellW >= wellD) {           // run along x: rails on z sides
@@ -1296,12 +1372,109 @@ function buildPlan(plan) {
         ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
         bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
         sill: op.sill, head: Math.min(op.head, H), widthIn: (hi - lo) / IN2M, thick: depth,
+        shut: op.shut,
       });
       dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
       cursor = Math.max(cursor, hi);
     }
     if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
   });
+
+  // ------------------------------------------------- grade & foundation
+  // VR note #9: from the yard the front door opened onto flat lawn and the
+  // garage rode at house-floor level. With split levels, foundation stem
+  // walls wrap the footprint (and the dropped garage slab), the openings
+  // that live at grade stay clear of them, and every exterior door that
+  // keeps the high floor gets a concrete stoop with steps down to the lawn.
+  if (gradeM && footprintWorld) {
+    const fndH = gradeM + 0.10;
+    const gaps = [];    // spans the foundation must leave open
+    for (const o of planOpeningsWorld) {
+      if (o.sill > 0.001) continue;
+      const mx = (o.ax + o.bx) / 2, mz = (o.az + o.bz) / 2;
+      const wlen = Math.hypot(o.bx - o.ax, o.bz - o.az) || 1;
+      const ux2 = (o.bx - o.ax) / wlen, uz2 = (o.bz - o.az) / wlen;
+      const px = -uz2, pz = ux2;                    // unit wall normal
+      const off = o.thick / 2 + 0.15;
+      const outSide = [1, -1].find(s =>
+        outsideBuilding(mx + px * off * s, mz + pz * off * s));
+      if (outSide === undefined) continue;          // interior opening
+      const inLow = baseGroundAt(mx - px * off * outSide,
+                                 mz - pz * off * outSide) < -0.05;
+      if ((o.type === 'opening' && o.widthIn >= 90) ||
+          (o.type === 'door' && inLow)) {
+        gaps.push(o);   // garage doors / doors landing on the low slab
+      } else if (o.type === 'door' && !o.shut) {
+        // stoop: platform one riser below the floor, then steps to grade
+        const nx2 = px * outSide, nz2 = pz * outSide;
+        const rise = gradeM / 4;
+        const Wp = wlen + 1.2;
+        let edge = o.thick / 2;
+        for (let k = 0; k < 3; k++) {
+          const top = -rise * (k + 1);
+          const dpt = k === 0 ? 1.5 : 0.32;         // platform, then treads
+          const h = top + gradeM + 0.08;
+          const sx = mx + nx2 * (edge + dpt / 2);
+          const sz = mz + nz2 * (edge + dpt / 2);
+          const box = new THREE.Mesh(new THREE.BoxGeometry(Wp, h, dpt), slabMat);
+          box.position.set(sx, top - h / 2, sz);
+          box.rotation.y = -Math.atan2(uz2, ux2);
+          box.castShadow = box.receiveShadow = true;
+          group.add(box);
+          if (k === 0) laserTargets.push(box);
+          stairSteps.push({ cx: sx, cz: sz, ux: ux2, uz: uz2,
+            kx: nx2, kz: nz2, hl: Wp / 2, hd: dpt / 2, top });
+          edge += dpt;
+        }
+      }
+    }
+    // concrete stem wall along a run, split around the grade-level gaps
+    const stemRun = (ax, az, bx, bz, thick) => {
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.05) return;
+      const ux2 = (bx - ax) / len, uz2 = (bz - az) / len;
+      const cuts = [];
+      for (const g of gaps) {
+        const gmx = (g.ax + g.bx) / 2, gmz = (g.az + g.bz) / 2;
+        const lat = Math.abs((gmx - ax) * uz2 - (gmz - az) * ux2);
+        if (lat > 0.4) continue;                    // not along this run
+        const t0 = (g.ax - ax) * ux2 + (g.az - az) * uz2;
+        const t1 = (g.bx - ax) * ux2 + (g.bz - az) * uz2;
+        cuts.push([Math.min(t0, t1), Math.max(t0, t1)]);
+      }
+      cuts.sort((p, q) => p[0] - q[0]);
+      const spans = [];
+      let t = 0;
+      for (const [c0, c1] of cuts) {
+        if (c1 <= t) continue;
+        if (c0 > t) spans.push([t, Math.min(c0, len)]);
+        t = Math.max(t, c1);
+      }
+      if (t < len) spans.push([t, len]);
+      for (const [s0, s1] of spans) {
+        if (s1 - s0 < 0.06) continue;
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(s1 - s0, fndH, thick), slabMat);
+        m.position.set(ax + ux2 * (s0 + s1) / 2, -fndH / 2 - 0.004,
+                       az + uz2 * (s0 + s1) / 2);
+        m.rotation.y = -Math.atan2(uz2, ux2);
+        m.castShadow = m.receiveShadow = true;
+        group.add(m);
+      }
+    };
+    for (let i = 0; i < footprintWorld.length; i++) {
+      const [ax, az] = footprintWorld[i];
+      const [bx, bz] = footprintWorld[(i + 1) % footprintWorld.length];
+      stemRun(ax, az, bx, bz, 0.24);
+    }
+    for (const poly of lowPolysWorld) {
+      for (let i = 0; i < poly.length; i++) {
+        const [ax, az] = poly[i];
+        const [bx, bz] = poly[(i + 1) % poly.length];
+        stemRun(ax, az, bx, bz, 0.20);
+      }
+    }
+  }
 
   // floor slab. With a footprint it hugs the building outline (no concrete
   // apron); with room data it is bare concrete and each room lays its own
@@ -1312,7 +1485,21 @@ function buildPlan(plan) {
     footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz))) : null;
   let floor;
   if (footShape) {
-    const geo = new THREE.ShapeGeometry(footShape);
+    // low (garage) slabs are cut out of the finished-floor slab; each low
+    // room lays its own slab down at grade in the per-room loop below
+    const floorShape = new THREE.Shape(
+      footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz)));
+    if (lowPolysWorld.length) {
+      const outerCCW = THREE.ShapeUtils.area(floorShape.getPoints()) > 0;
+      for (const poly of lowPolysWorld) {
+        const pts = poly.map(([hx, hz]) => new THREE.Vector2(hx, -hz));
+        if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
+        const hole = new THREE.Path();
+        hole.setFromPoints(pts);
+        floorShape.holes.push(hole);
+      }
+    }
+    const geo = new THREE.ShapeGeometry(floorShape);
     geo.rotateX(-Math.PI / 2);
     floor = new THREE.Mesh(geo, rooms.length ? slabMat : floorMat);
   } else {
@@ -1339,7 +1526,7 @@ function buildPlan(plan) {
     const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat
       : (kind === 'garage') ? slabMat : roomWoodMat;
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.y = 0.004;
+    mesh.position.y = (kind === 'garage' ? -gradeM : 0) + 0.004;
     mesh.receiveShadow = true;
     group.add(mesh);
     laserTargets.push(mesh);
@@ -3593,8 +3780,17 @@ let fallV = 0;          // downward speed while airborne
 const STEP_MAX = 0.35;  // tallest ledge the player steps up (m)
 const lastSafe = { x: 0, z: 0 };
 
+// base slab level before stairs: lawn and garage slabs at -gradeM,
+// finished interior floor at 0
+function baseGroundAt(x, z) {
+  if (!gradeM) return 0;
+  if (outsideBuilding(x, z)) return -gradeM;
+  for (const poly of lowPolysWorld) if (pointInPoly(x, z, poly)) return -gradeM;
+  return 0;
+}
+
 function groundHeightAt(x, z) {
-  let g = 0;
+  let g = baseGroundAt(x, z);
   for (const s of stairSteps) {
     const lx = (x - s.cx) * s.ux + (z - s.cz) * s.uz;   // along the tread
     const lz = (x - s.cx) * s.kx + (z - s.cz) * s.kz;   // along the climb
