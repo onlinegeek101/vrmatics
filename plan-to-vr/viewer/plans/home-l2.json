@@ -355,7 +355,7 @@
   {
    "wall_index": 1,
    "position": 0.846,
-   "width": 38.02,
+   "width": 37.93,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -367,23 +367,23 @@
   {
    "wall_index": 3,
    "position": 0.4784,
-   "width": 107.03,
+   "width": 106.98,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 4,
-   "position": 0.2871,
-   "width": 55.5,
+   "position": 0.3302,
+   "width": 36.95,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 4,
-   "position": 0.8893,
-   "width": 37.02,
+   "position": 0.8892,
+   "width": 36.95,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -391,7 +391,7 @@
   {
    "wall_index": 6,
    "position": 0.1471,
-   "width": 33.78,
+   "width": 33.76,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -399,7 +399,7 @@
   {
    "wall_index": 6,
    "position": 0.5319,
-   "width": 35.77,
+   "width": 35.76,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -407,7 +407,7 @@
   {
    "wall_index": 6,
    "position": 0.9165,
-   "width": 35.79,
+   "width": 35.76,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -415,23 +415,23 @@
   {
    "wall_index": 7,
    "position": 0.0939,
-   "width": 60.02,
+   "width": 59.98,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 7,
-   "position": 0.4668,
-   "width": 89.51,
+   "position": 0.4336,
+   "width": 59.98,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 7,
-   "position": 0.6852,
-   "width": 60.36,
+   "position": 0.6856,
+   "width": 59.98,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -439,43 +439,35 @@
   {
    "wall_index": 7,
    "position": 0.9331,
-   "width": 38.02,
+   "width": 37.98,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 8,
-   "position": 0.2462,
-   "width": 56.38,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 9,
-   "position": 0.5782,
-   "width": 31.9,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": -1,
-   "leaf": 31.9,
-   "hinge_at": 89.9
-  },
-  {
-   "wall_index": 10,
-   "position": 0.3998,
-   "width": 18.37,
+   "position": 0.2481,
+   "width": 47.0,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
   {
+   "wall_index": 9,
+   "position": 0.3893,
+   "width": 33.99,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": -1,
+   "leaf": 31.9,
+   "hinge_at": 33.9
+  },
+  {
    "wall_index": 13,
-   "position": 0.4014,
-   "width": 120.94,
+   "position": 0.2263,
+   "width": 33.99,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
@@ -483,7 +475,7 @@
   {
    "wall_index": 13,
    "position": 0.8233,
-   "width": 34.01,
+   "width": 33.99,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -495,19 +487,19 @@
   {
    "wall_index": 15,
    "position": 0.295,
-   "width": 62.06,
+   "width": 62.0,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
-   "leaf": 78.7,
-   "hinge_at": 45.8
+   "leaf": 30.0,
+   "hinge_at": 71.3
   },
   {
    "wall_index": 16,
-   "position": 0.1155,
-   "width": 41.21,
+   "position": 0.1268,
+   "width": 33.98,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -519,23 +511,27 @@
   {
    "wall_index": 16,
    "position": 0.5173,
-   "width": 32.3,
+   "width": 31.91,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 16,
-   "position": 0.8182,
-   "width": 69.83,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
+   "position": 0.8235,
+   "width": 64.75,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 30.0,
+   "hinge_at": 296.2
   },
   {
    "wall_index": 17,
-   "position": 0.429,
-   "width": 32.32,
+   "position": 0.4269,
+   "width": 30.25,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
@@ -543,7 +539,7 @@
   {
    "wall_index": 17,
    "position": 0.8919,
-   "width": 34.01,
+   "width": 34.0,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -554,36 +550,36 @@
   },
   {
    "wall_index": 19,
-   "position": 0.3726,
-   "width": 30.1,
+   "position": 0.5222,
+   "width": 62.0,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
-   "hinge": -1,
+   "hinge": 1,
    "swing": 1,
-   "leaf": 30.1,
-   "hinge_at": 22.0
+   "leaf": 30.0,
+   "hinge_at": 82.0
   },
   {
    "wall_index": 20,
-   "position": 0.3677,
-   "width": 132.08,
-   "type": "window",
-   "sill": 30.0,
+   "position": 0.362,
+   "width": 123.5,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 20,
-   "position": 0.7555,
-   "width": 109.92,
+   "position": 0.755,
+   "width": 101.07,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 24,
-   "position": 0.5956,
-   "width": 92.86,
+   "position": 0.6631,
+   "width": 36.13,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
@@ -595,6 +591,54 @@
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
+  },
+  {
+   "wall_index": 9,
+   "position": 0.703,
+   "width": 40.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 31.9,
+   "hinge_at": 89.9
+  },
+  {
+   "wall_index": 19,
+   "position": 0.221,
+   "width": 40.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": 1,
+   "leaf": 30.1,
+   "hinge_at": 22.0
+  },
+  {
+   "wall_index": 16,
+   "position": 0.0623,
+   "width": 40.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": -1,
+   "leaf": 30.0,
+   "hinge_at": -0.9
+  },
+  {
+   "wall_index": 18,
+   "position": 0.49,
+   "width": 20.32,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": 1,
+   "leaf": 30.1,
+   "hinge_at": -1.1
   }
  ],
  "fixtures": [],
@@ -1147,8 +1191,8 @@
  "cameras": [
   {
    "position": [
-    -16.24,
-    103.75
+    -16.16,
+    120.83
    ],
    "rotation": -90.28,
    "is_primary": true

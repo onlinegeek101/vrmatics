@@ -26,6 +26,7 @@ import ezdxf
 
 import extract as X
 import dxf_stairs
+import dxf_openings
 from pdf2plan import default_camera, point_in_poly
 
 
@@ -280,6 +281,15 @@ def main():
     gt = json.load(open(args.gt)) if args.gt else {}
 
     n_drop = filter_disconnected(plan)
+
+    # Re-derive openings from the architect's colour-coded door/window
+    # symbols (red swing arcs = doors, green frames = windows, bare wall
+    # gaps = cased openings) instead of the merge-and-infer classifier,
+    # which over-merged whole wall runs and dropped arc-marked doors.
+    # Done AFTER filter_disconnected so wall indices match the final walls.
+    plan["openings"], op_report = dxf_openings.detect(
+        args.input, args.wall_layers.split(","), dw.split(","), plan["walls"])
+    report["openings"] = op_report
 
     stair_labels = []
     if args.rmnames_layer:
