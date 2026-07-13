@@ -24,6 +24,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp build version for the viewer
+        run: |
+          printf '{"sha":"%s","msg":%s,"when":"%s"}'             "$(git rev-parse --short HEAD)"             "$(git log -1 --pretty=%s | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')"             "$(git log -1 --date=format:'%Y-%m-%d %H:%M' --pretty=%cd)"             > plan-to-vr/viewer/version.json
       - uses: actions/configure-pages@v5
         with:
           enablement: true

@@ -58,5 +58,19 @@
    294
   ],
   "_note": "spawn at the FRONT door (with sidelites), not the widest back door"
- }
+ },
+ "walls": [
+  {
+   "start": [
+    804.6,
+    400.4
+   ],
+   "end": [
+    833.4,
+    400.4
+   ],
+   "thickness": 4.6,
+   "_note": "issue #8 ROOT: stair/laundry wall stretch dropped where the sink-counter strokes broke it; sheet shows solid wall - the void made the stairwell read as an open cubby into the laundry"
+  }
+ ]
 }

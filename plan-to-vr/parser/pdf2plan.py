@@ -795,6 +795,16 @@ def apply_corrections(plan, fixes):
             print(f"fix: stair near {fx['near']}: "
                   + ", ".join(f"{k}={fx[k]}" for k in ("down", "direction")
                               if k in fx))
+    for fx in fixes.get("walls") or []:
+        # a wall stretch the linework lost (counters/fixtures interrupting
+        # the strokes) that the homeowner confirmed is solid
+        h = plan["walls"][0]["height"] if plan["walls"] else 96.0
+        plan["walls"].append({
+            "start": fx["start"], "end": fx["end"],
+            "thickness": fx.get("thickness", 4.5),
+            "height": fx.get("height", h),
+        })
+        print(f"fix: wall added {fx['start']} -> {fx['end']}")
     for fx in fixes.get("openings") or []:
         tx, ty = fx["near"]
         best, bd = None, 1e9

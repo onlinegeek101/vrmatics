@@ -120,6 +120,9 @@
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
+<div id="build-tag" style="position:fixed;right:10px;bottom:8px;z-index:40;
+  font:11px ui-monospace,monospace;color:#8b94a8;opacity:.85;max-width:52ch;
+  text-align:right;pointer-events:none"></div>
 
 <button id="map-btn" title="top-down plan view (M)">▦ plan</button>
 <button id="notes-btn" title="voice notes (hold V or left trigger to record)">🎤 0</button>
@@ -2127,6 +2130,15 @@ async function pushSessionZip(notes) {
                `VR session bundle (${notes.length} notes)`);
 }
 setTimeout(initFeedbackFromHash, 0);   // after toast/DOM wiring exists
+
+// build tag: which deploy am I on? The Pages workflow stamps
+// version.json with the commit sha + subject + time at deploy
+fetch('version.json', { cache: 'no-store' }).then(r => r.json()).then(v => {
+  document.getElementById('build-tag').textContent =
+    `${v.sha} · ${v.msg} · ${v.when}`;
+}).catch(() => {
+  document.getElementById('build-tag').textContent = 'dev build (no version.json)';
+});
 
 async function renderNotesPanel() {
   const panel = document.getElementById('notes-panel');
