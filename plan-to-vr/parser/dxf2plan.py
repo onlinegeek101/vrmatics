@@ -217,6 +217,7 @@ def _switchback_bands(path, layers, g):
             gv, gi = d, i
     bands = [items[:gi], items[gi:]]
     dn = g.get("down_near")
+    labels = dxf_stairs._dir_labels(path)     # architect's own Up/Down text
     cents = []
     for band in bands:
         if band:
@@ -234,17 +235,39 @@ def _switchback_bands(path, layers, g):
         bx0, bx1, by0, by1 = min(xs), max(xs), min(ys), max(ys)
         treads = [[[round(s[0], 1), round(s[1], 1)],
                    [round(s[2], 1), round(s[3], 1)]] for s in segset]
+        cx, cy = cents[bi]
+        sx, sy = nrm                          # climb axis; sign set below
+        down = None
+        # PRIMARY: follow the architect's own Down/Up text nearest this band
+        # (owner, VR note #14: "the plan clearly indicates up and down and
+        # which side is level with this floor, follow it"). Down descends AWAY
+        # from its label (the label sits at the floor-level top of the run);
+        # up climbs TOWARD it - so the switchback's two bands get opposite
+        # directions, matching _annotate_directions' generic path.
+        best, bestd = None, 90.0
+        for kind, (lx, ly) in labels:
+            d = math.hypot(cx - lx, cy - ly)
+            if d < bestd:
+                best, bestd = (kind, (lx, ly)), d
+        if best is not None:
+            kind, (lx, ly) = best
+            s = 1.0 if ((lx - cx) * sx + (ly - cy) * sy) >= 0 else -1.0
+            sign = -s if kind == "down" else s
+            sx, sy = sign * nrm[0], sign * nrm[1]
+            down = (kind == "down")
         st = {"polygon": [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]],
               "treads": treads,
-              "direction": [round(nrm[0], 2), round(nrm[1], 2)]}
+              "direction": [round(sx, 2), round(sy, 2)]}
         if "direction" in g and g.get("down_dir_from_gt"):
             st["direction"] = g["direction"]
-        if dn and cents[bi]:
+        # FALLBACK: the manual down_near heuristic, only when no label is near
+        if down is None and dn and cents[bi]:
             oc = cents[1 - bi]
             here = math.hypot(cents[bi][0] - dn[0], cents[bi][1] - dn[1])
             there = math.hypot(oc[0] - dn[0], oc[1] - dn[1]) if oc else 1e18
-            if here <= there:
-                st["down"] = True
+            down = here <= there
+        if down:
+            st["down"] = True
         out.append(st)
     return out
 
@@ -400,6 +423,36 @@ def main():
     plan["openings"], op_report = dxf_openings.detect(
         args.input, args.wall_layers.split(","), dw.split(","), plan["walls"])
     report["openings"] = op_report
+
+    # Semantic opening overrides (GT sidecar). The colour-coded symbols are
+    # authoritative, but a handful of pass-throughs the owner reviewed carry a
+    # fact the drawing can't (e.g. a wide gap the plotter drew a leaf on that
+    # is really an open cased pass-through, VR note #25). Match a detected
+    # opening whose centre is within `tol` (default 30") of `near`; then
+    # `remove` it, or set `type` / `width` / `sill` / `shut`. Generic + minimal.
+    for oc in (gt.get("openings") or []):
+        nx, ny = oc["near"]
+        best, bestd = None, oc.get("tol", 30)
+        for o in plan["openings"]:
+            w = plan["walls"][o["wall_index"]]
+            (ax, ay), (bx, by) = w["start"], w["end"]
+            p = o["position"]
+            d = math.hypot(ax + (bx - ax) * p - nx, ay + (by - ay) * p - ny)
+            if d < bestd:
+                best, bestd = o, d
+        if best is None:
+            print(f"fix: opening near ({nx},{ny}) UNMATCHED")
+            continue
+        if oc.get("remove"):
+            plan["openings"].remove(best)
+            print(f"fix: opening near ({nx},{ny}) removed")
+            continue
+        for k in ("type", "width", "sill"):
+            if k in oc:
+                best[k] = oc[k]
+        if oc.get("shut"):
+            best["shut"] = True
+        print(f"fix: opening near ({nx},{ny}) -> {best.get('type')}")
 
     # Re-trace rooms with doorway bridges. A door can sit in the gap
     # BETWEEN two collinear wall segments (the dining room's north door);

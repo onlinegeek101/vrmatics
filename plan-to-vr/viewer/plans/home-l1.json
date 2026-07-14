@@ -1636,7 +1636,8 @@
    "direction": [
     -1.0,
     0.0
-   ]
+   ],
+   "down": true
   },
   {
    "polygon": [
@@ -1750,10 +1751,9 @@
     ]
    ],
    "direction": [
-    -1.0,
-    0.0
-   ],
-   "down": true
+    1.0,
+    -0.0
+   ]
   },
   {
    "polygon": [

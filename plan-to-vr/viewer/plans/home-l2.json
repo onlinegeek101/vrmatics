@@ -524,7 +524,7 @@
    "wall_index": 16,
    "position": 0.8235,
    "width": 64.75,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0,
    "hinge": 1,

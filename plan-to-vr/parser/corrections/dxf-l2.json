@@ -1,5 +1,12 @@
 {
  "_source": "DXF migration GT",
  "_note": "stair up/down + direction now come from the architect's Down/Up-to-Attic text on 1.2RMNAMES, detected in dxf_stairs (issue #30). No manual stair entries needed.",
- "stairs": []
+ "stairs": [],
+ "openings": [
+  {
+   "near": [-43.3, -123.4],
+   "type": "opening",
+   "_note": "VR note #25: this wide gap the plotter drew a door leaf on is really an open cased pass-through, not a door -- render it as just an opening (owner: 'there should just be an opening')."
+  }
+ ]
 }

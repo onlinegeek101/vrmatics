@@ -50,10 +50,10 @@
     -183
    ],
    "down_near": [
-    -97,
-    -208
+    -100,
+    -256
    ],
-   "_note": "main stair is a switchback (VR note #14): the south band (y~-256, 5 treads) is the up-flight to L2 -- L2's own down-stair lands right here at (-105,-257) dir[-1,0] -- and the north band (y~-208, 9 treads) is the down-flight to the basement; the two meet at a mid-landing. 'split' re-reads the raw tread ladders in bbox and emits both flights so the viewer renders the landing + return flight instead of one dead-ending flat run. down_near tags the north (basement) band as the DOWN partner."
+   "_note": "main stair is a switchback (VR note #14). up/down now follow the architect's own plotted text: the DXF 'DOWN' label sits on the SOUTH band (y~-256) and 'UP' on the NORTH band (y~-207), so the south band is the DOWN-flight and the north band is the UP-flight (owner: 'the plan clearly indicates up and down ... follow it'). 'split' re-reads the raw tread ladders in bbox and emits both flights so the viewer renders the landing + return flight instead of one dead-ending flat run; _switchback_bands reads _dir_labels() to assign each band's down/direction. down_near is only a fallback for wells with no nearby Up/Down text; it now points at the south (DOWN) band for consistency."
   }
  ],
  "camera": {
