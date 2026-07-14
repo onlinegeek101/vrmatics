@@ -24,9 +24,42 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build DXF-derived plans from source of truth
+        run: |
+          python3 -m pip install --quiet ezdxf shapely pymupdf
+          cd plan-to-vr
+          # Regenerate to temp, validate JSON, then swap in. On any failure keep the
+          # committed plan (from checkout) so a transient CI issue never breaks deploy.
+          regen () {
+            local dxf="$1" out="$2" floor="$3" walls="$4"
+            if python3 parser/dxf2plan.py "$dxf" -o /tmp/regen.json --floor "$floor" \
+                 --wall-layers "$walls" --dw-layers "1.${floor}DRWDWS" --rmnames-layer "1.${floor}RMNAMES" \
+                 --gt "parser/corrections/dxf-l${floor}.json" \
+               && python3 -c "import json,sys; d=json.load(open('/tmp/regen.json')); assert d.get('walls'), 'no walls'"; then
+              cp /tmp/regen.json "$out"; echo "regenerated $out"
+            else
+              echo "::warning::regen failed for $out; using committed copy"
+            fi
+          }
+          regen plans-src/home-l1.dxf viewer/plans/home-l1.json 1 1.1WALL
+          regen plans-src/home-l2.dxf viewer/plans/home-l2.json 2 1.2WALLS
+      - name: PII guard on generated plans
+        run: |
+          cd plan-to-vr/viewer/plans
+          if grep -riE 'pavlu|2611|shelburne|wyman|design[ ._-]?planning' home-l1.json home-l2.json; then
+            echo "::error::PII leaked into generated plans"; exit 1
+          fi
       - name: Stamp build version for the viewer
         run: |
-          printf '{"sha":"%s","msg":%s,"when":"%s"}'             "$(git rev-parse --short HEAD)"             "$(git log -1 --pretty=%s | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')"             "$(git log -1 --date=format:'%Y-%m-%d %H:%M' --pretty=%cd)"             > plan-to-vr/viewer/version.json
+          printf '{"sha":"%s","msg":%s,"when":"%s"}' \
+            "$(git rev-parse --short HEAD)" \
+            "$(git log -1 --pretty=%s | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')" \
+            "$(git log -1 --date=format:'%Y-%m-%d %H:%M' --pretty=%cd)" \
+            > plan-to-vr/viewer/version.json
       - uses: actions/configure-pages@v5
         with:
           enablement: true
