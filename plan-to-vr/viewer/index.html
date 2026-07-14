@@ -1123,6 +1123,40 @@ function buildPlan(plan) {
                 kx: ddx, kz: ddz, hl: len / 2, hd: tdep / 2, top,
               });
             });
+            // The garage step is drawn inside the slab, so its top tread lands
+            // a riser below the finished floor with bare slab between the flight
+            // and the house-floor edge at the junction - the step read as
+            // floating, offset from the dropped garage door/opening (VR note
+            // #17, reopened). March up-slope from the top tread to the finished
+            // floor and bridge the gap with a slab->floor landing, so the step
+            // MEETS the finished floor and the door, the cased opening and the
+            // step all line up at the slab->floor transition. Gated: only when
+            // finished-floor ground is actually found up-slope within a stride,
+            // so a flight that already tops out at the floor gets no landing.
+            const topT = treads[0];        // highest (climb-top) tread
+            const tlen = Math.hypot(topT.b.x - topT.a.x, topT.b.z - topT.a.z) || 1;
+            let landLen = 0;
+            for (let d = tdep * 0.5; d <= 1.4; d += 0.05) {
+              if (baseGroundAt(topT.mx - ddx * d, topT.mz - ddz * d) > -0.05) {
+                landLen = d; break;
+              }
+            }
+            if (landLen > 0.06) {
+              const lcx = topT.mx - ddx * landLen / 2;
+              const lcz = topT.mz - ddz * landLen / 2;
+              const land = new THREE.Mesh(
+                new THREE.BoxGeometry(tlen, -baseY, landLen), stMat);
+              land.position.set(lcx, baseY / 2, lcz);
+              land.rotation.y = -Math.atan2(topT.b.z - topT.a.z, topT.b.x - topT.a.x);
+              land.castShadow = land.receiveShadow = true;
+              group.add(land);
+              laserTargets.push(land);
+              stairSteps.push({
+                cx: lcx, cz: lcz,
+                ux: (topT.b.x - topT.a.x) / tlen, uz: (topT.b.z - topT.a.z) / tlen,
+                kx: ddx, kz: ddz, hl: tlen / 2, hd: landLen / 2, top: 0,
+              });
+            }
             continue;
           }
         }
