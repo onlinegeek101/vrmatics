@@ -25,12 +25,20 @@ defect is gone in regenerated output/build, with a proof comment:
 
 - one-line root cause -> what changed (commit sha on main) -> proof
   image(s) -> "reopen if it persists after hard refresh (build tag >= sha)".
-- **DXF / parser / plan-data fixes** -> attach the color-coded map:
-  regenerated plan rendered over its underlay PNG (grey walls, green
-  doors, blue windows, red cased openings, purple stairs), cropped to the
-  affected area.
-- **Viewer fixes** -> headless Playwright screenshots at the issue's
-  reported position/facing, before/after when cheap.
+- **VR render (EVERY close)** -> a headless-Playwright screenshot of the
+  actual 3D viewer positioned at the note's RECORDED VANTAGE: its (x, y)
+  plan-inches and yaw (world x=(px-cx)*0.0254, z=-(py-cy)*0.0254 via
+  `PLAN2VR_DRAW.planOffset`, `dolly.rotation.y = yaw`). For a fix with a
+  visible before/after, include BOTH a before render (viewer loaded with
+  the plan state just before the fix commit) and an after render (current
+  main).
+- **DXF / parser / plan-data fixes** -> ALSO attach a FULL-FLOOR
+  color-coded map: the ENTIRE floor plan rendered over its underlay PNG
+  (grey walls, green doors, blue windows, red cased openings, purple
+  stairs) as a **before/after pair** so the change is unmistakable — full
+  extent, not a partial zoom/crop; mark or arrow the changed feature.
+- **Viewer-only fixes** -> the VR render before/after is sufficient (no
+  color map needed).
 - Commit proof images under `vr-notes/proof/<issue>/` and embed via
   raw.githubusercontent URLs.
 - **Deploy gate**: do not close until a successful Pages run includes
