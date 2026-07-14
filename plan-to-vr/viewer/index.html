@@ -907,11 +907,16 @@ function buildPlan(plan) {
     ? plan.footprint.map(([px, py]) => [(px - cx) * IN2M, -(py - cy) * IN2M])
     : null;
 
-  // Split ground levels (VR note #9): with a real footprint the yard drops
-  // GRADE_M below the finished floor - the owner's main floor rides ~4
-  // risers above grade - and garage-kind rooms carry their slab down at
-  // grade level. Plans without a footprint stay single-level.
-  gradeM = footprintWorld ? GRADE_M : 0;
+  // Split ground levels (VR note #9): with a real footprint AND a garage
+  // riding at grade, the yard drops GRADE_M below the finished floor - the
+  // owner's main floor sits ~4 risers up and garage-kind rooms carry their
+  // slab down at grade level. The split level only exists BECAUSE of that
+  // at-grade garage, so gate it on a garage room being present: an upper
+  // floor (VR note #24: home-l2) or a plain single-level plan (duplex, zind)
+  // has no yard under its floor, and dropping grade there just exposed the
+  // exterior lawn/sky through interior doorways and off the footprint edge.
+  const hasGarage = rooms.some(r => (r.kind || '') === 'garage');
+  gradeM = (footprintWorld && hasGarage) ? GRADE_M : 0;
   lowPolysWorld = gradeM
     ? roomPolysWorld.filter((p, i) => (rooms[i].kind || '') === 'garage')
     : [];
