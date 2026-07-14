@@ -58,13 +58,35 @@ def _dir_labels(path):
     return out
 
 
-def _annotate_directions(runs, labels, maxd=80.0):
-    """Tag each run with the nearest up/down label (within maxd of its
-    centroid) as `down` (bool) + a signed `label_dir` along the run's climb
-    axis. Down descends AWAY from the label (the label sits at the floor-level
-    top of the run); up climbs TOWARD the label (it names the destination,
-    e.g. the attic, at the flight's far/top end) - so a switchback down+up
-    pair sharing one well gets opposite directions, which is what it is."""
+def _term_circles(path):
+    """The architect marks each flight's TERMINATING side - the end that is
+    level with THIS floor - with a small annotation circle (r~4in) on the
+    notes/room-name layer, sitting on the flight's travel line (verified in
+    ShareCAD, VR notes #14/#30). The run travels (descends if down, climbs if
+    up) AWAY from that circle. This is the authoritative termination/direction
+    indicator; the Down/Up text only says which KIND, not which end is the
+    floor - and on a shared landing both flights' text sits together, so the
+    text position can't give direction. Returns [(x, y)]."""
+    doc = ezdxf.readfile(path)
+    out = []
+    for e in doc.modelspace().query("CIRCLE"):
+        lyr = e.dxf.layer.upper()
+        if ("NOTES" in lyr or "RMNAMES" in lyr) and 2.0 <= e.dxf.radius <= 8.0:
+            c = e.dxf.center
+            out.append((c[0], c[1]))
+    return out
+
+
+def _annotate_directions(runs, labels, circles=None, maxd=80.0, circd=70.0):
+    """Tag each run with `down` (from the nearest Down/Up text) and a signed
+    `label_dir` along its climb axis. DIRECTION comes from the flight's
+    terminating CIRCLE when one is near: the run travels AWAY from the circle
+    (which marks the end level with this floor). Only if no circle is near does
+    it fall back to the label position (down away from label, up toward it).
+    Circle-first fixes shared-landing stairs where both flights' text sits at
+    the same landing yet the runs' floor-ends are marked by their own circles
+    (VR #14/#30)."""
+    circles = circles or []
     for r in runs:
         cx, cy = r["centroid"]
         best, bestd = None, maxd
@@ -76,10 +98,19 @@ def _annotate_directions(runs, labels, maxd=80.0):
             continue
         kind, (lx, ly) = best
         ux, uy = r["climb"]
-        s = 1.0 if ((lx - cx) * ux + (ly - cy) * uy) >= 0 else -1.0
-        sign = -s if kind == "down" else s
+        circ, cd = None, circd
+        for (qx, qy) in circles:
+            d = math.hypot(cx - qx, cy - qy)
+            if d < cd:
+                circ, cd = (qx, qy), d
+        if circ is not None:
+            qx, qy = circ                        # travel AWAY from the circle
+            s = 1.0 if ((cx - qx) * ux + (cy - qy) * uy) >= 0 else -1.0
+        else:
+            s0 = 1.0 if ((lx - cx) * ux + (ly - cy) * uy) >= 0 else -1.0
+            s = -s0 if kind == "down" else s0
         r["down"] = (kind == "down")
-        r["label_dir"] = [round(sign * ux, 2), round(sign * uy, 2)]
+        r["label_dir"] = [round(s * ux, 2), round(s * uy, 2)]
     return runs
 
 
@@ -171,7 +202,7 @@ def detect(path, layers, tread_min=22, tread_max=80, spacing_lo=7,
                 if len(chain) >= min_treads:
                     runs.append(_build([c["seg"] for c in chain], nrm))
                 i = j if j > i + 1 else i + 1
-    _annotate_directions(runs, _dir_labels(path))
+    _annotate_directions(runs, _dir_labels(path), _term_circles(path))
     return runs
 
 

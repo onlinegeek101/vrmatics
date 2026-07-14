@@ -217,7 +217,8 @@ def _switchback_bands(path, layers, g):
             gv, gi = d, i
     bands = [items[:gi], items[gi:]]
     dn = g.get("down_near")
-    labels = dxf_stairs._dir_labels(path)     # architect's own Up/Down text
+    labels = dxf_stairs._dir_labels(path)     # up/down KIND from the text
+    circles = dxf_stairs._term_circles(path)  # terminating side (floor-level end)
     cents = []
     for band in bands:
         if band:
@@ -238,23 +239,27 @@ def _switchback_bands(path, layers, g):
         cx, cy = cents[bi]
         sx, sy = nrm                          # climb axis; sign set below
         down = None
-        # PRIMARY: follow the architect's own Down/Up text nearest this band
-        # (owner, VR note #14: "the plan clearly indicates up and down and
-        # which side is level with this floor, follow it"). Down descends AWAY
-        # from its label (the label sits at the floor-level top of the run);
-        # up climbs TOWARD it - so the switchback's two bands get opposite
-        # directions, matching _annotate_directions' generic path.
+        # up/down KIND from the architect's Down/Up text nearest this band;
+        # DIRECTION from the flight's terminating CIRCLE (owner, VR #14/#30:
+        # each stair carries a circle on the side level with this floor - the
+        # run travels AWAY from it). Text alone can't give direction on a
+        # shared landing where both bands' labels sit together.
         best, bestd = None, 90.0
         for kind, (lx, ly) in labels:
             d = math.hypot(cx - lx, cy - ly)
             if d < bestd:
-                best, bestd = (kind, (lx, ly)), d
+                best, bestd = kind, d
+        circ, cd = None, 70.0
+        for (qx, qy) in circles:
+            d = math.hypot(cx - qx, cy - qy)
+            if d < cd:
+                circ, cd = (qx, qy), d
+        if circ is not None:                  # travel AWAY from the circle
+            qx, qy = circ
+            s = 1.0 if ((cx - qx) * sx + (cy - qy) * sy) >= 0 else -1.0
+            sx, sy = s * nrm[0], s * nrm[1]
         if best is not None:
-            kind, (lx, ly) = best
-            s = 1.0 if ((lx - cx) * sx + (ly - cy) * sy) >= 0 else -1.0
-            sign = -s if kind == "down" else s
-            sx, sy = sign * nrm[0], sign * nrm[1]
-            down = (kind == "down")
+            down = (best == "down")
         st = {"polygon": [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]],
               "treads": treads,
               "direction": [round(sx, 2), round(sy, 2)]}
