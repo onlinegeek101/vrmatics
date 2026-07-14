@@ -618,25 +618,29 @@ function boxOnWall(group, worldStart, dir, angle, along, len, yc, h, out, thick,
 // Dress an opening the way a finished house would: flat casing boards around
 // it on both faces, a glass pane + frame for windows, and a door leaf parked
 // open flat against the wall for doors.
-function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallLen) {
+function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallLen, floorY) {
   const CW = 3.5 * IN2M;       // casing width
   const CT = 0.6 * IN2M;       // casing proudness
   const mid = (lo + hi) / 2, w = hi - lo;
   const head = Math.min(op.head, H);
   const sill = op.sill;
   const sideBase = sill > 0 ? sill - CW : 0;
+  // vertical anchor for this opening's dressing: a door/garage bay in a
+  // dropped (garage) room sits on that room's slab; windows keep their
+  // measured sill above the finished floor (VR notes #17/#18).
+  const baseY = (op.type === 'window') ? 0 : (floorY || 0);
 
   for (const side of [1, -1]) {
     if (!faceIsInterior(worldStart, dir, angle, lo, hi, depth, side)) continue;
     const out = side * (depth / 2 + CT / 2);
     // side casings
     boxOnWall(group, worldStart, dir, angle, lo - CW / 2, CW,
-      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+      baseY + (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
     boxOnWall(group, worldStart, dir, angle, hi + CW / 2, CW,
-      (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
+      baseY + (sideBase + head) / 2, head - sideBase, out, CT, trimMat);
     // head casing
     boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW,
-      head + CW / 2, CW, out, CT, trimMat);
+      baseY + head + CW / 2, CW, out, CT, trimMat);
     if (sill > 0) {
       // window stool: a small shelf protruding past the casings
       boxOnWall(group, worldStart, dir, angle, mid, w + 2 * CW + 1 * IN2M,
@@ -665,31 +669,29 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
   // jamb boards lining the reveal, so the cut faces of the wall never show
   if (op.type === 'door' || (op.type === 'opening' && w < 90 * IN2M)) {
     const JT = 0.75 * IN2M;
-    boxOnWall(group, worldStart, dir, angle, mid, w, head - JT / 2, JT, 0, depth * 0.99, trimMat);
-    boxOnWall(group, worldStart, dir, angle, lo + JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
-    boxOnWall(group, worldStart, dir, angle, hi - JT / 2, JT, head / 2, head, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, baseY + head - JT / 2, JT, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, lo + JT / 2, JT, baseY + head / 2, head, 0, depth * 0.99, trimMat);
+    boxOnWall(group, worldStart, dir, angle, hi - JT / 2, JT, baseY + head / 2, head, 0, depth * 0.99, trimMat);
   }
 
   if (op.type === 'opening' && w >= 90 * IN2M && openingIsExterior(worldStart, dir, angle, lo, hi, depth)) {
-    // wide EXTERIOR opening: fill with a paneled garage door. Wide interior
-    // pass-throughs stay open. With split levels the door runs all the way
-    // down to the (dropped) garage slab, not just to the finished floor.
-    let bot = 0;
-    if (gradeM) {
-      const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
-      for (const side of [1, -1]) {
-        const off = side * (depth / 2 + 0.15);
-        if (baseGroundAt(worldStart.x + dir.x * mid + nrm.x * off,
-                         worldStart.z + dir.z * mid + nrm.z * off) < -0.05) {
-          bot = -gradeM;
-          break;
-        }
-      }
+    // wide EXTERIOR opening = a vehicle/garage door. Render it OPEN (issue
+    // #19): the sectional panels rolled up into a shallow bundle tucked under
+    // the head, leaving the bay clear so it reads open from the yard and stays
+    // walk/drive-through. Side tracks run down to the slab so the open bay
+    // still reads as a door pocket rather than a bare hole. Wide interior
+    // pass-throughs stay open with no bundle.
+    const seamMat = std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY });
+    const trackMat = std({ color: 0x8a8a8a, roughness: 0.6, metalness: 0.4, envMapIntensity: ENV_INTENSITY });
+    const bundleH = 0.30, bundleY = head - bundleH / 2;
+    boxOnWall(group, worldStart, dir, angle, mid, w, bundleY, bundleH, 0, 5 * IN2M, garageDoorMat);
+    for (let i = 0; i < 3; i++) {   // rolled panel ribs on the bundle
+      boxOnWall(group, worldStart, dir, angle, mid, w,
+        head - bundleH * (i + 0.5) / 3, 0.5 * IN2M, 3.0 * IN2M, 0.4 * IN2M, seamMat);
     }
-    boxOnWall(group, worldStart, dir, angle, mid, w, (head + bot) / 2, head - bot, 0, 1.5 * IN2M, garageDoorMat);
-    for (let i = 1; i < 4; i++) {   // panel seams
-      boxOnWall(group, worldStart, dir, angle, mid, w, head * i / 4, 0.6 * IN2M,
-        0.8 * IN2M, 0.4 * IN2M, std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY }));
+    for (const a of [lo + 1.5 * IN2M, hi - 1.5 * IN2M]) {   // vertical tracks
+      boxOnWall(group, worldStart, dir, angle, a, 2 * IN2M,
+        (baseY + head) / 2, head - baseY, 0, 1.2 * IN2M, trackMat);
     }
   }
 
@@ -697,9 +699,9 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     // wide doors are sliders (patio or interior French): two glass panes
     // in a thin frame, one per track, no swinging leaf
     const FT = 1.2 * IN2M;
-    const midY = (sill + head) / 2, glassH = head - sill - 2 * FT;
-    boxOnWall(group, worldStart, dir, angle, mid, w, sill + FT / 2, FT, 0, 3 * IN2M, trimMat);
-    boxOnWall(group, worldStart, dir, angle, mid, w, head - FT / 2, FT, 0, 3 * IN2M, trimMat);
+    const midY = baseY + (sill + head) / 2, glassH = head - sill - 2 * FT;
+    boxOnWall(group, worldStart, dir, angle, mid, w, baseY + sill + FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, mid, w, baseY + head - FT / 2, FT, 0, 3 * IN2M, trimMat);
     boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
     boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
     boxOnWall(group, worldStart, dir, angle, mid, 2 * IN2M, midY, glassH, 0, 2.4 * IN2M, trimMat);
@@ -730,7 +732,7 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     const lw = w - 0.02;
     const pivot = new THREE.Group();
     pivot.position.set(
-      worldStart.x + dir.x * hingeA, 0, worldStart.z + dir.z * hingeA);
+      worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
     const leaf = new THREE.Mesh(
       new THREE.BoxGeometry(lw, head - 0.02, LT), doorMat);
     leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
@@ -781,6 +783,26 @@ function openingIsExterior(worldStart, dir, angle, lo, hi, depth) {
     if (outsideBuilding(x, z)) return true;
   }
   return false;
+}
+
+// Floor height an opening's threshold rides on. In a split-level plan a door
+// (or garage bay) whose ROOM sits on the dropped garage slab is anchored to
+// that slab, not the finished floor - so its leaf/casing/jamb start ON that
+// floor and terminate a proper door-height above it, instead of floating at
+// Y=0 (VR notes #17/#18). A finished-floor exterior door (front door) keeps
+// Y=0 and gets a stoop to the lawn, so we only drop when an INTERIOR face of
+// the opening is on the low slab - the lawn side alone never counts.
+function openingFloorY(worldStart, dir, angle, lo, hi, depth) {
+  if (!gradeM) return 0;
+  const mid = (lo + hi) / 2;
+  const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+  for (const side of [1, -1]) {
+    const off = side * (depth / 2 + 0.15);
+    const x = worldStart.x + dir.x * mid + nrm.x * off;
+    const z = worldStart.z + dir.z * mid + nrm.z * off;
+    if (!outsideBuilding(x, z) && baseGroundAt(x, z) < -0.05) return -gradeM;
+  }
+  return 0;
 }
 
 // Is this face of a wall span inside a room? Sample the face midpoint just
@@ -1359,17 +1381,23 @@ function buildPlan(plan) {
     let cursor = 0;
     for (const op of ops) {
       const lo = Math.max(0, op.lo), hi = Math.min(L, op.hi);
+      // floor this opening's threshold rides on (dropped garage slab, or 0)
+      const floorY = (op.type === 'window') ? 0
+        : openingFloorY(worldStart, dir, angle, lo, hi, depth);
       if (lo > cursor) addPiece(group, worldStart, dir, angle, cursor, lo, 0, H, depth, H); // solid
       if (lo > cursor) solid(cursor, lo);
-      // lintel above the opening
-      if (op.head < H) addPiece(group, worldStart, dir, angle, lo, hi, op.head, H, depth, H);
+      // lintel above the opening. A door on a dropped slab (floorY<0) drops its
+      // header with it, so it caps the door instead of leaving a tall open slot
+      // above (VR notes #17/#18); the ceiling H is unchanged.
+      const headY = op.head + floorY;
+      if (headY < H) addPiece(group, worldStart, dir, angle, lo, hi, headY, H, depth, H);
       // sill below a window
       if (op.sill > 0) addPiece(group, worldStart, dir, angle, lo, hi, 0, op.sill, depth, H);
       // glass is not a doorway: a window blocks movement even at sill 0
       if (op.type === 'window' || op.sill > 0) solid(lo, hi);
-      // a closed garage door is solid too
-      if (op.type === 'opening' && hi - lo >= 90 * IN2M &&
-          openingIsExterior(worldStart, dir, angle, lo, hi, depth)) solid(lo, hi);
+      // wide EXTERIOR garage bays render OPEN (issue #19): no closed-slab
+      // collision, so the bay is walk/drive-through (the yard is at the same
+      // garage grade and the foundation is already gapped here).
       // base segment for VR calibration anchoring
       planOpeningsWorld.push({
         key: wi + ':' + Math.round(lo / IN2M),
@@ -1379,7 +1407,7 @@ function buildPlan(plan) {
         sill: op.sill, head: Math.min(op.head, H), widthIn: (hi - lo) / IN2M, thick: depth,
         shut: op.shut,
       });
-      dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L);
+      dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, L, floorY);
       cursor = Math.max(cursor, hi);
     }
     if (cursor < L) { addPiece(group, worldStart, dir, angle, cursor, L, 0, H, depth, H); solid(cursor, L); }
