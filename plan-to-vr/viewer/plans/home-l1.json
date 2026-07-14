@@ -588,9 +588,13 @@
    "wall_index": 14,
    "position": 0.8767,
    "width": 63.97,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": -1,
+   "leaf": 36.0,
+   "hinge_at": 402.8
   },
   {
    "wall_index": 15,
@@ -1822,19 +1826,13 @@
  "cameras": [
   {
    "position": [
-    -17.78,
-    -248.73
+    -17.89,
+    -258.27
    ],
-   "rotation": -0.0,
+   "rotation": 0.24,
    "is_primary": true
   }
  ],
- "underlay": {
-  "file": "home-l1.png",
-  "x0": -780.55,
-  "y1": 268.9,
-  "in_per_px": 0.5
- },
  "source": {
   "kind": "dxf",
   "floor": "1"
