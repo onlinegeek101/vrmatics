@@ -437,6 +437,11 @@ const glassMat = new THREE.MeshStandardMaterial({
   transparent: true, opacity: 0.32, envMapIntensity: 2.4, side: THREE.DoubleSide,
 });
 const doorMat = std({ color: 0xf7f5ef, roughness: 0.4 });
+// warm honey-oak wood for interior + entry doors (owner reference: raised-panel
+// stile-and-rail doors). Frame/slab slightly darker than the raised panel field.
+const doorWoodMat = std({ color: 0x8a5c2c, roughness: 0.52, metalness: 0.0 });
+const doorPanelMat = std({ color: 0xa9773c, roughness: 0.5, metalness: 0.0 });
+const brassMat = std({ color: 0xc9a63a, roughness: 0.3, metalness: 0.85 });
 
 // fixture stand-ins keyed by what the block name says they are
 const applianceMat = std({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.75 });
@@ -695,68 +700,192 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     }
   }
 
-  if (op.type === 'door' && w >= 54 * IN2M) {
-    // wide doors are sliders (patio or interior French): two glass panes
-    // in a thin frame, one per track, no swinging leaf
-    const FT = 1.2 * IN2M;
-    const midY = baseY + (sill + head) / 2, glassH = head - sill - 2 * FT;
-    boxOnWall(group, worldStart, dir, angle, mid, w, baseY + sill + FT / 2, FT, 0, 3 * IN2M, trimMat);
-    boxOnWall(group, worldStart, dir, angle, mid, w, baseY + head - FT / 2, FT, 0, 3 * IN2M, trimMat);
-    boxOnWall(group, worldStart, dir, angle, lo + FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
-    boxOnWall(group, worldStart, dir, angle, hi - FT / 2, FT, midY, glassH, 0, 3 * IN2M, trimMat);
-    boxOnWall(group, worldStart, dir, angle, mid, 2 * IN2M, midY, glassH, 0, 2.4 * IN2M, trimMat);
-    const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
-    for (const [c, off] of [[mid - w / 4, 0.5 * IN2M], [mid + w / 4, -0.5 * IN2M]]) {
-      const pane = new THREE.Mesh(
-        new THREE.BoxGeometry(w / 2 - 2 * FT, glassH - 1 * IN2M, 0.25 * IN2M), glassMat);
-      pane.position.set(
-        worldStart.x + dir.x * c + nrm.x * off,
-        midY,
-        worldStart.z + dir.z * c + nrm.z * off);
-      pane.rotation.y = angle;
-      group.add(pane);
+  if (op.type === 'door') {
+    // Owner directive: glazed / "windowed" doors only ever belong on EXTERIOR
+    // walls. Classify the opening by whether its wall face projects outside the
+    // footprint, then render:
+    //   INTERIOR (any width)  -> raised-panel solid WOOD door (single or double)
+    //   EXTERIOR entry (wide) -> solid wood door(s) + full-height glass sidelites
+    //   EXTERIOR narrow       -> opaque hinged man/utility leaf (on its slab)
+    const isExt = openingIsExterior(worldStart, dir, angle, lo, hi, depth);
+    if (!isExt) {
+      buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth, baseY, head, w);
+    } else if (w >= 54 * IN2M) {
+      buildExteriorEntry(group, worldStart, dir, angle, lo, hi, op, depth, baseY, head, w);
+    } else {
+      // a REAL hinged leaf: pivoted on the plan's hinge jamb, opened 90deg
+      // toward the plan's swing side (exactly the arc drawn on the sheet),
+      // and grabbable in VR - squeeze the grip near a door to swing it. On a
+      // dropped garage slab baseY carries it down to the slab (issue #21).
+      const LT = 1.75 * IN2M;
+      const hingeLo = (op.hinge || -1) < 0;   // -1: jamb toward wall start
+      const hingeA = hingeLo ? lo : hi;
+      // plan swing +1 opens toward the plan normal, which maps to world
+      // -nrm here (the plan's y axis flips into world -z)
+      let s = op.swing;
+      if (!s) s = faceIsInterior(worldStart, dir, angle, lo, hi, depth, -1) ? 1 : -1;
+      const theta0 = angle + (hingeLo ? 0 : Math.PI);       // closed pose
+      const rotSign = hingeLo ? s : -s;                     // opening sense
+      const lw = w - 0.02;
+      const pivot = new THREE.Group();
+      pivot.position.set(
+        worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
+      const leaf = new THREE.Mesh(
+        new THREE.BoxGeometry(lw, head - 0.02, LT), doorMat);
+      leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
+      leaf.castShadow = leaf.receiveShadow = true;
+      pivot.add(leaf);
+      laserTargets.push(leaf);
+      // recessed panels + knobs on both faces so it reads as a door
+      const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
+      for (const zs of [1, -1]) {
+        for (const [yc, yh] of [[head * 0.7, head * 0.35], [head * 0.25, head * 0.28]]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(lw * 0.7, yh, 0.01), inset);
+          p.position.set(0.01 + lw / 2, yc, zs * (LT / 2 + 0.004));
+          pivot.add(p);
+        }
+        const knob = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), applianceMat);
+        knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
+        pivot.add(knob);
+      }
+      // sheet-drawn position (90deg) unless the plan says the door stays
+      // closed (e.g. it leads somewhere not modeled yet)
+      const open0 = op.shut ? 0 : Math.PI / 2;
+      pivot.rotation.y = theta0 + rotSign * open0;
+      group.add(pivot);
+      doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
     }
-  } else if (op.type === 'door') {
-    // a REAL hinged leaf: pivoted on the plan's hinge jamb, opened 90deg
-    // toward the plan's swing side (exactly the arc drawn on the sheet),
-    // and grabbable in VR - squeeze the grip near a door to swing it
-    const LT = 1.75 * IN2M;
-    const hingeLo = (op.hinge || -1) < 0;   // -1: jamb toward wall start
+  }
+}
+
+// One raised-panel wood leaf added to a THREE.Group `pivot`, built in the
+// pivot's local frame: the leaf spans local x in [x0, x0+lw], y in [0, leafH],
+// with thickness LT along local z. Cheap stile-and-rail read: a wood slab plus
+// a few proud, lighter raised panels per face and a brass knob at the latch
+// stile (owner's closet-door reference).
+function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar) {
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(lw, leafH, LT), doorWoodMat);
+  slab.position.set(x0 + lw / 2, leafH / 2, 0);
+  slab.castShadow = slab.receiveShadow = true;
+  pivot.add(slab);
+  laserTargets.push(slab);
+  const cols = lw > 0.5 ? 2 : 1, rows = 3;      // 2-6 inset panels per leaf
+  const fx = Math.min(0.075, lw * 0.16);        // stile / mullion width
+  const fy = 0.11;                              // rail height
+  const cw = (lw - fx * (cols + 1)) / cols;
+  const ch = (leafH - fy * (rows + 1)) / rows;
+  const pt = 0.016;                             // panel proudness step
+  if (cw > 0.04 && ch > 0.06) {
+    for (const zs of [1, -1]) {
+      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+        const px = x0 + fx * (c + 1) + cw * (c + 0.5);
+        const py = fy * (r + 1) + ch * (r + 0.5);
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(cw, ch, pt), doorPanelMat);
+        p1.position.set(px, py, zs * (LT / 2 + pt / 2));
+        pivot.add(p1);
+        const p2 = new THREE.Mesh(   // raised field, a touch smaller + prouder
+          new THREE.BoxGeometry(cw * 0.72, ch * 0.82, pt * 0.9), doorPanelMat);
+        p2.position.set(px, py, zs * (LT / 2 + pt + pt * 0.4));
+        pivot.add(p2);
+      }
+    }
+  }
+  const kx = knobFar ? x0 + lw - 0.05 : x0 + 0.05;
+  for (const zs of [1, -1]) {
+    const k = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), brassMat);
+    k.position.set(kx, Math.min(0.98, leafH * 0.47), zs * (LT / 2 + 0.02));
+    pivot.add(k);
+  }
+}
+
+// INTERIOR door: raised-panel wood. Narrow (<48") = single leaf parked open ~90
+// so the room stays walk-through; wide (>=48") = double leaves closed at the
+// centre (reads best for closets / linen doors, issue #26/#23).
+function buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth, baseY, head, w) {
+  const LT = 1.75 * IN2M;
+  const leafH = head - 0.02;
+  if (w >= 48 * IN2M) {
+    for (const sideSign of [-1, 1]) {
+      const hingeA = sideSign < 0 ? lo : hi;          // hinge at each outer jamb
+      const pivot = new THREE.Group();
+      pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
+      const theta0 = angle + (sideSign < 0 ? 0 : Math.PI);   // closed, leaf toward centre
+      pivot.rotation.y = theta0;
+      addPaneledLeaf(pivot, 0.01, w / 2 - 0.02, leafH, LT, true);
+      group.add(pivot);
+      doorLeaves.push({ pivot, theta0, rotSign: sideSign < 0 ? 1 : -1, len: w / 2 - 0.02, head, open: 0 });
+    }
+  } else {
+    const hingeLo = (op.hinge || -1) < 0;
     const hingeA = hingeLo ? lo : hi;
-    // plan swing +1 opens toward the plan normal, which maps to world
-    // -nrm here (the plan's y axis flips into world -z)
     let s = op.swing;
     if (!s) s = faceIsInterior(worldStart, dir, angle, lo, hi, depth, -1) ? 1 : -1;
-    const theta0 = angle + (hingeLo ? 0 : Math.PI);       // closed pose
-    const rotSign = hingeLo ? s : -s;                     // opening sense
+    const theta0 = angle + (hingeLo ? 0 : Math.PI);
+    const rotSign = hingeLo ? s : -s;
     const lw = w - 0.02;
     const pivot = new THREE.Group();
-    pivot.position.set(
-      worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
-    const leaf = new THREE.Mesh(
-      new THREE.BoxGeometry(lw, head - 0.02, LT), doorMat);
-    leaf.position.set(0.01 + lw / 2, (head - 0.02) / 2, 0);
-    leaf.castShadow = leaf.receiveShadow = true;
-    pivot.add(leaf);
-    laserTargets.push(leaf);
-    // recessed panels + knobs on both faces so it reads as a door
-    const inset = std({ color: 0xe8e5dc, roughness: 0.5, envMapIntensity: ENV_INTENSITY });
-    for (const zs of [1, -1]) {
-      for (const [yc, yh] of [[head * 0.7, head * 0.35], [head * 0.25, head * 0.28]]) {
-        const p = new THREE.Mesh(new THREE.BoxGeometry(lw * 0.7, yh, 0.01), inset);
-        p.position.set(0.01 + lw / 2, yc, zs * (LT / 2 + 0.004));
-        pivot.add(p);
-      }
-      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), applianceMat);
-      knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
-      pivot.add(knob);
-    }
-    // sheet-drawn position (90deg) unless the plan says the door stays
-    // closed (e.g. it leads somewhere not modeled yet)
+    pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
+    addPaneledLeaf(pivot, 0.01, lw, leafH, LT, true);
     const open0 = op.shut ? 0 : Math.PI / 2;
     pivot.rotation.y = theta0 + rotSign * open0;
     group.add(pivot);
     doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
+  }
+}
+
+// EXTERIOR entry door (issue #22): a solid wood door leaf (or double) in the
+// centre, flanked by full-height narrow GLASS sidelites on both sides, with a
+// glazed transom light across the door span above. Reads as a real entry with
+// "small detail windows on both sides", not a plain slider.
+function buildExteriorEntry(group, worldStart, dir, angle, lo, hi, op, depth, baseY, head, w) {
+  const FT = 1.2 * IN2M;
+  const sideW = Math.min(12 * IN2M, w * 0.17);      // narrow sidelite each side
+  const dLo = lo + sideW, dHi = hi - sideW;
+  const dMid = (dLo + dHi) / 2, dW = dHi - dLo;
+  const transomH = Math.min(12 * IN2M, head * 0.16);
+  const doorHead = head - transomH;
+  // full-height glass sidelites, one per side
+  for (const a of [lo + sideW / 2, hi - sideW / 2]) {
+    boxOnWall(group, worldStart, dir, angle, a, sideW, baseY + head - FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, a, sideW, baseY + FT / 2, FT, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, a - sideW / 2 + FT / 2, FT, baseY + head / 2, head, 0, 3 * IN2M, trimMat);
+    boxOnWall(group, worldStart, dir, angle, a + sideW / 2 - FT / 2, FT, baseY + head / 2, head, 0, 3 * IN2M, trimMat);
+    const g = new THREE.Mesh(new THREE.BoxGeometry(sideW - 2 * FT, head - 2 * FT, 0.25 * IN2M), glassMat);
+    g.position.set(worldStart.x + dir.x * a, baseY + head / 2, worldStart.z + dir.z * a);
+    g.rotation.y = angle;
+    group.add(g);
+  }
+  // transom light across the door span
+  boxOnWall(group, worldStart, dir, angle, dMid, dW, baseY + doorHead + FT / 2, FT, 0, 3 * IN2M, trimMat);
+  boxOnWall(group, worldStart, dir, angle, dMid, dW, baseY + head - FT / 2, FT, 0, 3 * IN2M, trimMat);
+  const tg = new THREE.Mesh(new THREE.BoxGeometry(dW - 2 * FT, Math.max(0.02, transomH - FT), 0.25 * IN2M), glassMat);
+  tg.position.set(worldStart.x + dir.x * dMid, baseY + doorHead + transomH / 2, worldStart.z + dir.z * dMid);
+  tg.rotation.y = angle;
+  group.add(tg);
+  // solid wood door leaf(s), closed, in the centre
+  const LT = 1.75 * IN2M;
+  const leafH = doorHead - 0.02;
+  if (dW >= 60 * IN2M) {
+    for (const sideSign of [-1, 1]) {
+      const hingeA = sideSign < 0 ? dLo : dHi;
+      const pivot = new THREE.Group();
+      pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
+      const theta0 = angle + (sideSign < 0 ? 0 : Math.PI);
+      pivot.rotation.y = theta0;
+      addPaneledLeaf(pivot, 0.01, dW / 2 - 0.02, leafH, LT, true);
+      group.add(pivot);
+      doorLeaves.push({ pivot, theta0, rotSign: sideSign < 0 ? 1 : -1, len: dW / 2 - 0.02, head: doorHead, open: 0 });
+    }
+  } else {
+    const hingeLo = (op.hinge || -1) < 0;
+    const hingeA = hingeLo ? dLo : dHi;
+    const theta0 = angle + (hingeLo ? 0 : Math.PI);
+    const pivot = new THREE.Group();
+    pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
+    pivot.rotation.y = theta0;
+    addPaneledLeaf(pivot, 0.01, dW - 0.02, leafH, LT, true);
+    group.add(pivot);
+    doorLeaves.push({ pivot, theta0, rotSign: hingeLo ? 1 : -1, len: dW - 0.02, head: doorHead, open: 0 });
   }
 }
 
