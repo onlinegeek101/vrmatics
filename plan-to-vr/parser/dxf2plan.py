@@ -79,10 +79,13 @@ def assign_names(plan, labels):
         if best is not None:
             r["name"] = best.replace("  ", " ")
             k = kind_for(best)
-            # keep bath/laundry/garage/kitchen (the viewer styles them);
-            # generic rooms stay "room"
-            if k in ("garage", "bath", "laundry", "kitchen"):
-                r["kind"] = k
+            # The architect's label is authoritative for the kind. This
+            # must also OVERRIDE the geometric garage guess: wide interior
+            # cased openings (the hall/kitchen pass-throughs) look like a
+            # garage door to classify_garages, and a "garage" hall would
+            # drop the main floor slab by 4 risers in the viewer.
+            r["kind"] = k if k in ("garage", "bath", "laundry",
+                                   "kitchen") else "room"
 
 
 def filter_disconnected(plan, snap=6.0, min_component=3, min_keep_len=72.0):
