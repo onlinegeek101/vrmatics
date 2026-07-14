@@ -171,6 +171,84 @@ def filter_disconnected(plan, snap=6.0, min_component=3, min_keep_len=72.0):
     return dropped
 
 
+def _switchback_bands(path, layers, g):
+    """Split ONE stairwell's tread ladder into its two flights.
+
+    A switchback main stair draws its two flights as two parallel tread
+    ladders offset laterally (here: the up-flight to L2 in one band, the
+    down-flight to the basement in the other). dxf_stairs' generic chaining
+    folds them into one messy run, so the viewer renders a single flat run
+    that dead-ends. When a GT entry marks the well `split`, re-read the raw
+    treads inside its `bbox`, cluster them into the two lateral bands, and
+    emit each band as its own stair - one carries `down` (the band nearest
+    `down_near`), the other ascends. The viewer's existing switchback code
+    then builds the landing + return flight from that up/down pair."""
+    doc = ezdxf.readfile(path)
+    x0, x1, y0, y1 = g["bbox"]
+    segs = []
+    for e in doc.modelspace().query("LINE"):
+        if e.dxf.layer not in layers:
+            continue
+        a, b = e.dxf.start, e.dxf.end
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        if 22 <= L <= 80 and x0 <= mx <= x1 and y0 <= my <= y1:
+            segs.append((a[0], a[1], b[0], b[1], mx, my))
+    if not segs:
+        return []
+
+    def bucket(s):
+        return round(math.degrees(
+            math.atan2(s[3] - s[1], s[2] - s[0]) % math.pi) / 5) * 5
+    from collections import Counter
+    modal = Counter(bucket(s) for s in segs).most_common(1)[0][0]
+    tr = [s for s in segs if bucket(s) == modal]
+    a = math.radians(modal)
+    tdir = (math.cos(a), math.sin(a))       # along a tread
+    nrm = (-tdir[1], tdir[0])               # climb axis (perp to tread)
+    items = [{"s": s, "lat": s[4] * tdir[0] + s[5] * tdir[1],
+              "c": s[4] * nrm[0] + s[5] * nrm[1]} for s in tr]
+    items.sort(key=lambda d: d["lat"])
+    # break the ladder into lateral bands at the widest lateral gap
+    gi, gv = 0, -1.0
+    for i in range(1, len(items)):
+        d = items[i]["lat"] - items[i - 1]["lat"]
+        if d > gv:
+            gv, gi = d, i
+    bands = [items[:gi], items[gi:]]
+    dn = g.get("down_near")
+    cents = []
+    for band in bands:
+        if band:
+            cents.append((sum(b["s"][4] for b in band) / len(band),
+                          sum(b["s"][5] for b in band) / len(band)))
+        else:
+            cents.append(None)
+    out = []
+    for bi, band in enumerate(bands):
+        if len(band) < 3:
+            continue
+        segset = [b["s"] for b in band]
+        xs = [c for s in segset for c in (s[0], s[2])]
+        ys = [c for s in segset for c in (s[1], s[3])]
+        bx0, bx1, by0, by1 = min(xs), max(xs), min(ys), max(ys)
+        treads = [[[round(s[0], 1), round(s[1], 1)],
+                   [round(s[2], 1), round(s[3], 1)]] for s in segset]
+        st = {"polygon": [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]],
+              "treads": treads,
+              "direction": [round(nrm[0], 2), round(nrm[1], 2)]}
+        if "direction" in g and g.get("down_dir_from_gt"):
+            st["direction"] = g["direction"]
+        if dn and cents[bi]:
+            oc = cents[1 - bi]
+            here = math.hypot(cents[bi][0] - dn[0], cents[bi][1] - dn[1])
+            there = math.hypot(oc[0] - dn[0], oc[1] - dn[1]) if oc else 1e18
+            if here <= there:
+                st["down"] = True
+        out.append(st)
+    return out
+
+
 def add_stairs(plan, path, geom_layers, gt, stair_labels):
     """Label-gated stair detection. The architect labels every stairwell
     ("STAIR", plus "Down"/"Up to Attic"); we keep only tread-runs sitting
@@ -207,6 +285,11 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
         matched = g and math.hypot(g["near"][0] - cx,
                                    g["near"][1] - cy) <= g.get("tol", 90)
         if matched and g.get("drop"):
+            continue
+        if matched and g.get("split"):
+            # a switchback well: emit its two flights (up + down) so the
+            # viewer builds the landing + return flight instead of one run
+            out.extend(_switchback_bands(path, set(geom_layers), g))
             continue
         # dominant run's climb sets the default direction
         dom = max(grp, key=lambda r: len(r["treads"]))

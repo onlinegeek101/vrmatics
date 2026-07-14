@@ -19,7 +19,8 @@
     -147
    ],
    "down": true,
-   "_note": "4-tread step-down from the main floor into the garage level"
+   "force": true,
+   "_note": "4-tread step-down from the main floor into the garage level (garage->house connector, VR note #16); force so the DXF tread ladder here renders even though no STAIR text label sits within 110in"
   },
   {
    "near": [
@@ -33,6 +34,26 @@
     1
    ],
    "force": true
+  },
+  {
+   "near": [
+    -97,
+    -232
+   ],
+   "tol": 150,
+   "force": true,
+   "split": true,
+   "bbox": [
+    -142,
+    -55,
+    -282,
+    -183
+   ],
+   "down_near": [
+    -97,
+    -208
+   ],
+   "_note": "main stair is a switchback (VR note #14): the south band (y~-256, 5 treads) is the up-flight to L2 -- L2's own down-stair lands right here at (-105,-257) dir[-1,0] -- and the north band (y~-208, 9 treads) is the down-flight to the basement; the two meet at a mid-landing. 'split' re-reads the raw tread ladders in bbox and emits both flights so the viewer renders the landing + return flight instead of one dead-ending flat run. down_near tags the north (basement) band as the DOWN partner."
   }
  ],
  "camera": {
