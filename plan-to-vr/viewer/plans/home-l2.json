@@ -561,18 +561,6 @@
    "head": 80.0
   },
   {
-   "wall_index": 10,
-   "position": 0.3881,
-   "width": 40.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": -1,
-   "leaf": 31.9,
-   "hinge_at": 96.3
-  },
-  {
    "wall_index": 19,
    "position": 0.221,
    "width": 40.0,

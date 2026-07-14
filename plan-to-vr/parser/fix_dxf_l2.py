@@ -69,6 +69,11 @@ SHOWER_BOX = (212, 263, -100, -10)
 # demolition wall stub in the bedroom (red closed polyline)
 DEMO_BOX = (-74, -59, -87, -64)
 
+# erroneous all-red door symbol (homeowner: not a real door). Every valid
+# door is a red arc + GREEN leaf; this one at hinge (163,-78) is drawn
+# entirely red - leftover linework, not a door. Arc + red leaf -> demo.
+BAD_DOOR_BOX = (150, 200, -82, -40)
+
 
 def in_box(pt, box):
     x0, x1, y0, y1 = box
@@ -82,10 +87,19 @@ def main(src, dst):
     deleted = []
 
     for e in list(msp):
-        if e.dxf.layer != WALLS:
-            continue
         t = e.dxftype()
         pt = _mid(e)
+
+        # the erroneous all-red door lives on the doors/windows layer
+        if (e.dxf.layer == "1.2DRWDWS" and in_box(pt, BAD_DOOR_BOX)
+                and e.dxf.color in (1, 11)
+                and (t == "ARC" or (t == "LINE" and _linelen(e) > 6))):
+            e.dxf.layer = "1.2DEMO"
+            moved["1.2DEMO"] += 1
+            continue
+
+        if e.dxf.layer != WALLS:
+            continue
 
         if t == "LINE" and any(_line_matches(e, a, b)
                                for a, b in DELETE_LINES):
