@@ -53,17 +53,48 @@ def detect(path, layers, tread_min=22, tread_max=80, spacing_lo=7,
             L = math.hypot(s[2] - s[0], s[3] - s[1])
             items.append({"c": mx * nrm[0] + my * nrm[1],       # climb pos
                           "lat": mx * tdir[0] + my * tdir[1],    # lateral pos
-                          "L": L, "seg": s})
-        # 1) split into lateral bands (one flight per band): sort by lateral
-        #    centre, break where the gap exceeds ~half a tread
-        items.sort(key=lambda d: d["lat"])
-        bands, cur = [], []
-        for it in items:
-            if cur and it["lat"] - cur[-1]["lat"] > 0.6 * it["L"]:
-                bands.append(cur); cur = []
-            cur.append(it)
-        if cur:
-            bands.append(cur)
+                          "L": L, "seg": s, "mx": mx, "my": my})
+        # 0) spatially cluster treads before lateral banding. Lateral banding
+        #    alone is GLOBAL within an angle bucket, so an unrelated vertical
+        #    line elsewhere in the plan (a window mullion, a stray fragment)
+        #    that happens to share a lateral value bridges two distant flights
+        #    into one band - and when two stacked flights share climb positions
+        #    the collision then swallows one flight entirely. Grouping treads by
+        #    centre proximity first keeps each stairwell self-contained; a
+        #    U-stair's two flights (~half a tread-length apart laterally) stay
+        #    in one cluster and are split by the lateral pass below.
+        CLUSTER = 72.0
+        n = len(items)
+        parent = list(range(n))
+
+        def _find(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]; a = parent[a]
+            return a
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _find(i) == _find(j):
+                    continue
+                if math.hypot(items[i]["mx"] - items[j]["mx"],
+                              items[i]["my"] - items[j]["my"]) <= CLUSTER:
+                    parent[_find(i)] = _find(j)
+        clusters = {}
+        for i in range(n):
+            clusters.setdefault(_find(i), []).append(items[i])
+
+        bands = []
+        for cluster in clusters.values():
+            # 1) split cluster into lateral bands (one flight per band): sort by
+            #    lateral centre, break where the gap exceeds ~half a tread
+            cluster.sort(key=lambda d: d["lat"])
+            cur = []
+            for it in cluster:
+                if cur and it["lat"] - cur[-1]["lat"] > 0.6 * it["L"]:
+                    bands.append(cur); cur = []
+                cur.append(it)
+            if cur:
+                bands.append(cur)
         # 2) within a band, chain evenly-spaced treads along the climb
         for band in bands:
             band.sort(key=lambda d: d["c"])
