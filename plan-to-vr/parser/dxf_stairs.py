@@ -5,8 +5,13 @@ Architect DXF draws stair treads as a run of parallel, similar-length,
 evenly-spaced lines - far cleaner than the plotted-PDF case, so a direct
 geometric detector works. Returns run dicts shaped like the viewer's
 plan["stairs"]: {polygon, treads:[[[x,y],[x,y]],...], direction?, down?}.
-Direction / down come from a ground-truth sidecar (the plotted "Up/Down"
-text is unreadable geometry), matched by run centroid.
+
+The architect also writes a small "Down" / "Up" / "Up to Attic" text beside
+each flight naming which way it goes FROM THIS floor - the authoritative
+indicator of which side is level to this floor. In the native DXF that text
+is real, readable TEXT/MTEXT (unlike the plotted-PDF case), so we read it and
+tag each run with `down` (bool) and a signed climb `label_dir`. A GT sidecar
+can still override per flight where the label is ambiguous or absent.
 """
 import math
 from collections import defaultdict
@@ -27,6 +32,55 @@ def _lines(path, layers):
 def _angle(seg):
     a = math.atan2(seg[3] - seg[1], seg[2] - seg[0]) % math.pi
     return a
+
+
+def _dir_labels(path):
+    """Read the architect's up/down flight tags. Returns list of
+    (kind, (x, y)) where kind is "down" or "up". Kept deliberately strict
+    (whole-word DOWN/DN/UP/UP TO.../ATTIC) so unrelated notes elsewhere on
+    the sheet ("New window", a dimension string) never masquerade as a stair
+    direction; proximity to a detected flight gates it further in detect()."""
+    doc = ezdxf.readfile(path)
+    out = []
+    for e in doc.modelspace():
+        if e.dxftype() not in ("TEXT", "MTEXT"):
+            continue
+        t = (e.plain_text() if e.dxftype() == "MTEXT" else e.dxf.text)
+        u = t.strip().upper().rstrip(".")
+        if u in ("DOWN", "DN"):
+            kind = "down"
+        elif u == "UP" or u == "ATTIC" or u.startswith("UP TO"):
+            kind = "up"
+        else:
+            continue
+        p = e.dxf.insert
+        out.append((kind, (p[0], p[1])))
+    return out
+
+
+def _annotate_directions(runs, labels, maxd=80.0):
+    """Tag each run with the nearest up/down label (within maxd of its
+    centroid) as `down` (bool) + a signed `label_dir` along the run's climb
+    axis. Down descends AWAY from the label (the label sits at the floor-level
+    top of the run); up climbs TOWARD the label (it names the destination,
+    e.g. the attic, at the flight's far/top end) - so a switchback down+up
+    pair sharing one well gets opposite directions, which is what it is."""
+    for r in runs:
+        cx, cy = r["centroid"]
+        best, bestd = None, maxd
+        for kind, (lx, ly) in labels:
+            d = math.hypot(cx - lx, cy - ly)
+            if d < bestd:
+                best, bestd = (kind, (lx, ly)), d
+        if best is None:
+            continue
+        kind, (lx, ly) = best
+        ux, uy = r["climb"]
+        s = 1.0 if ((lx - cx) * ux + (ly - cy) * uy) >= 0 else -1.0
+        sign = -s if kind == "down" else s
+        r["down"] = (kind == "down")
+        r["label_dir"] = [round(sign * ux, 2), round(sign * uy, 2)]
+    return runs
 
 
 def detect(path, layers, tread_min=22, tread_max=80, spacing_lo=7,
@@ -117,6 +171,7 @@ def detect(path, layers, tread_min=22, tread_max=80, spacing_lo=7,
                 if len(chain) >= min_treads:
                     runs.append(_build([c["seg"] for c in chain], nrm))
                 i = j if j > i + 1 else i + 1
+    _annotate_directions(runs, _dir_labels(path))
     return runs
 
 

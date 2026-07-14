@@ -291,13 +291,25 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
             # viewer builds the landing + return flight instead of one run
             out.extend(_switchback_bands(path, set(geom_layers), g))
             continue
-        # dominant run's climb sets the default direction
+        # Direction / down: a matched GT entry is authoritative (keeps the
+        # hand-tuned L1 switchback + garage runs exact); otherwise take the
+        # architect's own Down/Up text indicator that dxf_stairs read off the
+        # sheet (run["down"] / run["label_dir"]); else fall back to the
+        # dominant run's raw climb axis with no level change.
         dom = max(grp, key=lambda r: len(r["treads"]))
+        labr = next((r for r in grp if r.get("label_dir")), None)
+        if matched:
+            direction = g["direction"] if "direction" in g else dom["climb"]
+            down = bool(g.get("down"))
+        elif labr is not None:
+            direction = labr["label_dir"]
+            down = bool(labr.get("down"))
+        else:
+            direction = dom["climb"]
+            down = False
         st = {"polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-              "treads": treads,
-              "direction": (g.get("direction") if matched and "direction" in g
-                            else dom["climb"])}
-        if matched and g.get("down"):
+              "treads": treads, "direction": direction}
+        if down:
             st["down"] = True
         out.append(st)
     plan["stairs"] = out

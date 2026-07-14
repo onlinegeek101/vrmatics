@@ -1,9 +1,5 @@
 {
  "_source": "DXF migration GT",
- "stairs": [
-  {"near": [-105, -257], "down": true, "direction": [-1, 0],
-   "_note": "main stairwell: DOWN flight to floor 1 (south half of the shared well)"},
-  {"near": [-106, -208], "direction": [1, 0],
-   "_note": "main stairwell: UP-to-attic flight (north half of the shared well); ascends opposite the down run - VR note #30"}
- ]
+ "_note": "stair up/down + direction now come from the architect's Down/Up-to-Attic text on 1.2RMNAMES, detected in dxf_stairs (issue #30). No manual stair entries needed.",
+ "stairs": []
 }
