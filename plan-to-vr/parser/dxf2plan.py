@@ -306,6 +306,48 @@ def main():
         args.input, args.wall_layers.split(","), dw.split(","), plan["walls"])
     report["openings"] = op_report
 
+    # Re-trace rooms with doorway bridges. A door can sit in the gap
+    # BETWEEN two collinear wall segments (the dining room's north door);
+    # that hole is wider than detect_rooms' junction healing, so the room
+    # loop never closes and the room gets no floor. Bridge close,
+    # collinear wall-end pairs before polygonizing.
+    class _W:
+        pass
+
+    def _adapt(c0, c1, th):
+        a = _W()
+        a.c0, a.c1, a.thickness = tuple(c0), tuple(c1), th
+        d = math.hypot(c1[0] - c0[0], c1[1] - c0[1]) or 1.0
+        a.axis = ((c1[0] - c0[0]) / d, (c1[1] - c0[1]) / d)
+        return a
+
+    ads = [_adapt(w["start"], w["end"], w["thickness"])
+           for w in plan["walls"]]
+    ends = []
+    for w in plan["walls"]:
+        d = math.hypot(w["end"][0] - w["start"][0],
+                       w["end"][1] - w["start"][1]) or 1.0
+        ax = ((w["end"][0] - w["start"][0]) / d,
+              (w["end"][1] - w["start"][1]) / d)
+        ends.append((w["start"], ax, w["thickness"]))
+        ends.append((w["end"], ax, w["thickness"]))
+    for i in range(len(ends)):
+        for j in range(i + 1, len(ends)):
+            (p, pax, pth), (q, qax, qth) = ends[i], ends[j]
+            gap = math.hypot(q[0] - p[0], q[1] - p[1])
+            if not (6.0 < gap <= 48.0):
+                continue
+            if abs(pax[0] * qax[0] + pax[1] * qax[1]) < 0.96:
+                continue
+            gx, gy = (q[0] - p[0]) / gap, (q[1] - p[1]) / gap
+            if abs(gx * pax[0] + gy * pax[1]) < 0.9:
+                continue          # ends are beside each other, not in line
+            ads.append(_adapt(p, q, min(pth, qth)))
+    rooms2 = X.detect_rooms(ads, plan.get("fixtures", []),
+                            plan.setdefault("warnings", []))
+    if len(rooms2) >= len(plan.get("rooms", [])):
+        plan["rooms"] = rooms2
+
     stair_labels = []
     if args.rmnames_layer:
         labels = room_labels(args.input, args.rmnames_layer)
@@ -316,6 +358,10 @@ def main():
         stair_labels = [pos for name, pos in labels
                         if any(k in name.upper()
                                for k in ("STAIR", "DOWN", "ATTIC", "UP TO"))]
+    # unlabeled flights the homeowner wants modeled anyway (the exterior
+    # stoop off the dining door) are forced via the GT sidecar
+    stair_labels += [tuple(s["near"]) for s in gt.get("stairs", [])
+                     if s.get("force")]
 
     # treads live on the doors/windows layer; the wall layer only adds noise
     n_st = add_stairs(plan, args.input, dw.split(","), gt, stair_labels)

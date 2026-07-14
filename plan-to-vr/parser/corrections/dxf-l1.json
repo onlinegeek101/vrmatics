@@ -1,12 +1,45 @@
 {
- "_source": "DXF migration GT — stair down/level facts (homeowner review); main floor rides ~4 risers above the garage/basement",
+ "_source": "DXF migration GT \u2014 stair down/level facts (homeowner review); main floor rides ~4 risers above the garage/basement",
  "stairs": [
-  {"near": [-248, 19], "down": true, "direction": [-1, 0],
-   "_note": "garage/mudroom run down to basement, bottom at the east end"},
-  {"near": [-261, -147], "down": true,
-   "_note": "4-tread step-down from the main floor into the garage level"},
-  {"near": [7, 282], "drop": true,
-   "_note": "exterior stoop steps, not modeled"}
+  {
+   "near": [
+    -248,
+    19
+   ],
+   "down": true,
+   "direction": [
+    -1,
+    0
+   ],
+   "_note": "garage/mudroom run down to basement, bottom at the east end"
+  },
+  {
+   "near": [
+    -261,
+    -147
+   ],
+   "down": true,
+   "_note": "4-tread step-down from the main floor into the garage level"
+  },
+  {
+   "near": [
+    7,
+    264
+   ],
+   "_note": "exterior stoop off the dining door, down to grade northward",
+   "down": true,
+   "direction": [
+    0,
+    1
+   ],
+   "force": true
+  }
  ],
- "camera": {"near": [70, -300], "_note": "spawn near the front entry / porch side"}
+ "camera": {
+  "near": [
+   70,
+   -300
+  ],
+  "_note": "spawn near the front entry / porch side"
+ }
 }

@@ -131,7 +131,7 @@
     10.723,
     -79.406
    ],
-   "thickness": 3.99,
+   "thickness": 4.02,
    "height": 96.0
   },
   {
@@ -244,14 +244,14 @@
   },
   {
    "start": [
-    -106.048,
+    -185.463,
     32.348
    ],
    "end": [
     98.827,
     32.348
    ],
-   "thickness": 4.04,
+   "thickness": 4.07,
    "height": 96.0
   },
   {
@@ -546,7 +546,7 @@
   },
   {
    "wall_index": 20,
-   "position": 0.6077,
+   "position": 0.7173,
    "width": 123.5,
    "type": "opening",
    "sill": 0.0,
@@ -684,12 +684,12 @@
      -88.784
     ],
     [
-     -42.523,
-     30.95
+     -42.516,
+     32.348
     ],
     [
-     8.906,
-     31.458
+     8.907,
+     32.348
     ],
     [
      8.691,
@@ -697,7 +697,7 @@
     ]
    ],
    "kind": "room",
-   "area": 42075.5,
+   "area": 42134.4,
    "name": "HALL"
   },
   {
@@ -755,19 +755,35 @@
   ],
   [
    -110.132,
-   32.385
+   30.301
   ],
   [
-   -108.069,
-   32.385
+   -185.463,
+   30.314
   ],
   [
-   -108.069,
-   34.368
+   -185.47,
+   -48.244
+  ],
+  [
+   -191.626,
+   -48.244
+  ],
+  [
+   -191.626,
+   227.064
+  ],
+  [
+   -185.47,
+   227.064
+  ],
+  [
+   -185.47,
+   34.381
   ],
   [
    -44.426,
-   34.368
+   34.381
   ],
   [
    -43.89,
@@ -903,7 +919,6 @@
   "orphan line not paired into a wall: (37.6,-79.2)->(37.6,-83.4)",
   "orphan line not paired into a wall: (163.6,-79.0)->(163.6,-83.5)",
   "orphan line not paired into a wall: (128.9,-79.2)->(129.6,-83.5)",
-  "orphan line not paired into a wall: (185.8,-79.2)->(128.9,-79.2)",
   "orphan line not paired into a wall: (124.7,-79.3)->(102.8,-79.3)",
   "orphan line not paired into a wall: (259.0,-79.3)->(219.8,-79.2)",
   "orphan line not paired into a wall: (185.8,-79.2)->(128.9,-79.2)",
@@ -932,7 +947,6 @@
   "orphan line not paired into a wall: (34.3,141.0)->(30.1,141.0)",
   "orphan line not paired into a wall: (10.8,60.1)->(6.6,60.1)",
   "orphan line not paired into a wall: (10.8,94.1)->(6.6,94.1)",
-  "orphan line not paired into a wall: (-185.5,30.2)->(-110.0,30.3)",
   "orphan line not paired into a wall: (-45.0,30.3)->(-45.0,30.3)",
   "orphan line not paired into a wall: (-185.5,30.2)->(-110.0,30.3)",
   "orphan line not paired into a wall: (-45.0,30.3)->(-45.0,30.3)",
@@ -980,7 +994,7 @@
   "orphan line not paired into a wall: (237.8,53.2)->(208.9,53.2)",
   "orphan line not paired into a wall: (223.3,70.2)->(223.3,22.6)",
   "9 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "3 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "2 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
   {

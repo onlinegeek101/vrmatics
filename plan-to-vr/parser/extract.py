@@ -469,7 +469,14 @@ def pair_segments(segs, max_wall, min_thick=MIN_WALL_THICK):
                 seen_after = True
         if covered > 0.1 * (ov_hi - ov_lo):
             continue
-        if seen_before and seen_after:
+        if seen_before and seen_after and (ov_hi - ov_lo) < 50.0:
+            # short two-sided fill = casing/header linework inside a door
+            # gap; but a LONG two-sided fill is a genuine missing stretch
+            # of wall. Real case: one face drawn as a single 100" line,
+            # the other as two segments - greedy pairing consumes the
+            # long line once and strands the second segment, leaving a
+            # 60" hole mid-wall. No door is 50" wide, so length separates
+            # the two.
             continue
         used[i] = True
         pieces.append(WallPiece(c0, c1, d))
