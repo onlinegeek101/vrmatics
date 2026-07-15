@@ -925,13 +925,22 @@ function openingFloorY(worldStart, dir, angle, lo, hi, depth) {
   if (!gradeM) return 0;
   const mid = (lo + hi) / 2;
   const nrm = { x: Math.sin(angle), z: Math.cos(angle) };
+  let low = 0, highInterior = false;
   for (const side of [1, -1]) {
     const off = side * (depth / 2 + 0.15);
     const x = worldStart.x + dir.x * mid + nrm.x * off;
     const z = worldStart.z + dir.z * mid + nrm.z * off;
-    if (!outsideBuilding(x, z) && baseGroundAt(x, z) < -0.05) return -gradeM;
+    if (outsideBuilding(x, z)) continue;
+    if (baseGroundAt(x, z) < -0.05) low = -gradeM;
+    else highInterior = true;
   }
-  return 0;
+  // an INTERIOR split-level threshold (garage <-> house) serves the upper
+  // floor - the stair landing meets it there, so the door stands at the
+  // house level with a full-height head (VR note #43). Openings facing the
+  // yard, or fully on the slab, stay dropped (#17/#18/#21 - garage bays and
+  // the exterior man-door cap at the slab).
+  if (low < 0 && highInterior) return 0;
+  return low;
 }
 
 // Is this face of a wall span inside a room? Sample the face midpoint just
@@ -1244,6 +1253,52 @@ function buildPlan(plan) {
       const depth = gaps.length ? gaps[gaps.length >> 1] : 0.26;
       const dir = st.down ? -1 : 1;           // down descends, up climbs
       const N = tr.length;
+      // DOWN-flight onto a modeled low slab (the garage): the drawn ladder
+      // footprint becomes a LANDING at floor level, and a solid flight
+      // continues off its far edge, descending to the slab (VR #16/#42/#44:
+      // "a landing that goes to there, then stairs approximately where they
+      // are going all the way down to the ground off of the landing").
+      if (st.down) {
+        const bcx = tr.reduce((a, t) => a + t.mx, 0) / N;
+        const bcz = tr.reduce((a, t) => a + t.mz, 0) / N;
+        const slabY = baseGroundAt(bcx, bcz);
+        if (slabY < -0.05) {
+          const width = tr.reduce((a, t) => Math.max(a, t.len), 0);
+          const ux2 = -cz, uz2 = cx;                 // tread (long) axis
+          const rotY = -Math.atan2(uz2, ux2);
+          const span = (tr[N - 1].mx - tr[0].mx) * cx +
+                       (tr[N - 1].mz - tr[0].mz) * cz + depth;
+          const lcx = tr[0].mx + cx * (span / 2 - depth / 2);
+          const lcz = tr[0].mz + cz * (span / 2 - depth / 2);
+          const land = new THREE.Mesh(
+            new THREE.BoxGeometry(width, -slabY, span), stMat);
+          land.position.set(lcx, slabY / 2, lcz);
+          land.rotation.y = rotY;
+          land.castShadow = land.receiveShadow = true;
+          group.add(land); laserTargets.push(land);
+          stairSteps.push({ cx: lcx, cz: lcz, ux: ux2, uz: uz2, kx: cx, kz: cz,
+                            hl: width / 2, hd: span / 2, top: 0 });
+          // the flight off the landing's far edge, solid risers to the slab
+          const n = Math.max(3, Math.ceil(-slabY / riserM));
+          const rise = -slabY / (n + 1), stepD = 0.27;
+          const ex = tr[0].mx + cx * (span - depth / 2);
+          const ez = tr[0].mz + cz * (span - depth / 2);
+          for (let k = 1; k <= n; k++) {
+            const top = -k * rise;
+            const mxw = ex + cx * (k - 0.5) * stepD;
+            const mzw = ez + cz * (k - 0.5) * stepD;
+            const m = new THREE.Mesh(
+              new THREE.BoxGeometry(width, top - slabY, stepD), stMat);
+            m.position.set(mxw, (top + slabY) / 2, mzw);
+            m.rotation.y = rotY;
+            m.castShadow = m.receiveShadow = true;
+            group.add(m); laserTargets.push(m);
+            stairSteps.push({ cx: mxw, cz: mzw, ux: ux2, uz: uz2,
+                              kx: cx, kz: cz, hl: width / 2, hd: stepD / 2, top });
+          }
+          continue;
+        }
+      }
       // each tread is a solid step block; tread 0 sits flush at floor 0
       tr.forEach((t, i) => {
         const top = dir * i * riserM;                 // walkable surface
@@ -1341,15 +1396,28 @@ function buildPlan(plan) {
           // the treads simply descend onto it, no shaft/hole/rail needed.
           const bc = baseGroundAt((rect.x0 + rect.x1) / 2, (rect.z0 + rect.z1) / 2);
           if (bc >= -0.05) {
-            // a true storey-to-storey descent: cut a floor opening, drop a
-            // dark shaft under it, and rail the open edges
+            // a true storey-to-storey descent: cut a floor opening and line
+            // it as an OPEN shaft (side walls + a floor below) so the
+            // descending treads stay visible - a solid dark box would swallow
+            // them and read as "open space below us" (VR #39/#58)
             floorHoles.push(rect);
-            const wallH = Math.max(0.9, N * riserM);
+            const wallH = N * riserM + 0.35;
             const sx = (rect.x0 + rect.x1) / 2, sz = (rect.z0 + rect.z1) / 2;
-            const shaft = new THREE.Mesh(new THREE.BoxGeometry(
-              rect.x1 - rect.x0, wallH, rect.z1 - rect.z0), wellMat);
-            shaft.position.set(sx, -wallH / 2 - 0.02, sz);
-            group.add(shaft);
+            const rw = rect.x1 - rect.x0, rd = rect.z1 - rect.z0;
+            const mkSide = (px2, pz2, w2, d2) => {
+              const s2 = new THREE.Mesh(
+                new THREE.BoxGeometry(w2, wallH, d2), wellMat);
+              s2.position.set(px2, -wallH / 2, pz2);
+              group.add(s2);
+            };
+            mkSide(sx, rect.z0 + 0.01, rw, 0.02);   // shaft side walls
+            mkSide(sx, rect.z1 - 0.01, rw, 0.02);
+            mkSide(rect.x0 + 0.01, sz, 0.02, rd);
+            mkSide(rect.x1 - 0.01, sz, 0.02, rd);
+            const bot = new THREE.Mesh(
+              new THREE.BoxGeometry(rw, 0.02, rd), wellMat);
+            bot.position.set(sx, -wallH, sz);
+            group.add(bot);
             const railH = 0.92, railMk = (ax, az, bx, bz) => {
               const len = Math.hypot(bx - ax, bz - az);
               const r = new THREE.Mesh(new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
@@ -1682,6 +1750,30 @@ function buildPlan(plan) {
       const hole = new THREE.Path();
       hole.setFromPoints(pts);
       floorShape.holes.push(hole);
+    }
+    // the lawn plane runs under the building and would show grass through a
+    // stair shaft: cut the footprint out of it (the slab hides the cut from
+    // every outside vantage; the shaft liner below stays visible instead)
+    if (floorHoles.length) {
+      const lawn = new THREE.Shape();
+      lawn.absarc(0, 0, 240, 0, Math.PI * 2, false);
+      const hp = footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz));
+      if ((THREE.ShapeUtils.area(hp) > 0) ===
+          (THREE.ShapeUtils.area(lawn.getPoints()) > 0)) hp.reverse();
+      const lh = new THREE.Path();
+      lh.setFromPoints(hp);
+      lawn.holes.push(lh);
+      const g2 = new THREE.ShapeGeometry(lawn, 48);
+      g2.rotateX(-Math.PI / 2);
+      const gp = g2.attributes.position, guv = g2.attributes.uv;
+      for (let gi = 0; gi < gp.count; gi++)   // match CircleGeometry's UV scale
+        guv.setXY(gi, gp.getX(gi) / 480 + 0.5, -gp.getZ(gi) / 480 + 0.5);
+      ground.geometry.dispose();
+      ground.geometry = g2;
+    } else if (!ground.geometry.parameters ||
+               ground.geometry.parameters.radius !== 240) {
+      ground.geometry.dispose();
+      ground.geometry = new THREE.CircleGeometry(240, 48).rotateX(-Math.PI / 2);
     }
     const geo = new THREE.ShapeGeometry(floorShape);
     geo.rotateX(-Math.PI / 2);
@@ -3990,8 +4082,13 @@ const lastSafe = { x: 0, z: 0 };
 // finished interior floor at 0
 function baseGroundAt(x, z) {
   if (!gradeM) return 0;
-  if (outsideBuilding(x, z)) return -gradeM;
   for (const poly of lowPolysWorld) if (pointInPoly(x, z, poly)) return -gradeM;
+  // every non-garage room lays its own finished floor, so inside a room the
+  // ground is the floor even where the footprint polygon undershoots the
+  // building outline (the NE/dining wing - VR notes #15/#35, "falling
+  // through the floor"). Room check BEFORE the footprint check.
+  for (const poly of roomPolysWorld) if (pointInPoly(x, z, poly)) return 0;
+  if (outsideBuilding(x, z)) return -gradeM;
   return 0;
 }
 
