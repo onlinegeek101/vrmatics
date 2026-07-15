@@ -4,7 +4,7 @@
  "walls": [
   {
    "start": [
-    86.446,
+    86.364,
     71.1
    ],
    "end": [
@@ -16,14 +16,14 @@
   },
   {
    "start": [
-    -188.58,
-    -280.557
+    -188.465,
+    -280.442
    ],
    "end": [
-    -190.577,
-    -90.821
+    -188.465,
+    223.975
    ],
-   "thickness": 6.09,
+   "thickness": 6.1,
    "height": 96.0
   },
   {
@@ -64,14 +64,14 @@
   },
   {
    "start": [
-    -106.796,
-    226.975
+    -191.596,
+    226.904
    ],
    "end": [
     -7.676,
     227.058
    ],
-   "thickness": 6.17,
+   "thickness": 6.24,
    "height": 96.0
   },
   {
@@ -92,7 +92,7 @@
     -284.446
    ],
    "end": [
-    -185.521,
+    -185.462,
     -282.8
    ],
    "thickness": 6.09,
@@ -104,22 +104,10 @@
     -88.772
    ],
    "end": [
-    -185.542,
+    -185.461,
     -88.579
    ],
-   "thickness": 4.19,
-   "height": 96.0
-  },
-  {
-   "start": [
-    -188.548,
-    -45.167
-   ],
-   "end": [
-    -188.548,
-    223.986
-   ],
-   "thickness": 6.16,
+   "thickness": 4.15,
    "height": 96.0
   },
   {
@@ -131,7 +119,7 @@
     10.723,
     -79.406
    ],
-   "thickness": 4.02,
+   "thickness": 4.13,
    "height": 96.0
   },
   {
@@ -160,14 +148,14 @@
   },
   {
    "start": [
-    100.827,
-    31.475
+    100.788,
+    31.379
    ],
    "end": [
-    100.827,
-    -40.812
+    100.563,
+    -79.173
    ],
-   "thickness": 4.0,
+   "thickness": 4.02,
    "height": 96.0
   },
   {
@@ -185,25 +173,25 @@
   {
    "start": [
     -45.605,
-    -158.05
+    -157.918
    ],
    "end": [
-    -185.548,
-    -158.05
+    -185.462,
+    -158.137
    ],
    "thickness": 4.05,
    "height": 96.0
   },
   {
    "start": [
-    -41.98,
-    140.957
+    -41.673,
+    202.965
    ],
    "end": [
     -43.565,
     -180.035
    ],
-   "thickness": 3.83,
+   "thickness": 3.96,
    "height": 96.0
   },
   {
@@ -220,18 +208,6 @@
   },
   {
    "start": [
-    -43.548,
-    202.983
-   ],
-   "end": [
-    -43.632,
-    223.716
-   ],
-   "thickness": 4.17,
-   "height": 96.0
-  },
-  {
-   "start": [
     32.243,
     223.892
    ],
@@ -239,7 +215,7 @@
     32.243,
     124.467
    ],
-   "thickness": 4.12,
+   "thickness": 4.2,
    "height": 96.0
   },
   {
@@ -248,10 +224,10 @@
     32.348
    ],
    "end": [
-    98.827,
+    130.0,
     32.348
    ],
-   "thickness": 4.07,
+   "thickness": 4.18,
    "height": 96.0
   },
   {
@@ -293,49 +269,61 @@
   {
    "start": [
     -108.048,
-    -156.0
+    -86.578
    ],
    "end": [
     -108.048,
     30.301
    ],
-   "thickness": 4.11,
+   "thickness": 4.17,
    "height": 96.0
   },
   {
    "start": [
-    80.45,
+    80.364,
+    53.892
+   ],
+   "end": [
+    10.704,
     53.975
    ],
-   "end": [
-    10.702,
-    53.975
-   ],
-   "thickness": 4.0,
+   "thickness": 4.08,
    "height": 96.0
   },
   {
    "start": [
-    83.45,
-    67.975
+    83.283,
+    68.05
    ],
    "end": [
-    83.45,
-    55.975
+    83.283,
+    35.39
    ],
-   "thickness": 6.0,
+   "thickness": 5.83,
    "height": 96.0
   },
   {
    "start": [
-    -41.692,
-    -10.426
+    102.843,
+    -42.686
    ],
    "end": [
-    8.959,
-    -9.569
+    124.974,
+    -42.491
    ],
-   "thickness": 3.14,
+   "thickness": 3.75,
+   "height": 96.0
+  },
+  {
+   "start": [
+    126.994,
+    -44.58
+   ],
+   "end": [
+    127.02,
+    -79.163
+   ],
+   "thickness": 4.13,
    "height": 96.0
   },
   {
@@ -349,20 +337,132 @@
    ],
    "thickness": 4.0,
    "height": 96.0
+  },
+  {
+   "start": [
+    -192.001,
+    -26.0
+   ],
+   "end": [
+    -434.985,
+    -30.037
+   ],
+   "thickness": 4.5,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -434.985,
+    -30.037
+   ],
+   "end": [
+    -535.983,
+    -72.039
+   ],
+   "thickness": 4.34,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -535.983,
+    -72.039
+   ],
+   "end": [
+    -522.252,
+    -145.001
+   ],
+   "thickness": 4.5,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -522.252,
+    -145.001
+   ],
+   "end": [
+    -548.913,
+    -213.033
+   ],
+   "thickness": 4.15,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -548.913,
+    -213.033
+   ],
+   "end": [
+    -509.007,
+    -244.861
+   ],
+   "thickness": 4.5,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -509.007,
+    -244.861
+   ],
+   "end": [
+    -381.019,
+    -240.827
+   ],
+   "thickness": 3.96,
+   "height": 96.0
+  },
+  {
+   "start": [
+    -381.019,
+    -240.827
+   ],
+   "end": [
+    -192.557,
+    -157.435
+   ],
+   "thickness": 4.33,
+   "height": 96.0
   }
  ],
  "openings": [
   {
    "wall_index": 1,
-   "position": 0.846,
-   "width": 37.93,
+   "position": 0.318,
+   "width": 37.97,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": -1,
    "swing": 1,
    "leaf": 36.0,
-   "hinge_at": 142.5
+   "hinge_at": 142.4
+  },
+  {
+   "wall_index": 1,
+   "position": 0.4327,
+   "width": 34.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": 1,
+   "leaf": 32.0,
+   "hinge_at": 234.4
+  },
+  {
+   "wall_index": 1,
+   "position": 0.6631,
+   "width": 33.89,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 1,
+   "position": 0.9151,
+   "width": 71.83,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
   },
   {
    "wall_index": 3,
@@ -384,6 +484,14 @@
    "wall_index": 4,
    "position": 0.8892,
    "width": 36.95,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 5,
+   "position": 0.268,
+   "width": 71.0,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
@@ -422,7 +530,7 @@
   },
   {
    "wall_index": 7,
-   "position": 0.4336,
+   "position": 0.4337,
    "width": 59.98,
    "type": "window",
    "sill": 30.0,
@@ -430,7 +538,7 @@
   },
   {
    "wall_index": 7,
-   "position": 0.6856,
+   "position": 0.6857,
    "width": 59.98,
    "type": "window",
    "sill": 30.0,
@@ -438,7 +546,7 @@
   },
   {
    "wall_index": 7,
-   "position": 0.9331,
+   "position": 0.9332,
    "width": 37.98,
    "type": "window",
    "sill": 30.0,
@@ -446,22 +554,6 @@
   },
   {
    "wall_index": 9,
-   "position": 0.3686,
-   "width": 33.89,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 9,
-   "position": 0.8408,
-   "width": 71.83,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 10,
    "position": 0.2263,
    "width": 33.97,
    "type": "door",
@@ -473,7 +565,7 @@
    "hinge_at": 40.3
   },
   {
-   "wall_index": 10,
+   "wall_index": 9,
    "position": 0.8233,
    "width": 33.97,
    "type": "door",
@@ -485,9 +577,9 @@
    "hinge_at": 188.4
   },
   {
-   "wall_index": 15,
-   "position": 0.295,
-   "width": 62.0,
+   "wall_index": 14,
+   "position": 0.2952,
+   "width": 61.99,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -497,8 +589,20 @@
    "hinge_at": 71.3
   },
   {
-   "wall_index": 16,
-   "position": 0.1268,
+   "wall_index": 15,
+   "position": 0.1253,
+   "width": 28.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 30.0,
+   "hinge_at": 61.1
+  },
+  {
+   "wall_index": 15,
+   "position": 0.2681,
    "width": 33.98,
    "type": "door",
    "sill": 0.0,
@@ -506,11 +610,11 @@
    "hinge": 1,
    "swing": -1,
    "leaf": 31.9,
-   "hinge_at": 56.7
+   "hinge_at": 118.7
   },
   {
-   "wall_index": 16,
-   "position": 0.519,
+   "wall_index": 15,
+   "position": 0.5968,
    "width": 32.97,
    "type": "door",
    "sill": 0.0,
@@ -518,11 +622,11 @@
    "hinge": 1,
    "swing": -1,
    "leaf": 31.9,
-   "hinge_at": 182.0
+   "hinge_at": 244.0
   },
   {
-   "wall_index": 16,
-   "position": 0.8235,
+   "wall_index": 15,
+   "position": 0.8521,
    "width": 64.75,
    "type": "opening",
    "sill": 0.0,
@@ -530,10 +634,10 @@
    "hinge": 1,
    "swing": -1,
    "leaf": 30.0,
-   "hinge_at": 296.2
+   "hinge_at": 358.2
   },
   {
-   "wall_index": 17,
+   "wall_index": 16,
    "position": 0.4303,
    "width": 32.94,
    "type": "door",
@@ -545,7 +649,7 @@
    "hinge_at": 188.0
   },
   {
-   "wall_index": 17,
+   "wall_index": 16,
    "position": 0.8919,
    "width": 34.0,
    "type": "door",
@@ -557,47 +661,59 @@
    "hinge_at": 341.6
   },
   {
-   "wall_index": 19,
-   "position": 0.5222,
-   "width": 62.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": 1,
-   "leaf": 30.0,
-   "hinge_at": 82.0
-  },
-  {
-   "wall_index": 20,
-   "position": 0.7173,
-   "width": 123.5,
-   "type": "opening",
-   "sill": 0.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 24,
-   "position": 0.1825,
-   "width": 32.0,
+   "wall_index": 17,
+   "position": 0.3511,
+   "width": 27.97,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": -1,
    "swing": -1,
-   "leaf": 30.0,
-   "hinge_at": 18.0
+   "leaf": 27.0,
+   "hinge_at": 21.9
   },
   {
-   "wall_index": 24,
-   "position": 0.7025,
+   "wall_index": 17,
+   "position": 0.693,
+   "width": 28.03,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": -1,
+   "leaf": 27.0,
+   "hinge_at": 81.9
+  },
+  {
+   "wall_index": 18,
+   "position": 0.5367,
+   "width": 54.3,
+   "type": "opening",
+   "sill": 0.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 22,
+   "position": 0.5258,
    "width": 34.0,
    "type": "opening",
    "sill": 0.0,
    "head": 80.0
   },
   {
-   "wall_index": 28,
+   "wall_index": 26,
+   "position": 0.4863,
+   "width": 22.79,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": 1,
+   "swing": 1,
+   "leaf": 22.0,
+   "hinge_at": 28.2
+  },
+  {
+   "wall_index": 27,
    "position": 0.5,
    "width": 25.0,
    "type": "door",
@@ -607,42 +723,6 @@
    "swing": 1,
    "leaf": 25.0,
    "hinge_at": 38.0
-  },
-  {
-   "wall_index": 19,
-   "position": 0.221,
-   "width": 40.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": 1,
-   "leaf": 30.1,
-   "hinge_at": 22.0
-  },
-  {
-   "wall_index": 16,
-   "position": 0.0623,
-   "width": 40.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": -1,
-   "leaf": 30.0,
-   "hinge_at": -0.9
-  },
-  {
-   "wall_index": 18,
-   "position": 0.49,
-   "width": 20.32,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": 1,
-   "leaf": 30.1,
-   "hinge_at": -1.1
   }
  ],
  "fixtures": [],
@@ -650,47 +730,43 @@
   {
    "polygon": [
     [
-     83.45,
-     67.975
+     83.283,
+     68.05
     ],
     [
      261.958,
      67.981
     ],
     [
-     258.927,
-     -284.446
+     260.674,
+     -81.29
     ],
     [
-     8.691,
-     -283.519
+     100.556,
+     -80.091
     ],
     [
-     8.907,
-     32.769
-    ],
-    [
-     100.119,
-     32.963
+     100.788,
+     31.379
     ]
    ],
-   "kind": "room",
-   "area": 85654.7,
-   "name": "PRIMARY BEDROOM"
+   "kind": "bath",
+   "area": 24205.3,
+   "name": "PRIMARY BATHROOM"
   },
   {
    "polygon": [
     [
-     214.615,
-     67.979
+     214.475,
+     67.999
     ],
     [
-     83.45,
-     67.975
+     83.283,
+     68.05
     ],
     [
-     83.45,
-     55.975
+     83.283,
+     53.892
     ],
     [
      8.922,
@@ -714,22 +790,22 @@
     ]
    ],
    "kind": "room",
-   "area": 30986.5,
+   "area": 31044.5,
    "name": "BEDROOM"
   },
   {
    "polygon": [
     [
-     -185.521,
+     -185.462,
      -282.8
     ],
     [
-     -188.804,
-     -158.136
+     -186.197,
+     -158.141
     ],
     [
      -43.456,
-     -158.061
+     -157.929
     ],
     [
      -42.972,
@@ -745,31 +821,124 @@
     ]
    ],
    "kind": "room",
-   "area": 29602.2,
+   "area": 29444.9,
    "name": "STAIR"
   },
   {
    "polygon": [
     [
-     -188.804,
-     -158.136
+     -186.197,
+     -158.141
     ],
     [
-     -190.468,
-     -88.36
+     -186.607,
+     -88.586
     ],
     [
-     -108.049,
-     -88.597
+     -43.114,
+     -88.784
     ],
     [
-     -108.047,
-     -158.094
+     -43.456,
+     -157.929
     ]
    ],
    "kind": "room",
-   "area": 5681.4,
+   "area": 9925.2,
    "name": "STORAGE"
+  },
+  {
+   "polygon": [
+    [
+     -186.976,
+     -25.97
+    ],
+    [
+     -186.218,
+     -154.63
+    ],
+    [
+     -381.019,
+     -240.827
+    ],
+    [
+     -509.007,
+     -244.861
+    ],
+    [
+     -548.913,
+     -213.033
+    ],
+    [
+     -522.252,
+     -145.001
+    ],
+    [
+     -535.983,
+     -72.039
+    ],
+    [
+     -434.985,
+     -30.037
+    ]
+   ],
+   "kind": "room",
+   "area": 63284.2,
+   "name": "GUEST ROOM"
+  },
+  {
+   "polygon": [
+    [
+     -186.607,
+     -88.586
+    ],
+    [
+     -187.32,
+     32.337
+    ],
+    [
+     -108.048,
+     32.34
+    ],
+    [
+     -108.051,
+     -88.694
+    ]
+   ],
+   "kind": "bath",
+   "area": 9546.9,
+   "name": "BATHROOM"
+  },
+  {
+   "polygon": [
+    [
+     -187.32,
+     32.337
+    ],
+    [
+     -188.467,
+     226.907
+    ],
+    [
+     -5.671,
+     227.057
+    ],
+    [
+     -5.646,
+     123.453
+    ],
+    [
+     -42.071,
+     122.478
+    ],
+    [
+     -42.516,
+     32.342
+    ]
+   ],
+   "kind": "room",
+   "area": 32150.8,
+   "name": "BEDROOM"
   },
   {
    "polygon": [
@@ -797,75 +966,56 @@
   {
    "polygon": [
     [
+     260.674,
+     -81.29
+    ],
+    [
+     258.927,
+     -284.446
+    ],
+    [
+     8.691,
+     -283.519
+    ],
+    [
+     8.907,
+     32.344
+    ],
+    [
+     100.326,
+     32.347
+    ],
+    [
+     100.556,
+     -80.091
+    ]
+   ],
+   "kind": "room",
+   "area": 61386.6,
+   "name": "PRIMARY BEDROOM"
+  },
+  {
+   "polygon": [
+    [
      -43.114,
      -88.784
     ],
     [
-     -108.049,
-     -88.597
+     -108.051,
+     -88.694
     ],
     [
-     -108.053,
-     32.519
+     -108.048,
+     32.34
     ],
     [
-     -42.515,
-     32.659
+     -42.516,
+     32.342
     ]
    ],
    "kind": "room",
-   "area": 7911.9,
+   "area": 7898.6,
    "name": "Tub/shower"
-  },
-  {
-   "polygon": [
-    [
-     -108.049,
-     -88.597
-    ],
-    [
-     -43.114,
-     -88.784
-    ],
-    [
-     -43.456,
-     -158.061
-    ],
-    [
-     -108.047,
-     -158.094
-    ]
-   ],
-   "kind": "room",
-   "area": 4493.7,
-   "name": "LINEN"
-  },
-  {
-   "polygon": [
-    [
-     -108.049,
-     -88.597
-    ],
-    [
-     -190.468,
-     -88.36
-    ],
-    [
-     -188.548,
-     -45.167
-    ],
-    [
-     -188.548,
-     32.348
-    ],
-    [
-     -108.053,
-     32.519
-    ]
-   ],
-   "kind": "bath",
-   "area": 9774.8,
-   "name": "BATHROOM"
   },
   {
    "polygon": [
@@ -879,39 +1029,16 @@
     ],
     [
      8.907,
-     32.769
+     32.344
     ],
     [
-     -42.515,
-     32.659
+     -42.516,
+     32.342
     ]
    ],
    "kind": "room",
-   "area": 4633.5,
+   "area": 4652.6,
    "name": "New structural beam"
-  },
-  {
-   "polygon": [
-    [
-     -42.727,
-     -10.421
-    ],
-    [
-     -42.515,
-     32.659
-    ],
-    [
-     8.907,
-     32.769
-    ],
-    [
-     8.878,
-     -9.569
-    ]
-   ],
-   "kind": "room",
-   "area": 2200.0,
-   "name": "HALL"
   },
   {
    "polygon": [
@@ -920,131 +1047,67 @@
      -59.995
     ],
     [
-     -42.727,
-     -10.421
+     -42.516,
+     32.342
     ],
     [
-     8.878,
-     -9.569
+     8.907,
+     32.344
     ],
     [
      8.844,
      -60.0
     ]
    ],
-   "kind": "bath",
-   "area": 2585.6,
-   "name": "BATHROOM"
+   "kind": "room",
+   "area": 4766.6,
+   "name": "HALL"
   }
  ],
  "footprint": [
   [
-   -188.576,
-   -285.832
+   -551.602,
+   -214.208
   ],
   [
-   -188.567,
-   -283.604
+   -524.521,
+   -145.105
   ],
   [
-   -191.594,
-   -283.636
+   -538.611,
+   -70.244
   ],
   [
-   -193.656,
-   -87.806
+   -433.814,
+   -27.2
   ],
   [
-   -187.634,
-   -87.743
+   -191.516,
+   -23.742
   ],
   [
-   -187.632,
-   -86.484
+   -191.516,
+   223.782
   ],
   [
-   -110.104,
-   -86.591
+   -194.715,
+   223.779
   ],
   [
-   -110.104,
-   30.301
+   -194.72,
+   230.023
   ],
   [
-   -185.463,
-   30.314
+   -39.559,
+   230.153
   ],
   [
-   -185.47,
-   -48.244
-  ],
-  [
-   -191.626,
-   -48.244
-  ],
-  [
-   -191.626,
-   227.064
-  ],
-  [
-   -185.47,
-   227.064
-  ],
-  [
-   -185.47,
-   34.381
-  ],
-  [
-   -44.423,
-   34.381
-  ],
-  [
-   -43.887,
-   142.883
-  ],
-  [
-   -40.053,
-   142.864
-  ],
-  [
-   -40.144,
+   -40.081,
    124.475
   ],
   [
    -7.673,
    124.475
-  ],
-  [
-   -7.673,
-   223.975
-  ],
-  [
-   -41.549,
-   223.946
-  ],
-  [
-   -41.457,
-   200.908
-  ],
-  [
-   -45.623,
-   200.892
-  ],
-  [
-   -45.716,
-   223.943
-  ],
-  [
-   -109.876,
-   223.889
-  ],
-  [
-   -109.882,
-   230.056
-  ],
-  [
-   -6.725,
-   230.142
   ],
   [
    -6.714,
@@ -1064,14 +1127,14 @@
   ],
   [
    217.547,
-   73.537
+   73.538
   ],
   [
-   261.389,
-   73.537
+   261.39,
+   73.538
   ],
   [
-   261.389,
+   261.39,
    71.037
   ],
   [
@@ -1089,11 +1152,38 @@
   [
    261.959,
    -287.501
+  ],
+  [
+   -188.517,
+   -285.832
+  ],
+  [
+   -188.508,
+   -283.493
+  ],
+  [
+   -191.516,
+   -283.493
+  ],
+  [
+   -191.516,
+   -159.344
+  ],
+  [
+   -382.124,
+   -243.686
+  ],
+  [
+   -507.676,
+   -246.8
+  ],
+  [
+   -508.651,
+   -248.023
   ]
  ],
  "warnings": [
   "1 over-wide door(s) split at the drawn leaf; leftover spans became sidelites (exterior) or wall",
-  "orphan line not paired into a wall: (-185.8,-256.8)->(-185.5,-160.0)",
   "orphan line not paired into a wall: (-106.8,230.1)->(-106.8,223.9)",
   "orphan line not paired into a wall: (168.7,230.1)->(168.7,223.9)",
   "orphan line not paired into a wall: (217.1,98.7)->(210.8,98.7)",
@@ -1113,8 +1203,8 @@
   "orphan line not paired into a wall: (48.7,230.1)->(48.7,223.7)",
   "orphan line not paired into a wall: (34.3,223.9)->(48.7,223.7)",
   "orphan line not paired into a wall: (-191.6,145.2)->(-185.5,145.2)",
-  "orphan line not paired into a wall: (-191.6,217.1)->(-191.5,230.0)",
-  "orphan line not paired into a wall: (-191.6,217.1)->(-191.5,230.0)",
+  "orphan line not paired into a wall: (-191.6,217.1)->(-191.6,230.0)",
+  "orphan line not paired into a wall: (-191.6,217.1)->(-191.6,230.0)",
   "orphan line not paired into a wall: (222.8,-79.0)->(219.8,-79.2)",
   "orphan line not paired into a wall: (258.9,-135.3)->(265.0,-135.3)",
   "orphan line not paired into a wall: (259.0,-83.3)->(259.0,-99.5)",
@@ -1124,18 +1214,16 @@
   "orphan line not paired into a wall: (265.0,-233.5)->(258.9,-233.5)",
   "orphan line not paired into a wall: (258.9,-0.2)->(265.1,-0.2)",
   "orphan line not paired into a wall: (6.6,20.6)->(10.5,20.2)",
-  "orphan line not paired into a wall: (102.8,-44.8)->(102.8,-79.3)",
-  "orphan line not paired into a wall: (102.8,-44.8)->(102.8,-79.3)",
   "orphan line not paired into a wall: (119.9,67.7)->(119.9,72.2)",
   "orphan line not paired into a wall: (153.9,67.7)->(153.9,72.2)",
   "orphan line not paired into a wall: (71.6,-79.2)->(71.6,-83.4)",
   "orphan line not paired into a wall: (37.6,-79.2)->(37.6,-83.4)",
   "orphan line not paired into a wall: (163.6,-79.0)->(163.6,-83.5)",
-  "orphan line not paired into a wall: (128.9,-79.2)->(129.6,-83.5)",
-  "orphan line not paired into a wall: (124.7,-79.3)->(102.8,-79.3)",
+  "orphan line not paired into a wall: (129.0,-79.2)->(129.6,-83.5)",
+  "orphan line not paired into a wall: (124.8,-79.4)->(102.7,-79.4)",
   "orphan line not paired into a wall: (259.0,-79.3)->(219.8,-79.2)",
-  "orphan line not paired into a wall: (185.8,-79.2)->(128.9,-79.2)",
-  "orphan line not paired into a wall: (124.7,-79.3)->(102.8,-79.3)",
+  "orphan line not paired into a wall: (185.8,-79.2)->(129.0,-79.2)",
+  "orphan line not paired into a wall: (124.8,-79.4)->(102.7,-79.4)",
   "orphan line not paired into a wall: (-75.8,-286.6)->(-75.8,-280.4)",
   "orphan line not paired into a wall: (-15.4,-286.7)->(-15.8,-280.4)",
   "orphan line not paired into a wall: (-45.3,-156.6)->(-41.6,-156.1)",
@@ -1167,47 +1255,41 @@
   "orphan line not paired into a wall: (-45.6,117.3)->(-41.5,117.3)",
   "orphan line not paired into a wall: (-41.5,117.3)->(-41.5,120.5)",
   "orphan line not paired into a wall: (-41.5,117.3)->(-41.5,120.5)",
-  "orphan line not paired into a wall: (-45.5,-9.0)->(-41.7,-8.9)",
-  "orphan line not paired into a wall: (-41.7,-8.9)->(-40.8,-5.9)",
+  "orphan line not paired into a wall: (-45.5,-9.0)->(-41.7,-9.0)",
+  "orphan line not paired into a wall: (-41.7,-9.0)->(-40.8,-5.9)",
   "orphan line not paired into a wall: (-45.5,-9.0)->(-46.2,-5.9)",
   "orphan line not paired into a wall: (-45.5,-9.0)->(-45.5,-9.0)",
-  "orphan line not paired into a wall: (-41.7,-8.9)->(-41.7,-8.9)",
-  "orphan line not paired into a wall: (-41.7,-8.9)->(-41.7,-8.9)",
+  "orphan line not paired into a wall: (-41.7,-9.0)->(-41.7,-9.0)",
+  "orphan line not paired into a wall: (-41.7,-9.0)->(-41.7,-9.0)",
   "orphan line not paired into a wall: (-45.5,-9.0)->(-45.5,-9.0)",
-  "orphan line not paired into a wall: (-45.5,-9.0)->(-41.7,-8.9)",
+  "orphan line not paired into a wall: (-45.5,-9.0)->(-41.7,-9.0)",
   "orphan line not paired into a wall: (-46.2,-5.9)->(-46.2,-5.9)",
   "orphan line not paired into a wall: (-40.8,-5.9)->(-40.8,-5.9)",
-  "orphan line not paired into a wall: (-185.5,-139.0)->(-191.6,-139.0)",
-  "orphan line not paired into a wall: (-185.5,-101.0)->(-191.6,-101.0)",
-  "orphan line not paired into a wall: (-185.5,-156.0)->(-185.5,-139.0)",
-  "orphan line not paired into a wall: (-45.6,203.0)->(-41.5,203.0)",
+  "orphan line not paired into a wall: (-185.3,-139.0)->(-191.5,-139.0)",
+  "orphan line not paired into a wall: (-185.3,-101.0)->(-191.5,-101.0)",
+  "orphan line not paired into a wall: (-185.3,-101.0)->(-185.5,-90.9)",
+  "orphan line not paired into a wall: (-45.8,203.0)->(-41.3,203.0)",
   "orphan line not paired into a wall: (-45.6,141.0)->(-41.5,141.0)",
   "orphan line not paired into a wall: (185.8,-79.2)->(185.8,-83.4)",
   "orphan line not paired into a wall: (222.7,-13.6)->(222.7,-18.1)",
   "orphan line not paired into a wall: (-106.0,-42.1)->(-110.1,-42.1)",
   "orphan line not paired into a wall: (-106.0,-8.1)->(-110.1,-8.1)",
   "orphan line not paired into a wall: (-185.5,-45.2)->(-191.6,-45.2)",
-  "orphan line not paired into a wall: (-185.5,-79.2)->(-191.6,-79.2)",
-  "orphan line not paired into a wall: (-45.5,-86.8)->(-185.5,-86.8)",
-  "orphan line not paired into a wall: (-185.5,-86.8)->(-185.5,-79.2)",
-  "orphan line not paired into a wall: (-185.5,-86.8)->(-185.5,-79.2)",
+  "orphan line not paired into a wall: (-185.3,-79.2)->(-191.5,-79.2)",
+  "orphan line not paired into a wall: (-45.5,-86.8)->(-185.5,-86.7)",
+  "orphan line not paired into a wall: (-185.5,-86.7)->(-185.3,-79.2)",
   "orphan line not paired into a wall: (-185.5,-45.2)->(-185.5,37.1)",
-  "orphan line not paired into a wall: (80.4,52.0)->(80.4,31.5)",
-  "orphan line not paired into a wall: (80.4,52.0)->(80.4,31.5)",
-  "orphan line not paired into a wall: (102.8,-40.8)->(128.7,-40.8)",
-  "orphan line not paired into a wall: (102.8,-40.8)->(128.7,-40.8)",
-  "orphan line not paired into a wall: (102.8,-44.8)->(124.7,-45.7)",
-  "orphan line not paired into a wall: (102.8,-44.8)->(124.7,-45.7)",
-  "orphan line not paired into a wall: (128.8,-46.8)->(124.7,-45.7)",
-  "orphan line not paired into a wall: (128.7,-40.8)->(128.8,-46.8)",
-  "orphan line not paired into a wall: (128.7,-40.8)->(128.8,-46.8)",
-  "orphan line not paired into a wall: (124.7,-45.7)->(124.7,-45.7)",
-  "orphan line not paired into a wall: (124.7,-45.7)->(124.7,-45.7)",
+  "orphan line not paired into a wall: (-191.5,-101.0)->(-191.3,-88.8)",
+  "orphan line not paired into a wall: (129.0,-46.8)->(124.5,-46.8)",
   "orphan line not paired into a wall: (237.8,37.0)->(208.9,37.0)",
   "orphan line not paired into a wall: (237.8,53.2)->(208.9,53.2)",
   "orphan line not paired into a wall: (223.3,70.2)->(223.3,22.6)",
-  "9 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "2 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "orphan line not paired into a wall: (30.0,175.0)->(34.5,175.0)",
+  "orphan line not paired into a wall: (-45.8,169.0)->(-41.3,169.0)",
+  "orphan line not paired into a wall: (-191.3,-88.8)->(-191.5,-79.2)",
+  "orphan line not paired into a wall: (130.0,31.2)->(130.0,35.7)",
+  "7 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
+  "4 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
   {
@@ -1396,10 +1478,10 @@
  "cameras": [
   {
    "position": [
-    -16.16,
-    120.83
+    -67.89,
+    155.1
    ],
-   "rotation": -90.28,
+   "rotation": 89.72,
    "is_primary": true
   }
  ],
