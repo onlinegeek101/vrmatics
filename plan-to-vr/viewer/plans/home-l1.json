@@ -1873,5 +1873,11 @@
  "source": {
   "kind": "dxf",
   "floor": "1"
+ },
+ "underlay": {
+  "file": "home-l1.png",
+  "x0": -780.55,
+  "y1": 268.9,
+  "in_per_px": 0.48
  }
 }
