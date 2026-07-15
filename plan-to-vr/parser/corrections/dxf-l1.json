@@ -101,5 +101,9 @@
    "sill": 30,
    "_note": "VR#40: laundry chute - raise the 16.6in slot to a counter-height hatch instead of a floor-to-head pass-through (proper chute+cabinet fixtures proposed separately)"
   }
- ]
+ ],
+ "palette": {
+  "PLAY ROOM": "#b9c445",
+  "_note": "owners' accents from current-house photos; walls default to sage-olive globally"
+ }
 }

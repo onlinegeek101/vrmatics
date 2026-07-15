@@ -418,8 +418,8 @@ const roomWoodTex = makeWoodTexture();
 roomWoodTex.repeat.set(1 / 1.22, 1 / 1.22);
 const roomTileTex = makeTileTexture();
 roomTileTex.repeat.set(1 / 1.22, 1 / 1.22);
-const wallMat = std({ color: 0xf1ead9, roughness: 0.88, metalness: 0.0 });
-const trimMat = std({ color: 0xfbfaf4, roughness: 0.32, metalness: 0.0 });
+const wallMat = std({ color: 0x9aa07a, roughness: 0.88, metalness: 0.0 });  // sage-olive (owners' palette)
+const trimMat = std({ color: 0xa87c46, roughness: 0.45, metalness: 0.0 });  // stained oak trim
 const floorMat = std({ map: floorTex, color: 0xd8b98e, roughness: 0.62 });
 const slabMat = std({ color: 0xcfccc3, roughness: 0.92 });   // concrete under/around rooms
 const roomWoodMat = std({ map: roomWoodTex, color: 0xd8b98e, roughness: 0.62 });
@@ -447,9 +447,9 @@ const brassMat = std({ color: 0xc9a63a, roughness: 0.3, metalness: 0.85 });
 const applianceMat = std({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.75 });
 const applianceDarkMat = std({ color: 0x2b2f33, roughness: 0.35, metalness: 0.4 });
 const porcelainMat = std({ color: 0xf4f6f6, roughness: 0.18, metalness: 0.0 });
-const counterMat = std({ color: 0xe8e4da, roughness: 0.35, metalness: 0.0 });
+const counterMat = std({ color: 0x243029, roughness: 0.18, metalness: 0.0 });  // green-black granite
 const fabricMat = std({ color: 0x8d7f6d, roughness: 0.95, metalness: 0.0 });
-const woodMat = std({ color: 0x8a5f3c, roughness: 0.7, metalness: 0.0 });
+const woodMat = std({ color: 0xb08a52, roughness: 0.6, metalness: 0.0 });  // maple casework
 const neutralMat = std({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.1 });
 
 // lawn the house sits on
@@ -1889,7 +1889,7 @@ function buildPlan(plan) {
     geo.rotateX(-Math.PI / 2);
     const kind = r.kind || 'room';
     const mat = floorFinish(r.theme && r.theme.floor)
-      || ((kind === 'bath' || kind === 'laundry') ? roomTileMat
+      || ((kind === 'bath' || kind === 'laundry' || kind === 'mud') ? roomTileMat
       : (kind === 'garage') ? slabMat : roomWoodMat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = (kind === 'garage' ? -gradeM : 0) + 0.004;
@@ -1916,6 +1916,31 @@ function buildPlan(plan) {
     disk.position.set(ax, roomH - 0.012, -ay);
     group.add(disk);
   });
+
+  // Per-room wall paint from plan.palette { "ROOM NAME": "#hex" } - the
+  // owners' accent colors (e.g. chartreuse playroom). A wall piece is
+  // tinted when either of its two faces looks into a painted room.
+  if (plan.palette) {
+    const tintMats = {};
+    const painted = rooms.map((r, i) => {
+      const hex = plan.palette[(r.name || '').toUpperCase()];
+      return hex ? { poly: roomPolysWorld[i], hex } : null;
+    }).filter(Boolean);
+    if (painted.length) laserTargets.forEach(mesh => {
+      if (mesh.material !== wallMat || !mesh.geometry.parameters) return;
+      const d = (mesh.geometry.parameters.depth || 0) / 2 + 0.15;
+      const nx = Math.sin(mesh.rotation.y), nz = Math.cos(mesh.rotation.y);
+      for (const p of painted) {
+        if (pointInPoly(mesh.position.x + nx * d, mesh.position.z + nz * d, p.poly)
+            || pointInPoly(mesh.position.x - nx * d, mesh.position.z - nz * d, p.poly)) {
+          tintMats[p.hex] = tintMats[p.hex]
+            || std({ color: new THREE.Color(p.hex).getHex(), roughness: 0.88 });
+          mesh.material = tintMats[p.hex];
+          break;
+        }
+      }
+    });
+  }
 
   // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
   fixtureGroup = new THREE.Group();

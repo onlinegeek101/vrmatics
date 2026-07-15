@@ -971,7 +971,7 @@
      -6.87
     ]
    ],
-   "kind": "room",
+   "kind": "mud",
    "area": 9247.7,
    "name": "MUDROOM"
   },
@@ -1870,6 +1870,10 @@
    "is_primary": true
   }
  ],
+ "palette": {
+  "PLAY ROOM": "#b9c445",
+  "_note": "owners' accents from current-house photos; walls default to sage-olive globally"
+ },
  "source": {
   "kind": "dxf",
   "floor": "1"

@@ -86,7 +86,7 @@ def assign_names(plan, labels):
             # garage door to classify_garages, and a "garage" hall would
             # drop the main floor slab by 4 risers in the viewer.
             r["kind"] = k if k in ("garage", "bath", "laundry",
-                                   "kitchen") else "room"
+                                   "kitchen", "mud") else "room"
 
 
 def filter_disconnected(plan, snap=6.0, min_component=3, min_keep_len=72.0):
@@ -658,6 +658,8 @@ def main():
         except Exception:
             pass
 
+    if gt.get("palette"):
+        plan["palette"] = gt["palette"]
     plan["source"] = {"kind": "dxf", "floor": args.floor}
     plan.setdefault("warnings", [])
     with open(args.output, "w") as f:
