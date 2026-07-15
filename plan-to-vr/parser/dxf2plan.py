@@ -21,6 +21,7 @@ Usage:
 import argparse
 import json
 import math
+import os
 
 import ezdxf
 
@@ -616,6 +617,18 @@ def main():
         u = render_underlay(args.input, set(args.wall_layers.split(",")
                                             + dw.split(",")), plan, args.underlay)
         plan["underlay"] = u
+    elif os.path.exists(args.output):
+        # without --underlay, keep the existing output's underlay registration
+        # (the plotted-sheet rasters are hand-registered; a bare regen must not
+        # strip their reference from the plan)
+        try:
+            with open(args.output) as f:
+                prev = json.load(f).get("underlay")
+            if prev:
+                plan["underlay"] = prev
+                print(f"underlay: carried forward {prev.get('file')}")
+        except Exception:
+            pass
 
     plan["source"] = {"kind": "dxf", "floor": args.floor}
     plan.setdefault("warnings", [])
