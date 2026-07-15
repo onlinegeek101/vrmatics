@@ -72,5 +72,34 @@
    "turn": "back",
    "_note": "VR#14/#58: L1 up-to-L2 is a U-turn switchback -- up, landing to the west wall, then back east up to L2"
   }
+ ],
+ "openings": [
+  {
+   "near": [
+    -123,
+    71
+   ],
+   "tol": 10,
+   "remove": true,
+   "_note": "VR#33: phantom door in the playroom closet east wall - the red arc at (-120.9,52.1) is a hall-side door symbol in wall y~57.5 that the parser force-attached to the vertical closet wall; owner: 'should just be a wall ... that's a closet'"
+  },
+  {
+   "near": [
+    -17.8,
+    -279.6
+   ],
+   "tol": 4,
+   "type": "opening",
+   "_note": "VR#47: single front door - facade is drawn as two overlapping wall runs each carrying a 64in door; the INNER one (wall y=-279.6) becomes a cased opening so only the outer entry door reads from the yard"
+  },
+  {
+   "near": [
+    -81.7,
+    -111
+   ],
+   "tol": 8,
+   "sill": 30,
+   "_note": "VR#40: laundry chute - raise the 16.6in slot to a counter-height hatch instead of a floor-to-head pass-through (proper chute+cabinet fixtures proposed separately)"
+  }
  ]
 }

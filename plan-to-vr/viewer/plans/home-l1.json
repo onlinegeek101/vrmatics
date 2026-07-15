@@ -9,21 +9,21 @@
    ],
    "end": [
     -188.573,
-    223.986
+    223.966
    ],
    "thickness": 6.06,
    "height": 96.0
   },
   {
    "start": [
-    3.565,
+    -17.298,
     70.975
    ],
    "end": [
     258.952,
     70.975
    ],
-   "thickness": 6.0,
+   "thickness": 5.99,
    "height": 96.0
   },
   {
@@ -100,38 +100,26 @@
   },
   {
    "start": [
-    213.962,
-    223.985
+    214.071,
+    223.969
    ],
    "end": [
-    214.477,
-    73.993
+    213.816,
+    73.991
    ],
-   "thickness": 6.14,
+   "thickness": 6.12,
    "height": 96.0
   },
   {
    "start": [
-    25.462,
-    228.31
+    -185.647,
+    226.959
    ],
    "end": [
-    210.974,
-    226.936
+    211.076,
+    226.973
    ],
-   "thickness": 6.17,
-   "height": 96.0
-  },
-  {
-   "start": [
-    -185.487,
-    228.897
-   ],
-   "end": [
-    -12.622,
-    225.864
-   ],
-   "thickness": 5.19,
+   "thickness": 6.05,
    "height": 96.0
   },
   {
@@ -245,25 +233,25 @@
   {
    "start": [
     -0.271,
-    61.85
+    61.766
    ],
    "end": [
-    -17.548,
-    61.85
+    -17.549,
+    61.766
    ],
-   "thickness": 12.75,
+   "thickness": 12.58,
    "height": 96.0
   },
   {
    "start": [
-    -19.298,
-    223.971
+    -19.361,
+    223.969
    ],
    "end": [
-    -19.582,
+    -19.644,
     59.488
    ],
-   "thickness": 4.0,
+   "thickness": 3.94,
    "height": 96.0
   },
   {
@@ -340,14 +328,14 @@
   },
   {
    "start": [
-    3.567,
-    -45.775
+    3.557,
+    -45.839
    ],
    "end": [
     -185.542,
-    -45.775
+    -45.839
    ],
-   "thickness": 4.43,
+   "thickness": 4.47,
    "height": 96.0
   },
   {
@@ -376,14 +364,14 @@
   },
   {
    "start": [
-    1.782,
-    67.978
+    1.779,
+    67.977
    ],
    "end": [
-    1.655,
-    -9.344
+    1.671,
+    -47.927
    ],
-   "thickness": 3.68,
+   "thickness": 3.84,
    "height": 96.0
   },
   {
@@ -430,7 +418,7 @@
   },
   {
    "wall_index": 1,
-   "position": 0.3082,
+   "position": 0.3605,
    "width": 85.16,
    "type": "opening",
    "sill": 0.0,
@@ -467,37 +455,57 @@
   {
    "wall_index": 8,
    "position": 0.4784,
-   "width": 106.98,
+   "width": 106.99,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 9,
-   "position": 0.225,
-   "width": 36.95,
+   "position": 0.0702,
+   "width": 37.0,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 9,
-   "position": 0.8719,
-   "width": 36.95,
+   "position": 0.3681,
+   "width": 26.0,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 9,
+   "position": 0.4842,
+   "width": 38.0,
+   "type": "door",
+   "sill": 0.0,
+   "head": 80.0,
+   "hinge": -1,
+   "swing": -1,
+   "leaf": 36.0,
+   "hinge_at": 174.1
+  },
+  {
+   "wall_index": 9,
+   "position": 0.6373,
+   "width": 37.0,
+   "type": "window",
+   "sill": 30.0,
+   "head": 80.0
+  },
+  {
+   "wall_index": 9,
+   "position": 0.9398,
+   "width": 37.0,
    "type": "window",
    "sill": 30.0,
    "head": 80.0
   },
   {
    "wall_index": 10,
-   "position": 0.1603,
-   "width": 36.88,
-   "type": "window",
-   "sill": 30.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 11,
    "position": 0.1505,
    "width": 107.0,
    "type": "window",
@@ -505,7 +513,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 11,
+   "wall_index": 10,
    "position": 0.3914,
    "width": 60.0,
    "type": "window",
@@ -513,7 +521,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 11,
+   "wall_index": 10,
    "position": 0.6996,
    "width": 60.0,
    "type": "window",
@@ -521,10 +529,10 @@
    "head": 80.0
   },
   {
-   "wall_index": 11,
+   "wall_index": 10,
    "position": 0.871,
    "width": 64.0,
-   "type": "door",
+   "type": "opening",
    "sill": 0.0,
    "head": 80.0,
    "hinge": -1,
@@ -533,7 +541,7 @@
    "hinge_at": 408.8
   },
   {
-   "wall_index": 12,
+   "wall_index": 11,
    "position": 0.1973,
    "width": 37.97,
    "type": "door",
@@ -545,7 +553,7 @@
    "hinge_at": 45.3
   },
   {
-   "wall_index": 12,
+   "wall_index": 11,
    "position": 0.6683,
    "width": 71.96,
    "type": "window",
@@ -553,7 +561,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 13,
+   "wall_index": 12,
    "position": 0.5,
    "width": 176.96,
    "type": "window",
@@ -561,7 +569,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 14,
+   "wall_index": 13,
    "position": 0.1412,
    "width": 106.97,
    "type": "window",
@@ -569,7 +577,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 14,
+   "wall_index": 13,
    "position": 0.3871,
    "width": 59.97,
    "type": "window",
@@ -577,7 +585,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 14,
+   "wall_index": 13,
    "position": 0.7017,
    "width": 59.97,
    "type": "window",
@@ -585,7 +593,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 14,
+   "wall_index": 13,
    "position": 0.8767,
    "width": 63.97,
    "type": "door",
@@ -597,7 +605,7 @@
    "hinge_at": 402.8
   },
   {
-   "wall_index": 15,
+   "wall_index": 14,
    "position": 0.2303,
    "width": 37.0,
    "type": "window",
@@ -605,7 +613,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 15,
+   "wall_index": 14,
    "position": 0.4941,
    "width": 37.0,
    "type": "window",
@@ -613,7 +621,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 15,
+   "wall_index": 14,
    "position": 0.7579,
    "width": 38.0,
    "type": "door",
@@ -625,7 +633,7 @@
    "hinge_at": 431.8
   },
   {
-   "wall_index": 16,
+   "wall_index": 15,
    "position": 0.0664,
    "width": 37.98,
    "type": "door",
@@ -637,7 +645,7 @@
    "hinge_at": 18.2
   },
   {
-   "wall_index": 16,
+   "wall_index": 15,
    "position": 0.3411,
    "width": 193.98,
    "type": "opening",
@@ -645,7 +653,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 16,
+   "wall_index": 15,
    "position": 0.7733,
    "width": 193.98,
    "type": "opening",
@@ -653,7 +661,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 18,
+   "wall_index": 17,
    "position": 0.5024,
    "width": 97.98,
    "type": "opening",
@@ -661,7 +669,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 19,
+   "wall_index": 18,
    "position": 0.463,
    "width": 33.97,
    "type": "door",
@@ -673,7 +681,7 @@
    "hinge_at": 44.0
   },
   {
-   "wall_index": 21,
+   "wall_index": 20,
    "position": 0.7643,
    "width": 34.03,
    "type": "door",
@@ -685,7 +693,7 @@
    "hinge_at": 141.8
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.2029,
    "width": 165.67,
    "type": "opening",
@@ -693,7 +701,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.4655,
    "width": 110.02,
    "type": "opening",
@@ -701,7 +709,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.7262,
    "width": 34.0,
    "type": "door",
@@ -713,7 +721,7 @@
    "hinge_at": 380.6
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.9546,
    "width": 38.0,
    "type": "door",
@@ -725,7 +733,7 @@
    "hinge_at": 540.7
   },
   {
-   "wall_index": 24,
+   "wall_index": 23,
    "position": 0.8016,
    "width": 37.97,
    "type": "door",
@@ -737,7 +745,7 @@
    "hinge_at": 128.9
   },
   {
-   "wall_index": 26,
+   "wall_index": 25,
    "position": 0.539,
    "width": 33.95,
    "type": "door",
@@ -749,8 +757,8 @@
    "hinge_at": 8.9
   },
   {
-   "wall_index": 28,
-   "position": 0.7582,
+   "wall_index": 27,
+   "position": 0.7581,
    "width": 34.0,
    "type": "door",
    "sill": 0.0,
@@ -761,48 +769,24 @@
    "hinge_at": 127.4
   },
   {
-   "wall_index": 33,
-   "position": 0.865,
-   "width": 16.57,
-   "type": "opening",
-   "sill": 0.0,
-   "head": 80.0
-  },
-  {
-   "wall_index": 10,
-   "position": 0.8843,
-   "width": 40.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": -1,
-   "leaf": 36.0,
-   "hinge_at": 174.0
-  },
-  {
-   "wall_index": 28,
-   "position": 0.1058,
-   "width": 40.0,
+   "wall_index": 30,
+   "position": 0.8052,
+   "width": 32.0,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
    "hinge": 1,
    "swing": -1,
    "leaf": 30.0,
-   "hinge_at": 4.9
+   "hinge_at": 108.3
   },
   {
-   "wall_index": 4,
-   "position": 0.49,
-   "width": 23.03,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": 1,
-   "leaf": 28.0,
-   "hinge_at": -7.4
+   "wall_index": 32,
+   "position": 0.865,
+   "width": 16.57,
+   "type": "opening",
+   "sill": 30,
+   "head": 80.0
   }
  ],
  "fixtures": [],
@@ -814,12 +798,20 @@
      -283.567
     ],
     [
-     -185.536,
+     -185.568,
      -182.025
     ],
     [
-     -81.687,
-     -180.432
+     -53.2,
+     -179.995
+    ],
+    [
+     -53.954,
+     -129.007
+    ],
+    [
+     -81.673,
+     -129.025
     ],
     [
      -81.663,
@@ -847,18 +839,18 @@
     ]
    ],
    "kind": "room",
-   "area": 30947.2,
+   "area": 29509.8,
    "name": "STAIR"
   },
   {
    "polygon": [
     [
-     -185.526,
-     -95.133
+     -185.585,
+     -95.132
     ],
     [
-     -185.545,
-     -260.861
+     -185.553,
+     -260.862
     ],
     [
      -737.556,
@@ -870,7 +862,7 @@
     ],
     [
      -291.58,
-     47.009
+     47.013
     ],
     [
      -291.036,
@@ -878,18 +870,18 @@
     ]
    ],
    "kind": "garage",
-   "area": 154632.6,
+   "area": 154628.3,
    "name": "GARAGE"
   },
   {
    "polygon": [
     [
-     -185.536,
+     -185.568,
      -182.025
     ],
     [
-     -185.526,
-     -95.133
+     -185.585,
+     -95.132
     ],
     [
      -81.663,
@@ -901,30 +893,26 @@
     ]
    ],
    "kind": "laundry",
-   "area": 8903.6,
+   "area": 8907.6,
    "name": "LAUNDRY"
   },
   {
    "polygon": [
     [
-     -185.526,
-     -95.133
+     -185.585,
+     -95.132
     ],
     [
-     -185.507,
-     57.475
+     -185.594,
+     -45.839
     ],
     [
-     -0.271,
-     57.475
+     1.671,
+     -45.837
     ],
     [
-     -17.548,
-     61.85
-    ],
-    [
-     3.565,
-     70.975
+     1.809,
+     70.751
     ],
     [
      261.952,
@@ -936,115 +924,161 @@
     ]
    ],
    "kind": "room",
-   "area": 72242.6,
+   "area": 52742.0,
    "name": "HALL"
   },
   {
    "polygon": [
     [
-     -185.515,
-     -7.567
+     -185.602,
+     -7.524
     ],
     [
-     -185.526,
-     -95.133
+     -185.585,
+     -95.132
     ],
     [
      -291.036,
      -94.392
     ],
     [
-     -291.373,
+     -291.372,
      -6.87
     ]
    ],
    "kind": "room",
-   "area": 9251.9,
+   "area": 9247.7,
    "name": "MUDROOM"
   },
   {
    "polygon": [
     [
-     -185.509,
-     46.939
+     -185.594,
+     -45.839
     ],
     [
-     -185.515,
-     -7.567
+     -185.614,
+     57.475
     ],
     [
-     -291.373,
+     -83.798,
+     57.474
+    ],
+    [
+     -83.798,
+     -45.838
+    ]
+   ],
+   "kind": "bath",
+   "area": 10517.9,
+   "name": "BATHROOM"
+  },
+  {
+   "polygon": [
+    [
+     -185.612,
+     46.944
+    ],
+    [
+     -185.602,
+     -7.524
+    ],
+    [
+     -291.372,
      -6.87
     ],
     [
      -291.58,
-     47.009
+     47.013
     ]
    ],
    "kind": "room",
-   "area": 5742.4,
+   "area": 5735.5,
    "name": "STAIR"
   },
   {
    "polygon": [
     [
-     -185.507,
-     57.475
+     -185.62,
+     85.322
     ],
     [
-     -185.487,
-     228.897
+     -185.647,
+     226.959
     ],
     [
-     -19.263,
-     225.981
+     -19.362,
+     226.965
     ],
     [
-     -19.582,
-     57.475
+     -19.644,
+     57.473
+    ],
+    [
+     -123.048,
+     57.474
+    ],
+    [
+     -125.037,
+     84.986
     ]
    ],
    "kind": "room",
-   "area": 28227.0,
+   "area": 26452.6,
    "name": "PLAY ROOM"
   },
   {
    "polygon": [
     [
-     214.414,
-     68.532
+     -19.621,
+     70.979
     ],
     [
-     3.565,
-     70.975
+     1.809,
+     70.751
     ],
     [
-     -17.548,
-     61.85
+     1.671,
+     -45.837
     ],
     [
-     -0.271,
-     57.475
+     -83.798,
+     -45.838
     ],
     [
-     -19.582,
-     57.475
+     -83.798,
+     57.474
     ],
     [
-     -19.263,
-     225.981
-    ],
-    [
-     25.462,
-     228.31
-    ],
-    [
-     210.974,
-     226.936
+     -19.644,
+     57.473
     ]
    ],
    "kind": "room",
-   "area": 36750.5,
+   "area": 9123.3,
+   "name": "PANTRY"
+  },
+  {
+   "polygon": [
+    [
+     213.758,
+     68.494
+    ],
+    [
+     -19.621,
+     70.979
+    ],
+    [
+     -19.362,
+     226.965
+    ],
+    [
+     211.076,
+     226.973
+    ]
+   ],
+   "kind": "room",
+   "area": 36462.1,
    "name": "DINING ROOM"
   },
   {
@@ -1062,7 +1096,7 @@
      -88.007
     ],
     [
-     407.132,
+     407.131,
      -279.661
     ],
     [
@@ -1114,70 +1148,38 @@
   ],
   [
    -191.603,
-   227.016
+   226.996
   ],
   [
-   -188.115,
-   227.016
+   -188.671,
+   226.996
   ],
   [
-   -188.036,
-   231.536
+   -188.671,
+   229.983
   ],
   [
-   -9.982,
-   228.413
+   214.1,
+   229.997
   ],
   [
-   -10.073,
-   223.225
+   214.1,
+   227.028
   ],
   [
-   -17.298,
-   223.352
+   217.136,
+   227.023
   ],
   [
-   -17.556,
-   73.973
+   216.876,
+   73.985
   ],
   [
-   211.41,
-   73.973
+   261.945,
+   73.968
   ],
   [
-   210.895,
-   223.853
-  ],
-  [
-   22.356,
-   225.25
-  ],
-  [
-   22.401,
-   231.416
-  ],
-  [
-   214.08,
-   229.996
-  ],
-  [
-   214.058,
-   227.053
-  ],
-  [
-   217.019,
-   227.063
-  ],
-  [
-   217.545,
-   74.003
-  ],
-  [
-   261.95,
-   73.973
-  ],
-  [
-   261.95,
+   261.945,
    71.024
   ],
   [
@@ -1255,7 +1257,6 @@
   "orphan line not paired into a wall: (168.7,230.1)->(168.7,223.9)",
   "orphan line not paired into a wall: (217.1,98.7)->(210.8,98.7)",
   "orphan line not paired into a wall: (217.0,205.7)->(210.9,205.7)",
-  "orphan line not paired into a wall: (-139.3,223.9)->(-21.3,224.0)",
   "orphan line not paired into a wall: (217.1,98.7)->(210.8,98.7)",
   "orphan line not paired into a wall: (265.0,-42.3)->(258.9,-42.3)",
   "orphan line not paired into a wall: (265.0,34.7)->(258.9,34.7)",
@@ -1302,8 +1303,8 @@
   "orphan line not paired into a wall: (85.7,230.1)->(85.7,223.9)",
   "orphan line not paired into a wall: (48.7,230.1)->(48.7,223.9)",
   "orphan line not paired into a wall: (-191.6,145.2)->(-185.5,145.2)",
-  "orphan line not paired into a wall: (-191.6,217.1)->(-191.5,230.0)",
-  "orphan line not paired into a wall: (-191.6,217.1)->(-191.5,230.0)",
+  "orphan line not paired into a wall: (-191.6,217.1)->(-191.6,230.0)",
+  "orphan line not paired into a wall: (-191.6,217.1)->(-191.6,230.0)",
   "orphan line not paired into a wall: (231.0,-100.3)->(231.0,-96.3)",
   "orphan line not paired into a wall: (231.0,-100.3)->(231.0,-96.3)",
   "orphan line not paired into a wall: (258.9,-107.5)->(265.0,-107.5)",
@@ -1345,11 +1346,7 @@
   "orphan line not paired into a wall: (-21.5,115.3)->(-17.1,115.3)",
   "orphan line not paired into a wall: (-17.2,81.2)->(-17.3,74.0)",
   "orphan line not paired into a wall: (3.6,-9.4)->(-0.5,-9.3)",
-  "orphan line not paired into a wall: (-0.5,-41.3)->(-0.4,-43.8)",
   "orphan line not paired into a wall: (-0.3,55.5)->(-0.5,-9.3)",
-  "orphan line not paired into a wall: (-0.5,-41.3)->(-0.4,-43.8)",
-  "orphan line not paired into a wall: (3.6,-41.4)->(3.6,-47.8)",
-  "orphan line not paired into a wall: (3.6,-41.4)->(3.6,-47.8)",
   "orphan line not paired into a wall: (124.9,74.1)->(124.9,67.9)",
   "orphan line not paired into a wall: (-116.0,23.1)->(-120.1,23.1)",
   "orphan line not paired into a wall: (-120.0,20.7)->(-120.1,23.1)",
@@ -1364,8 +1361,10 @@
   "orphan line not paired into a wall: (-0.4,-43.8)->(-46.4,-43.8)",
   "orphan line not paired into a wall: (-46.4,-43.8)->(-81.8,-43.8)",
   "orphan line not paired into a wall: (-83.7,-180.0)->(-83.9,-131.3)",
+  "orphan line not paired into a wall: (-26.6,224.0)->(-21.3,224.0)",
+  "orphan line not paired into a wall: (-26.6,224.0)->(-21.3,224.0)",
   "6 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "7 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "8 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
   {
