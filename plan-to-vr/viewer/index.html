@@ -681,19 +681,11 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
 
   if (op.type === 'opening' && w >= 90 * IN2M && openingIsExterior(worldStart, dir, angle, lo, hi, depth)) {
     // wide EXTERIOR opening = a vehicle/garage door. Render it OPEN (issue
-    // #19): the sectional panels rolled up into a shallow bundle tucked under
-    // the head, leaving the bay clear so it reads open from the yard and stays
-    // walk/drive-through. Side tracks run down to the slab so the open bay
-    // still reads as a door pocket rather than a bare hole. Wide interior
-    // pass-throughs stay open with no bundle.
-    const seamMat = std({ color: 0xb9b5aa, roughness: 0.7, envMapIntensity: ENV_INTENSITY });
+    // #19) and CLEAR: no rolled-panel bundle across the bay - the full-width
+    // bundle at head height read as a giant beam spanning the garage (VR
+    // notes #41/#46). Only the slim vertical side tracks remain, so the open
+    // bay still reads as a door pocket rather than a bare hole.
     const trackMat = std({ color: 0x8a8a8a, roughness: 0.6, metalness: 0.4, envMapIntensity: ENV_INTENSITY });
-    const bundleH = 0.30, bundleY = head - bundleH / 2;
-    boxOnWall(group, worldStart, dir, angle, mid, w, bundleY, bundleH, 0, 5 * IN2M, garageDoorMat);
-    for (let i = 0; i < 3; i++) {   // rolled panel ribs on the bundle
-      boxOnWall(group, worldStart, dir, angle, mid, w,
-        head - bundleH * (i + 0.5) / 3, 0.5 * IN2M, 3.0 * IN2M, 0.4 * IN2M, seamMat);
-    }
     for (const a of [lo + 1.5 * IN2M, hi - 1.5 * IN2M]) {   // vertical tracks
       boxOnWall(group, worldStart, dir, angle, a, 2 * IN2M,
         (baseY + head) / 2, head - baseY, 0, 1.2 * IN2M, trackMat);
@@ -748,9 +740,10 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
         knob.position.set(0.01 + lw - 0.07, 38 * IN2M, zs * (LT / 2 + 0.02));
         pivot.add(knob);
       }
-      // sheet-drawn position (90deg) unless the plan says the door stays
-      // closed (e.g. it leads somewhere not modeled yet)
-      const open0 = op.shut ? 0 : Math.PI / 2;
+      // exterior doors park CLOSED: a leaf opened flat against the wall is
+      // invisible edge-on and its head casing reads as a floating bar (VR
+      // notes #41/#20). Still grabbable in VR - squeeze the grip to swing.
+      const open0 = 0;
       pivot.rotation.y = theta0 + rotSign * open0;
       group.add(pivot);
       doorLeaves.push({ pivot, theta0, rotSign, len: lw, head, open: open0 });
@@ -1348,12 +1341,26 @@ function buildPlan(plan) {
                             hl: w / 2, hd: dp / 2, top: yT });
           cxs2.push(mxw - w / 2, mxw + w / 2); czs2.push(mzw - w / 2, mzw + w / 2);
         };
-        // start of the second flight and the landing centre
+        // start of the second flight and the landing centre. A U-turn return
+        // flight doubles back OVER the adjacent down-flight strip (that's the
+        // side the well actually has) - offset toward the partner strip, not
+        // blindly along the perpendicular, which shoved the return flight
+        // through the laundry wall (VR notes #41/#58 floating platform).
         let scx, scz, lcx, lcz, lw, ld;
-        if (st.up_turn === 'back') {                   // return flight beside, offset by width
-          scx = topX + px * width; scz = topZ + pz * width;
-          lcx = topX + cx * (depth / 2) + px * (width / 2);
-          lcz = topZ + cz * (depth / 2) + pz * (width / 2);
+        if (st.up_turn === 'back') {
+          let sgn = 1;
+          const mate = (plan.stairs || []).find(o =>
+            o !== st && o.down && stripsAdjacent(st.polygon, o.polygon));
+          if (mate) {
+            const mp = mate.polygon.map(([qx, qy]) => toWorld(qx, qy));
+            const mcx = mp.reduce((a, q) => a + q.x, 0) / mp.length;
+            const mcz = mp.reduce((a, q) => a + q.z, 0) / mp.length;
+            const own = tr.reduce((a, t) => [a[0] + t.mx / N, a[1] + t.mz / N], [0, 0]);
+            sgn = ((mcx - own[0]) * px + (mcz - own[1]) * pz) >= 0 ? 1 : -1;
+          }
+          scx = topX + px * sgn * width; scz = topZ + pz * sgn * width;
+          lcx = topX + cx * (depth / 2) + px * sgn * (width / 2);
+          lcz = topZ + cz * (depth / 2) + pz * sgn * (width / 2);
           lw = width; ld = 2 * width + depth;
         } else {                                        // quarter turn: corner landing
           scx = topX + tx * width; scz = topZ + tz * width;
