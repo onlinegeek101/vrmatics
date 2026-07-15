@@ -340,6 +340,21 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
         if down:
             st["down"] = True
         out.append(st)
+    # flush end: the architect's termination circle marks the tread that is
+    # level with THIS floor's plane (the flight travels away from it, up or
+    # down). The viewer anchors that end at elevation 0 (VR notes #14/#30).
+    circles = dxf_stairs._term_circles(path)
+    for st in out:
+        poly = st["polygon"]
+        cx = sum(p[0] for p in poly) / len(poly)
+        cy = sum(p[1] for p in poly) / len(poly)
+        best, bd = None, 110.0
+        for (qx, qy) in circles:
+            d = math.hypot(cx - qx, cy - qy)
+            if d < bd:
+                best, bd = (qx, qy), d
+        if best is not None:
+            st["flush"] = [round(best[0], 1), round(best[1], 1)]
     plan["stairs"] = out
     return len(out)
 

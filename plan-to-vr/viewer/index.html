@@ -1176,7 +1176,8 @@ function buildPlan(plan) {
   // goes somewhere: full height to a landing, a return flight climbing
   // back over the down-run, and a hole cut in the roof above - no more
   // stairs dead-ending under a closed ceiling.
-  const roofHoles = [];   // world rects the roof must open over
+  const roofHoles = [];   // world rects the roof must open over (up-flights)
+  const floorHoles = [];  // world rects the floor must open over (down-flights)
   const stripsAdjacent = (pa, pb) => {
     const bb = p => {
       const xs = p.map(q => q[0]), ys = p.map(q => q[1]);
@@ -1192,269 +1193,113 @@ function buildPlan(plan) {
            (ovY > 30 && gapX > -6 && gapX < 24);
   };
   if (plan.stairs && plan.stairs.length) {
+    // Each flight is anchored at its FLUSH end - the tread the architect's
+    // termination circle marks as level with THIS floor's plane (y = 0). From
+    // there the flight steps AWAY along its travel axis: UP-flights climb and
+    // punch through the ceiling (roof hole); DOWN-flights descend and drop
+    // through an opening cut in the floor (floor hole). Two flights sharing a
+    // landing therefore terminate flush next to each other, one rising, one
+    // falling - never floating, never plunging through the floor at the wrong
+    // spot (VR notes #14 / #29 / #30).
     const stMat = std({ color: 0xb9a988, roughness: 0.85,
                         envMapIntensity: ENV_INTENSITY });
-    const wallHm = ((walls[0] && walls[0].height) || 96) * IN2M;
-    const riserM = 0.17, capM = 1.1;
     const wellMat = std({ color: 0x14161c, roughness: 1.0,
                           envMapIntensity: 0 });
     const railMat = std({ color: 0xcfc8ba, roughness: 0.6,
                           envMapIntensity: ENV_INTENSITY });
+    const riserM = 0.17, treadThick = 0.06;
     for (const st of plan.stairs) {
-      if (st.down) {
-        const pw = st.polygon.map(([px, py]) => toWorld(px, py));
-        let cx0 = Math.min(...pw.map(q => q.x)), cx1 = Math.max(...pw.map(q => q.x));
-        let cz0 = Math.min(...pw.map(q => q.z)), cz1 = Math.max(...pw.map(q => q.z));
-        const wellW = cx1 - cx0, wellD = cz1 - cz0;
-        const baseY = baseGroundAt((cx0 + cx1) / 2, (cz0 + cz1) / 2);
-        if (baseY < -0.05 && (st.treads.length + 1) * riserM <= -baseY + 0.25) {
-          // this short DOWN run lands on a slab that is genuinely modeled
-          // below the floor now (the garage at grade): build the flight
-          // for real - treads descending from the finished floor to it
-          const treads = st.treads.map(t => {
-            const a2 = toWorld(t[0][0], t[0][1]);
-            const b2 = toWorld(t[1][0], t[1][1]);
-            return { a: a2, b: b2, mx: (a2.x + b2.x) / 2, mz: (a2.z + b2.z) / 2 };
-          }).filter(t => Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z) > 0.2);
-          if (treads.length) {
-            let ddx, ddz;                       // descend direction
-            if (st.direction) { ddx = st.direction[0]; ddz = -st.direction[1]; }
-            else {
-              ddx = treads[treads.length - 1].mx - treads[0].mx;
-              ddz = treads[treads.length - 1].mz - treads[0].mz;
-              const n = Math.hypot(ddx, ddz) || 1; ddx /= n; ddz /= n;
-            }
-            treads.sort((p1, p2) =>
-              (p1.mx * ddx + p1.mz * ddz) - (p2.mx * ddx + p2.mz * ddz));
-            const dgaps = [];
-            for (let i = 1; i < treads.length; i++) {
-              const d = (treads[i].mx - treads[i - 1].mx) * ddx +
-                        (treads[i].mz - treads[i - 1].mz) * ddz;
-              if (d > 0.05) dgaps.push(d);
-            }
-            dgaps.sort((x, y) => x - y);
-            const tdep = dgaps.length ? dgaps[dgaps.length >> 1] : 0.26;
-            const rise = -baseY / (treads.length + 1);
-            treads.forEach((t, i) => {
-              const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
-              const top = -(i + 1) * rise;
-              const m = new THREE.Mesh(
-                new THREE.BoxGeometry(len, top - baseY, tdep), stMat);
-              m.position.set(t.mx + ddx * tdep / 2, (top + baseY) / 2,
-                             t.mz + ddz * tdep / 2);
-              m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
-              m.castShadow = m.receiveShadow = true;
-              group.add(m);
-              laserTargets.push(m);
-              stairSteps.push({
-                cx: t.mx + ddx * tdep / 2, cz: t.mz + ddz * tdep / 2,
-                ux: (t.b.x - t.a.x) / len, uz: (t.b.z - t.a.z) / len,
-                kx: ddx, kz: ddz, hl: len / 2, hd: tdep / 2, top,
-              });
-            });
-            // The garage step is drawn inside the slab, so its top tread lands
-            // a riser below the finished floor with bare slab between the flight
-            // and the house-floor edge at the junction - the step read as
-            // floating, offset from the dropped garage door/opening (VR note
-            // #17, reopened). March up-slope from the top tread to the finished
-            // floor and bridge the gap with a slab->floor landing, so the step
-            // MEETS the finished floor and the door, the cased opening and the
-            // step all line up at the slab->floor transition. Gated: only when
-            // finished-floor ground is actually found up-slope within a stride,
-            // so a flight that already tops out at the floor gets no landing.
-            const topT = treads[0];        // highest (climb-top) tread
-            const tlen = Math.hypot(topT.b.x - topT.a.x, topT.b.z - topT.a.z) || 1;
-            let landLen = 0;
-            for (let d = tdep * 0.5; d <= 1.4; d += 0.05) {
-              if (baseGroundAt(topT.mx - ddx * d, topT.mz - ddz * d) > -0.05) {
-                landLen = d; break;
-              }
-            }
-            if (landLen > 0.06) {
-              const lcx = topT.mx - ddx * landLen / 2;
-              const lcz = topT.mz - ddz * landLen / 2;
-              const land = new THREE.Mesh(
-                new THREE.BoxGeometry(tlen, -baseY, landLen), stMat);
-              land.position.set(lcx, baseY / 2, lcz);
-              land.rotation.y = -Math.atan2(topT.b.z - topT.a.z, topT.b.x - topT.a.x);
-              land.castShadow = land.receiveShadow = true;
-              group.add(land);
-              laserTargets.push(land);
-              stairSteps.push({
-                cx: lcx, cz: lcz,
-                ux: (topT.b.x - topT.a.x) / tlen, uz: (topT.b.z - topT.a.z) / tlen,
-                kx: ddx, kz: ddz, hl: tlen / 2, hd: landLen / 2, top: 0,
-              });
-            }
-            continue;
-          }
-        }
-        // a DOWN flight can't descend through its slab; render the well:
-        // a dark pit at slab level with a guard rail around it, which
-        // reads instantly as "stairs going down" without a basement
-        const well = new THREE.Mesh(
-          new THREE.BoxGeometry(wellW, 0.02, wellD), wellMat);
-        well.position.set((cx0 + cx1) / 2, baseY + 0.012, (cz0 + cz1) / 2);
-        group.add(well);
-        laserTargets.push(well);
-        // first three treads sink into the dark before it swallows them
-        const dirW = st.direction
-          ? [st.direction[0], -st.direction[1]]
-          : [wellW >= wellD ? 1 : 0, wellW >= wellD ? 0 : 1];
-        for (let i = 0; i < 3; i++) {
-          const t = st.treads[Math.min(i, st.treads.length - 1)];
-          const a2 = toWorld(t[0][0], t[0][1]);
-          const b2 = toWorld(t[1][0], t[1][1]);
-          const len = Math.hypot(b2.x - a2.x, b2.z - a2.z);
-          if (len < 0.2) continue;
-          const dep = 0.26;
-          const m = new THREE.Mesh(
-            new THREE.BoxGeometry(len, 0.02, dep), stMat);
-          m.position.set(
-            (a2.x + b2.x) / 2 + dirW[0] * dep * i,
-            baseY - 0.001 - i * 0.004,
-            (a2.z + b2.z) / 2 + dirW[1] * dep * i);
-          m.rotation.y = -Math.atan2(b2.z - a2.z, b2.x - a2.x);
-          group.add(m);
-        }
-        // guard rail on the long sides + far end
-        const railH = 0.92;
-        const mkRail = (x, z, len, rotY) => {
-          const r = new THREE.Mesh(
-            new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
-          r.position.set(x, baseY + railH, z);
-          r.rotation.y = rotY;
-          group.add(r);
-          const p1 = new THREE.Mesh(
-            new THREE.BoxGeometry(0.04, railH, 0.04), railMat);
-          p1.position.set(x - Math.cos(rotY) * len / 2, baseY + railH / 2,
-                          z + Math.sin(rotY) * len / 2);
-          group.add(p1);
-          const p2 = p1.clone();
-          p2.position.set(x + Math.cos(rotY) * len / 2, baseY + railH / 2,
-                          z - Math.sin(rotY) * len / 2);
-          group.add(p2);
-          collisionSegs.push({    // guard rails stop the player too
-            ax: x - Math.cos(rotY) * len / 2, az: z + Math.sin(rotY) * len / 2,
-            bx: x + Math.cos(rotY) * len / 2, bz: z - Math.sin(rotY) * len / 2,
-            hw: 0.06, top: baseY + railH,
-          });
-        };
-        if (wellW >= wellD) {           // run along x: rails on z sides
-          mkRail((cx0 + cx1) / 2, cz0 + 0.03, wellW, 0);
-          mkRail((cx0 + cx1) / 2, cz1 - 0.03, wellW, 0);
-        } else {
-          mkRail(cx0 + 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
-          mkRail(cx1 - 0.03, (cz0 + cz1) / 2, wellD, Math.PI / 2);
-        }
-        continue;
-      }
-      const treads = st.treads.map(t => {
-        const a2 = toWorld(t[0][0], t[0][1]);
-        const b2 = toWorld(t[1][0], t[1][1]);
-        return { a: a2, b: b2,
-                 mx: (a2.x + b2.x) / 2, mz: (a2.z + b2.z) / 2 };
-      }).filter(t => Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z) > 0.2);
-      if (!treads.length) continue;
-      // climb axis: plan direction if present, else first-to-last tread
+      const tr = st.treads.map(t => {
+        const a = toWorld(t[0][0], t[0][1]), b = toWorld(t[1][0], t[1][1]);
+        return { a, b, mx: (a.x + b.x) / 2, mz: (a.z + b.z) / 2,
+                 len: Math.hypot(b.x - a.x, b.z - a.z) };
+      }).filter(t => t.len > 0.2);
+      if (!tr.length) continue;
+      // travel axis: away from the flush end (plan direction when present)
       let cx, cz;
-      if (st.direction) {
-        cx = st.direction[0]; cz = -st.direction[1];
-      } else {
-        cx = treads[treads.length - 1].mx - treads[0].mx;
-        cz = treads[treads.length - 1].mz - treads[0].mz;
+      if (st.direction) { cx = st.direction[0]; cz = -st.direction[1]; }
+      else {
+        cx = tr[tr.length - 1].mx - tr[0].mx;
+        cz = tr[tr.length - 1].mz - tr[0].mz;
         const n = Math.hypot(cx, cz) || 1; cx /= n; cz /= n;
       }
-      treads.sort((p1, p2) =>
-        (p1.mx * cx + p1.mz * cz) - (p2.mx * cx + p2.mz * cz));
-      // step depth from median tread spacing
+      // the flush end (circle) in world; fallback = the tread most 'against'
+      // the travel axis (i.e. the entry end)
+      let fx, fz;
+      if (st.flush) { const f = toWorld(st.flush[0], st.flush[1]); fx = f.x; fz = f.z; }
+      else {
+        let best = tr[0], bv = Infinity;
+        for (const t of tr) { const p = t.mx * cx + t.mz * cz; if (p < bv) { bv = p; best = t; } }
+        fx = best.mx - cx * 0.3; fz = best.mz - cz * 0.3;
+      }
+      // order treads outward from the flush end (nearest flush first)
+      tr.sort((p, q) => ((p.mx - fx) * cx + (p.mz - fz) * cz) -
+                        ((q.mx - fx) * cx + (q.mz - fz) * cz));
       const gaps = [];
-      for (let i = 1; i < treads.length; i++) {
-        const d = (treads[i].mx - treads[i - 1].mx) * cx +
-                  (treads[i].mz - treads[i - 1].mz) * cz;
+      for (let i = 1; i < tr.length; i++) {
+        const d = (tr[i].mx - tr[i - 1].mx) * cx + (tr[i].mz - tr[i - 1].mz) * cz;
         if (d > 0.05) gaps.push(d);
       }
-      gaps.sort((x, y) => x - y);
+      gaps.sort((a, b) => a - b);
       const depth = gaps.length ? gaps[gaps.length >> 1] : 0.26;
-      // a DOWN run sharing the well means this is a switchback pair:
-      // the flight rises full height to a landing and a return flight
-      // climbs back over the down-run to the floor above
-      const partner = (plan.stairs || []).find(o =>
-        o !== st && o.down && stripsAdjacent(st.polygon, o.polygon));
-      const flightTop = treads.length * riserM;
-      const through = !!partner && flightTop < wallHm - 0.15;
-      const cap = through ? Infinity : capM;
-      treads.forEach((t, i) => {
-        const len = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z);
-        const h = Math.min((i + 1) * riserM, cap);
-        const m = new THREE.Mesh(new THREE.BoxGeometry(len, h, depth), stMat);
-        m.position.set(t.mx + cx * depth / 2, h / 2, t.mz + cz * depth / 2);
+      const dir = st.down ? -1 : 1;           // down descends, up climbs
+      const N = tr.length;
+      // each tread is a solid step block; tread 0 sits flush at floor 0
+      tr.forEach((t, i) => {
+        const top = dir * i * riserM;                 // walkable surface
+        const prev = dir * (i - 1) * riserM;
+        let h, yc;
+        if (i === 0) { h = treadThick; yc = top - treadThick / 2; }
+        else { h = Math.abs(top - prev); yc = (top + prev) / 2; }
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(t.len, Math.max(h, treadThick), depth), stMat);
+        m.position.set(t.mx + cx * depth / 2, yc, t.mz + cz * depth / 2);
         m.rotation.y = -Math.atan2(t.b.z - t.a.z, t.b.x - t.a.x);
         m.castShadow = m.receiveShadow = true;
         group.add(m);
         laserTargets.push(m);
-        // walkable: the riser top is ground under the player's feet
         stairSteps.push({
           cx: t.mx + cx * depth / 2, cz: t.mz + cz * depth / 2,
-          ux: (t.b.x - t.a.x) / len, uz: (t.b.z - t.a.z) / len,
-          kx: cx, kz: cz, hl: len / 2, hd: depth / 2, top: h,
+          ux: (t.b.x - t.a.x) / t.len, uz: (t.b.z - t.a.z) / t.len,
+          kx: cx, kz: cz, hl: t.len / 2, hd: depth / 2, top,
         });
       });
-      if (through) {
-        // axis-aligned well: combined bbox of both strips, world space
-        const wpts = st.polygon.concat(partner.polygon)
-          .map(([px, py]) => toWorld(px, py));
-        const bx0 = Math.min(...wpts.map(q => q.x)), bx1 = Math.max(...wpts.map(q => q.x));
-        const bz0 = Math.min(...wpts.map(q => q.z)), bz1 = Math.max(...wpts.map(q => q.z));
-        const pw = partner.polygon.map(([px, py]) => toWorld(px, py));
-        const px0 = Math.min(...pw.map(q => q.x)), px1 = Math.max(...pw.map(q => q.x));
-        const pz0 = Math.min(...pw.map(q => q.z)), pz1 = Math.max(...pw.map(q => q.z));
-        const alongX = Math.abs(cx) > 0.5;      // climb axis of the pair
-        const lastT = treads[treads.length - 1];
-        // landing platform past the top tread, spanning BOTH strips
-        const landD = 0.95;
-        const lax = alongX ? lastT.mx + cx * (depth + landD / 2) : (bx0 + bx1) / 2;
-        const laz = alongX ? (bz0 + bz1) / 2 : lastT.mz + cz * (depth + landD / 2);
-        const lw = alongX ? landD : bx1 - bx0;
-        const ld = alongX ? bz1 - bz0 : landD;
-        const land = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.16, ld), stMat);
-        land.position.set(lax, flightTop - 0.08, laz);
-        land.castShadow = land.receiveShadow = true;
-        group.add(land);
-        laserTargets.push(land);
-        stairSteps.push({ cx: lax, cz: laz, ux: 1, uz: 0, kx: 0, kz: 1,
-                          hl: lw / 2, hd: ld / 2, top: flightTop });
-        // return flight over the partner strip, climbing back the
-        // other way from the landing up to the floor above
-        const alongLen = alongX ? px1 - px0 : pz1 - pz0;
-        const wide = alongX ? pz1 - pz0 : px1 - px0;
-        const n = Math.max(3, Math.round((wallHm - flightTop) / riserM));
-        const rise = (wallHm - flightTop) / n;
-        const stepD = alongLen / n;
-        for (let i = 0; i < n; i++) {
-          const h = flightTop + (i + 1) * rise;
-          const a = (i + 0.5) * stepD;     // distance from the landing end
-          const sx = alongX ? (cx < 0 ? px0 + a : px1 - a) : (px0 + px1) / 2;
-          const sz = alongX ? (pz0 + pz1) / 2 : (cz < 0 ? pz0 + a : pz1 - a);
-          const slab = new THREE.Mesh(new THREE.BoxGeometry(
-            alongX ? stepD : wide, 0.16, alongX ? wide : stepD), stMat);
-          slab.position.set(sx, h - 0.08, sz);
-          slab.castShadow = slab.receiveShadow = true;
-          group.add(slab);
-          laserTargets.push(slab);
-          stairSteps.push({ cx: sx, cz: sz,
-            ux: alongX ? 1 : 0, uz: alongX ? 0 : 1,
-            kx: alongX ? -cx : 0, kz: alongX ? 0 : -cz,
-            hl: (alongX ? stepD : wide) / 2, hd: (alongX ? wide : stepD) / 2,
-            top: h });
+      // opening over the travelled span (every tread past the flush one)
+      const far = tr.slice(1);
+      if (far.length) {
+        const xs = far.flatMap(t => [t.a.x, t.b.x, t.mx + cx * depth]);
+        const zs = far.flatMap(t => [t.a.z, t.b.z, t.mz + cz * depth]);
+        const rect = { x0: Math.min(...xs) - 0.06, x1: Math.max(...xs) + 0.06,
+                       z0: Math.min(...zs) - 0.06, z1: Math.max(...zs) + 0.06 };
+        if (st.down) {
+          // does the flight land on a modeled low slab just below (e.g. the
+          // garage at grade)? then the slab cut-out already opens the floor -
+          // the treads simply descend onto it, no shaft/hole/rail needed.
+          const bc = baseGroundAt((rect.x0 + rect.x1) / 2, (rect.z0 + rect.z1) / 2);
+          if (bc >= -0.05) {
+            // a true storey-to-storey descent: cut a floor opening, drop a
+            // dark shaft under it, and rail the open edges
+            floorHoles.push(rect);
+            const wallH = Math.max(0.9, N * riserM);
+            const sx = (rect.x0 + rect.x1) / 2, sz = (rect.z0 + rect.z1) / 2;
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(
+              rect.x1 - rect.x0, wallH, rect.z1 - rect.z0), wellMat);
+            shaft.position.set(sx, -wallH / 2 - 0.02, sz);
+            group.add(shaft);
+            const railH = 0.92, railMk = (ax, az, bx, bz) => {
+              const len = Math.hypot(bx - ax, bz - az);
+              const r = new THREE.Mesh(new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
+              r.position.set((ax + bx) / 2, railH, (az + bz) / 2);
+              r.rotation.y = -Math.atan2(bz - az, bx - ax);
+              group.add(r);
+              collisionSegs.push({ ax, az, bx, bz, hw: 0.05, top: railH });
+            };
+            railMk(rect.x0, rect.z0, rect.x1, rect.z0);
+            railMk(rect.x0, rect.z1, rect.x1, rect.z1);
+          }
+        } else {
+          roofHoles.push(rect);
         }
-        // the roof opens over the shaft: return strip + landing
-        roofHoles.push({
-          x0: Math.min(px0, lax - lw / 2) - 0.05,
-          z0: Math.min(pz0, laz - ld / 2) - 0.05,
-          x1: Math.max(px1, lax + lw / 2) + 0.05,
-          z1: Math.max(pz1, laz + ld / 2) + 0.05,
-        });
       }
     }
   }
@@ -1762,6 +1607,17 @@ function buildPlan(plan) {
         floorShape.holes.push(hole);
       }
     }
+    // down-stair openings punch through the footprint floor too
+    for (const hr of floorHoles) {
+      const pts = [
+        new THREE.Vector2(hr.x0, -hr.z0), new THREE.Vector2(hr.x1, -hr.z0),
+        new THREE.Vector2(hr.x1, -hr.z1), new THREE.Vector2(hr.x0, -hr.z1)];
+      const outerCCW = THREE.ShapeUtils.area(floorShape.getPoints()) > 0;
+      if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
+      const hole = new THREE.Path();
+      hole.setFromPoints(pts);
+      floorShape.holes.push(hole);
+    }
     const geo = new THREE.ShapeGeometry(floorShape);
     geo.rotateX(-Math.PI / 2);
     floor = new THREE.Mesh(geo, rooms.length ? slabMat : floorMat);
@@ -1783,7 +1639,25 @@ function buildPlan(plan) {
     // rotateX(-90), matching toWorld's recentred metres
     const pts = r.polygon.map(([px, py]) =>
       new THREE.Vector2((px - cx) * IN2M, (py - cy) * IN2M));
-    const geo = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    const rshape = new THREE.Shape(pts);
+    // cut any down-stair opening that lands inside this room's floor
+    if (floorHoles.length) {
+      const rxs = pts.map(v => v.x), rys = pts.map(v => v.y);
+      const rb = { x0: Math.min(...rxs), x1: Math.max(...rxs),
+                   y0: Math.min(...rys), y1: Math.max(...rys) };
+      const rccw = THREE.ShapeUtils.area(pts) > 0;
+      for (const hr of floorHoles) {
+        const hx0 = hr.x0, hx1 = hr.x1, hy0 = -hr.z1, hy1 = -hr.z0;
+        if (hx1 < rb.x0 || hx0 > rb.x1 || hy1 < rb.y0 || hy0 > rb.y1) continue;
+        const hp = [new THREE.Vector2(hx0, hy0), new THREE.Vector2(hx1, hy0),
+                    new THREE.Vector2(hx1, hy1), new THREE.Vector2(hx0, hy1)];
+        if ((THREE.ShapeUtils.area(hp) > 0) === rccw) hp.reverse();
+        const hole = new THREE.Path();
+        hole.setFromPoints(hp);
+        rshape.holes.push(hole);
+      }
+    }
+    const geo = new THREE.ShapeGeometry(rshape);
     geo.rotateX(-Math.PI / 2);
     const kind = r.kind || 'room';
     const mat = (kind === 'bath' || kind === 'laundry') ? roomTileMat
