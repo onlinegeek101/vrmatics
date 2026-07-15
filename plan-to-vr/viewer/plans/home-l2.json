@@ -328,18 +328,6 @@
   },
   {
    "start": [
-    -42.0,
-    -60.0
-   ],
-   "end": [
-    9.0,
-    -60.0
-   ],
-   "thickness": 4.0,
-   "height": 96.0
-  },
-  {
-   "start": [
     -192.001,
     -26.0
    ],
@@ -711,18 +699,6 @@
    "swing": 1,
    "leaf": 22.0,
    "hinge_at": 28.2
-  },
-  {
-   "wall_index": 27,
-   "position": 0.5,
-   "width": 25.0,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": 1,
-   "swing": 1,
-   "leaf": 25.0,
-   "hinge_at": 38.0
   }
  ],
  "fixtures": [
@@ -821,12 +797,12 @@
      -157.929
     ],
     [
-     -42.972,
-     -59.995
+     -42.516,
+     32.342
     ],
     [
-     8.844,
-     -60.0
+     8.907,
+     32.344
     ],
     [
      8.691,
@@ -834,8 +810,8 @@
     ]
    ],
    "kind": "room",
-   "area": 29444.9,
-   "name": "STAIR"
+   "area": 34211.5,
+   "name": "HALL"
   },
   {
    "polygon": [
@@ -1052,29 +1028,6 @@
    "kind": "room",
    "area": 4652.6,
    "name": "New structural beam"
-  },
-  {
-   "polygon": [
-    [
-     -42.972,
-     -59.995
-    ],
-    [
-     -42.516,
-     32.342
-    ],
-    [
-     8.907,
-     32.344
-    ],
-    [
-     8.844,
-     -60.0
-    ]
-   ],
-   "kind": "room",
-   "area": 4766.6,
-   "name": "HALL"
   }
  ],
  "footprint": [
@@ -1498,14 +1451,14 @@
    "is_primary": true
   }
  ],
- "source": {
-  "kind": "dxf",
-  "floor": "2"
- },
  "underlay": {
   "file": "home-l2.png",
   "x0": -230.58,
   "y1": 268.53,
   "in_per_px": 0.48
+ },
+ "source": {
+  "kind": "dxf",
+  "floor": "2"
  }
 }
