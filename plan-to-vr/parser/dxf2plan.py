@@ -607,6 +607,34 @@ def main():
     fx_layers = args.fixture_layers or f"1.{args.floor}FURN"
     n_fx = add_fixtures(plan, args.input, fx_layers.split(","))
 
+    # room material themes from the GT sidecar (owner's material photos).
+    # Each entry: {"name": "KITCHEN"} (applies to every room with that name)
+    # or {"near": [x, y], "tol": 60} (nearest room centroid), plus
+    # "theme": {"wall": "#hex", "floor": "maple|slate|tile|wood|#hex"}.
+    # The viewer paints that room's wall faces / floor accordingly.
+    for rt in (gt.get("room_themes") or []):
+        matched = []
+        if "name" in rt:
+            key = rt["name"].strip().upper()
+            matched = [r for r in plan["rooms"]
+                       if (r.get("name") or "").strip().upper() == key]
+        elif "near" in rt:
+            nx, ny = rt["near"]
+            best, bd = None, rt.get("tol", 60)
+            for r in plan["rooms"]:
+                poly = r["polygon"]
+                rcx = sum(p[0] for p in poly) / len(poly)
+                rcy = sum(p[1] for p in poly) / len(poly)
+                d = math.hypot(rcx - nx, rcy - ny)
+                if d < bd:
+                    best, bd = r, d
+            matched = [best] if best else []
+        if not matched:
+            print(f"fix: room_theme {rt.get('name') or rt.get('near')} UNMATCHED")
+        for r in matched:
+            r["theme"] = rt.get("theme", {})
+            print(f"fix: room_theme -> {r.get('name') or 'unnamed'}")
+
     spawn = default_camera(plan, (gt.get("camera") or {}).get("near"))
     if spawn:
         plan["cameras"] = [spawn]
