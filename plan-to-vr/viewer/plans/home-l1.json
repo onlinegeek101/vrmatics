@@ -789,7 +789,32 @@
    "head": 80.0
   }
  ],
- "fixtures": [],
+ "fixtures": [
+  {
+   "name": "FIXT-CHUTE",
+   "center": [
+    -91.0,
+    -111.0
+   ],
+   "size": [
+    14.0,
+    18.0
+   ],
+   "rotation": 0.0
+  },
+  {
+   "name": "FIXT-CABINET36",
+   "center": [
+    -96.5,
+    -140.0
+   ],
+   "size": [
+    24.0,
+    36.0
+   ],
+   "rotation": 0.0
+  }
+ ],
  "rooms": [
   {
    "polygon": [

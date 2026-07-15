@@ -374,6 +374,58 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
     return len(out)
 
 
+def add_fixtures(plan, path, fixture_layers):
+    """INSERT block references on the fixtures layer become plan fixtures.
+    The block NAME drives the viewer's stand-in (TOILET/TUB/CABINET/...,
+    see buildFixture), the block definition's extent drives the footprint
+    size, and the insert's rotation passes through. Owner-authored fixture
+    blocks live on 1.<floor>FURN (VR notes #56/#40)."""
+    lays = {l.strip().upper() for l in fixture_layers if l.strip()}
+    if not lays:
+        return 0
+    doc = ezdxf.readfile(path)
+    out = plan.get("fixtures") or []
+    for e in doc.modelspace().query("INSERT"):
+        if e.dxf.layer.upper() not in lays:
+            continue
+        xs, ys = [], []
+        try:
+            blk = doc.blocks[e.dxf.name]
+            for be in blk:
+                t = be.dxftype()
+                if t == "LINE":
+                    for p in (be.dxf.start, be.dxf.end):
+                        xs.append(p.x); ys.append(p.y)
+                elif t in ("CIRCLE", "ARC"):
+                    c, r = be.dxf.center, be.dxf.radius
+                    xs += [c.x - r, c.x + r]; ys += [c.y - r, c.y + r]
+                elif t == "LWPOLYLINE":
+                    for v in be.get_points("xy"):
+                        xs.append(v[0]); ys.append(v[1])
+        except Exception:
+            pass
+        if xs:
+            w, d = max(xs) - min(xs), max(ys) - min(ys)
+            ox, oy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+        else:
+            w, d, ox, oy = 24.0, 24.0, 0.0, 0.0
+        sx = getattr(e.dxf, "xscale", 1.0) or 1.0
+        sy = getattr(e.dxf, "yscale", 1.0) or 1.0
+        rot = math.radians(getattr(e.dxf, "rotation", 0.0) or 0.0)
+        ip = e.dxf.insert
+        cxr = ox * sx * math.cos(rot) - oy * sy * math.sin(rot)
+        cyr = ox * sx * math.sin(rot) + oy * sy * math.cos(rot)
+        out.append({
+            "name": e.dxf.name,
+            "center": [round(ip.x + cxr, 2), round(ip.y + cyr, 2)],
+            "size": [round(abs(w * sx), 2), round(abs(d * sy), 2)],
+            "rotation": round(math.degrees(rot), 1),
+        })
+        print(f"fixture: {e.dxf.name} @({ip.x:.1f},{ip.y:.1f})")
+    plan["fixtures"] = out
+    return len(out)
+
+
 def render_underlay(path, layers, plan, out_png, in_per_px=0.5, margin=40):
     """Rasterize the DXF geometry layers at plan scale for the viewer's
     'sheet' compare layer. Returns {file, x0, y1, in_per_px} mapping the
@@ -434,6 +486,8 @@ def main():
                     help="combined doors+windows layer(s)")
     ap.add_argument("--rmnames-layer", default="")
     ap.add_argument("--gt", default="")
+    ap.add_argument("--fixture-layers", default="",
+                    help="comma-separated INSERT layers; default 1.<floor>FURN")
     ap.add_argument("--wall-height", type=float, default=96.0)
     ap.add_argument("--underlay", default="",
                     help="also render a true-scale sheet PNG here")
@@ -548,6 +602,9 @@ def main():
 
     # treads live on the doors/windows layer; the wall layer only adds noise
     n_st = add_stairs(plan, args.input, dw.split(","), gt, stair_labels)
+
+    fx_layers = args.fixture_layers or f"1.{args.floor}FURN"
+    n_fx = add_fixtures(plan, args.input, fx_layers.split(","))
 
     spawn = default_camera(plan, (gt.get("camera") or {}).get("near"))
     if spawn:

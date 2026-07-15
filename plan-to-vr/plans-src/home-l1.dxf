@@ -493,7 +493,7 @@ $SKPOLY
   9
 $TDCREATE
  40
-2461237.2561921296
+2461237.392650463
   9
 $TDUCREATE
  40
@@ -501,7 +501,7 @@ $TDUCREATE
   9
 $TDUPDATE
  40
-2461237.2561921296
+2461237.392650463
   9
 $TDUUPDATE
  40
@@ -553,7 +553,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-100C
+101A
   9
 $SURFTAB1
  70
@@ -937,7 +937,7 @@ $FINGERPRINTGUID
   9
 $VERSIONGUID
   2
-{B3BDF1C4-E688-4C5B-AAFE-5471F6F3EDFA}
+{DACA01F9-0E4D-4DD3-ADD2-316FD8156003}
   9
 $EXTNAMES
 290
@@ -1893,7 +1893,7 @@ LAYER
 100
 AcDbSymbolTable
  70
-11
+12
   0
 LAYER
   5
@@ -2174,6 +2174,30 @@ Defpoints
 Continuous
 290
 0
+370
+-3
+390
+1D
+347
+FDD
+  0
+LAYER
+  5
+100D
+330
+2
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+1.1FURN
+ 70
+0
+ 62
+7
+  6
+Continuous
 370
 -3
 390
@@ -4293,7 +4317,7 @@ BLOCK_RECORD
 100
 AcDbSymbolTable
  70
-3
+5
   0
 BLOCK_RECORD
   5
@@ -4358,6 +4382,46 @@ ARCHSM8
 ACAD
 1000
 DATACAD SYMBOL: C:\DCAD7\SYM\SYMBOL\ARCHSM8
+  0
+BLOCK_RECORD
+  5
+100E
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+FIXT-CHUTE
+340
+0
+ 70
+0
+280
+1
+281
+0
+  0
+BLOCK_RECORD
+  5
+1012
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+FIXT-CABINET36
+340
+0
+ 70
+0
+280
+1
+281
+0
   0
 ENDTAB
   0
@@ -5286,6 +5350,146 @@ ENDBLK
 4A
 330
 2F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+100F
+330
+100E
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+FIXT-CHUTE
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+FIXT-CHUTE
+  1
+
+  0
+LWPOLYLINE
+  5
+1011
+330
+100E
+100
+AcDbEntity
+  8
+0
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 10
+-7.0
+ 20
+-9.0
+ 10
+7.0
+ 20
+-9.0
+ 10
+7.0
+ 20
+9.0
+ 10
+-7.0
+ 20
+9.0
+  0
+ENDBLK
+  5
+1010
+330
+100E
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+1013
+330
+1012
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+FIXT-CABINET36
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+FIXT-CABINET36
+  1
+
+  0
+LWPOLYLINE
+  5
+1015
+330
+1012
+100
+AcDbEntity
+  8
+0
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 10
+-12.0
+ 20
+-18.0
+ 10
+12.0
+ 20
+-18.0
+ 10
+12.0
+ 20
+18.0
+ 10
+-12.0
+ 20
+18.0
+  0
+ENDBLK
+  5
+1014
+330
+1012
 100
 AcDbEntity
   8
@@ -127935,6 +128139,46 @@ AcDbLine
  31
 0.0
   0
+INSERT
+  5
+1016
+330
+A
+100
+AcDbEntity
+  8
+1.1FURN
+100
+AcDbBlockReference
+  2
+FIXT-CHUTE
+ 10
+-91.0
+ 20
+-111.0
+ 30
+0.0
+  0
+INSERT
+  5
+1018
+330
+A
+100
+AcDbEntity
+  8
+1.1FURN
+100
+AcDbBlockReference
+  2
+FIXT-CABINET36
+ 10
+-96.5
+ 20
+-140.0
+ 30
+0.0
+  0
 ENDSEC
   0
 SECTION
@@ -136957,7 +137201,7 @@ DictionaryVariables
 280
 0
   1
-1.4.4 @ 2026-07-15T06:08:55.099183+00:00
+1.4.4 @ 2026-07-15T09:25:25.590993+00:00
   0
 ENDSEC
   0
