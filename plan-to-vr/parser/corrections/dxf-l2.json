@@ -10,6 +10,14 @@
    ],
    "type": "opening",
    "_note": "VR note #25: this wide gap the plotter drew a door leaf on is really an open cased pass-through, not a door -- render it as just an opening (owner: 'there should just be an opening')."
+  },
+  {
+   "near": [
+    -16.2,
+    32.3
+   ],
+   "head": 88,
+   "_note": "VR #52 follow-up: the plans call for a New structural beam where this wall was removed over the hallway. Raise the head above door height so the viewer renders a bare beam soffit (no door casing/jambs) instead of a cased doorway header."
   }
  ],
  "up_turns": [

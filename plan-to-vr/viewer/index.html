@@ -629,6 +629,11 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
   const mid = (lo + hi) / 2, w = hi - lo;
   const head = Math.min(op.head, H);
   const sill = op.sill;
+  // A pass-under BEAM (the plan's "New structural beam" spanning a removed
+  // wall) is an opening whose head is raised above door height. It gets the
+  // bare soffit the wall builder already makes above `head` - no door
+  // casing, no jamb boards - so it reads as a beam, not a doorway (VR #52).
+  if (op.type === 'opening' && head >= 88 * IN2M) return;
   const sideBase = sill > 0 ? sill - CW : 0;
   // vertical anchor for this opening's dressing: a door/garage bay in a
   // dropped (garage) room sits on that room's slab; windows keep their
