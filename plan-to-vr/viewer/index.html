@@ -1264,6 +1264,70 @@ function buildPlan(plan) {
           kx: cx, kz: cz, hl: t.len / 2, hd: depth / 2, top,
         });
       });
+      // UP-flight to the floor above: a first flight (drawn) climbs to a
+      // landing, then a second flight turns and climbs the rest of the way -
+      // "back" = U-turn beside the first flight (L1), "right"/"left" =
+      // quarter-turn (L2). Driven by st.up_turn from the plan (VR #58/#14).
+      let returnRect = null;
+      const ceilY = ((walls[0] && walls[0].height) || 96) * IN2M;
+      if (!st.down && st.up_turn) {
+        const last = tr[N - 1];
+        const width = last.len;                       // flight width
+        const topX = last.mx + cx * depth, topZ = last.mz + cz * depth;
+        let tx, tz;                                   // second-flight climb dir
+        if (st.up_turn === 'right') { tx = -cz; tz = cx; }
+        else if (st.up_turn === 'left') { tx = cz; tz = -cx; }
+        else { tx = -cx; tz = -cz; }                  // back (U-turn)
+        const px = -cz, pz = cx;                       // perp to first climb
+        const landY = N * riserM;
+        const cxs2 = [], czs2 = [];
+        const addStep = (mxw, mzw, yT, yB, dx, dz, w, dp) => {
+          const ax = -dz, az = dx;                     // tread long axis
+          const h = Math.max(Math.abs(yT - yB), treadThick);
+          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), stMat);
+          m.position.set(mxw, (yT + yB) / 2, mzw);
+          m.rotation.y = -Math.atan2(az, ax);
+          m.castShadow = m.receiveShadow = true;
+          group.add(m); laserTargets.push(m);
+          stairSteps.push({ cx: mxw, cz: mzw, ux: ax, uz: az, kx: dx, kz: dz,
+                            hl: w / 2, hd: dp / 2, top: yT });
+          cxs2.push(mxw - w / 2, mxw + w / 2); czs2.push(mzw - w / 2, mzw + w / 2);
+        };
+        // start of the second flight and the landing centre
+        let scx, scz, lcx, lcz, lw, ld;
+        if (st.up_turn === 'back') {                   // return flight beside, offset by width
+          scx = topX + px * width; scz = topZ + pz * width;
+          lcx = topX + cx * (depth / 2) + px * (width / 2);
+          lcz = topZ + cz * (depth / 2) + pz * (width / 2);
+          lw = width; ld = 2 * width + depth;
+        } else {                                        // quarter turn: corner landing
+          scx = topX + tx * width; scz = topZ + tz * width;
+          lcx = topX + tx * (width / 2); lcz = topZ + tz * (width / 2);
+          lw = width; ld = width;
+        }
+        // landing platform (flat, at landY)
+        const la = -pz, laz2 = px;                       // landing oriented along first climb
+        const landM = new THREE.Mesh(new THREE.BoxGeometry(
+          st.up_turn === 'back' ? width : width, treadThick,
+          st.up_turn === 'back' ? ld : width), stMat);
+        landM.position.set(lcx, landY - treadThick / 2, lcz);
+        landM.rotation.y = -Math.atan2(cx, cz);
+        landM.castShadow = landM.receiveShadow = true;
+        group.add(landM); laserTargets.push(landM);
+        stairSteps.push({ cx: lcx, cz: lcz, ux: -cz, uz: cx, kx: cx, kz: cz,
+                          hl: width / 2, hd: (st.up_turn === 'back' ? ld : width) / 2, top: landY });
+        cxs2.push(lcx - width / 2, lcx + width / 2); czs2.push(lcz - ld / 2, lcz + ld / 2);
+        // second flight
+        const n2 = Math.max(2, Math.round((ceilY - landY) / riserM));
+        const rise2 = (ceilY - landY) / n2;
+        for (let i = 1; i <= n2; i++) {
+          const yy = landY + i * rise2, yp = landY + (i - 1) * rise2;
+          const mxw = scx + tx * (i - 0.5) * depth, mzw = scz + tz * (i - 0.5) * depth;
+          addStep(mxw, mzw, yy, yp, tx, tz, width, depth);
+        }
+        returnRect = { x0: Math.min(...cxs2) - 0.06, x1: Math.max(...cxs2) + 0.06,
+                       z0: Math.min(...czs2) - 0.06, z1: Math.max(...czs2) + 0.06 };
+      }
       // opening over the travelled span (every tread past the flush one)
       const far = tr.slice(1);
       if (far.length) {
@@ -1299,6 +1363,7 @@ function buildPlan(plan) {
           }
         } else {
           roofHoles.push(rect);
+          if (returnRect) roofHoles.push(returnRect);
         }
       }
     }

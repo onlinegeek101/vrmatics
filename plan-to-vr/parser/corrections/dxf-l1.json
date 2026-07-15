@@ -62,5 +62,15 @@
    -300
   ],
   "_note": "spawn near the front entry / porch side"
- }
+ },
+ "up_turns": [
+  {
+   "near": [
+    -97,
+    -208
+   ],
+   "turn": "back",
+   "_note": "VR#14/#58: L1 up-to-L2 is a U-turn switchback -- up, landing to the west wall, then back east up to L2"
+  }
+ ]
 }

@@ -355,6 +355,21 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
                 best, bd = (qx, qy), d
         if best is not None:
             st["flush"] = [round(best[0], 1), round(best[1], 1)]
+    # second-flight turn for an up-flight that switchbacks/quarter-turns to the
+    # floor above ("back" = U-turn, "right"/"left" = quarter-turn). Supplied by
+    # the GT `up_turns` sidecar (owner read from the plan, VR notes #58/#14).
+    for oc in (gt.get("up_turns") or []):
+        nx, ny = oc["near"]
+        best, bd = None, oc.get("tol", 80)
+        for st in out:
+            poly = st["polygon"]
+            cx = sum(p[0] for p in poly) / len(poly)
+            cy = sum(p[1] for p in poly) / len(poly)
+            d = math.hypot(cx - nx, cy - ny)
+            if d < bd:
+                best, bd = st, d
+        if best is not None:
+            best["up_turn"] = oc.get("turn", "back")
     plan["stairs"] = out
     return len(out)
 

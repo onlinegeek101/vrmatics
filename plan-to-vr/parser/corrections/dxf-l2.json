@@ -4,9 +4,22 @@
  "stairs": [],
  "openings": [
   {
-   "near": [-43.3, -123.4],
+   "near": [
+    -43.3,
+    -123.4
+   ],
    "type": "opening",
    "_note": "VR note #25: this wide gap the plotter drew a door leaf on is really an open cased pass-through, not a door -- render it as just an opening (owner: 'there should just be an opening')."
+  }
+ ],
+ "up_turns": [
+  {
+   "near": [
+    -106,
+    -208
+   ],
+   "turn": "right",
+   "_note": "VR#58: L2 up-to-attic is a quarter-turn -- up, landing, then up to the right"
   }
  ]
 }
