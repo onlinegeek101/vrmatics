@@ -16,8 +16,8 @@
     -16.2,
     32.3
    ],
-   "head": 88,
-   "_note": "VR #52 follow-up: the plans call for a New structural beam where this wall was removed over the hallway. Raise the head above door height so the viewer renders a bare beam soffit (no door casing/jambs) instead of a cased doorway header."
+   "head": 96,
+   "_note": "VR #52 follow-up 2: owner wants NO header at all over the hallway - full-height opening (head = wall height renders no soffit; the New structural beam stays a plan annotation only)."
   }
  ],
  "up_turns": [
