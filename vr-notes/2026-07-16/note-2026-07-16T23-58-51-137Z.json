@@ -1,0 +1,19 @@
+{
+ "t": 1784246331137,
+ "when": "2026-07-16T23:58:51.137Z",
+ "app": "plan2vr 2026-07-13",
+ "session": "2026-07-16T23:55:23.596Z",
+ "plan": "plans/home-l2.json",
+ "plan_source": {
+  "kind": "dxf",
+  "floor": "2"
+ },
+ "x": 166.5,
+ "y": 127.8,
+ "yaw": 7.42,
+ "transcript": "",
+ "strokes": [],
+ "audio": "note-2026-07-16T23-58-51-137Z.webm",
+ "kind": "video",
+ "coords": "plan inches; strokes [x,y,heightM]"
+}
