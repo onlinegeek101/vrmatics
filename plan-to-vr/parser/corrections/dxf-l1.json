@@ -27,7 +27,7 @@
     7,
     264
    ],
-   "_note": "exterior stoop off the dining door, down to grade northward",
+   "_note": "VR #60: steps down from the dining door INTO the sunken sunroom (was: exterior stoop to grade - the sunroom exists but was not drawn on A1.1)",
    "down": true,
    "direction": [
     0,
@@ -113,6 +113,12 @@
    71,
    262,
    68
+  ],
+  [
+   -83.8,
+   -45.8,
+   -83.8,
+   57.5
   ]
  ],
  "furnishings": [
@@ -158,5 +164,13 @@
    "rotation": 0,
    "stub": "brown leather sectional sofa (photo 3611)"
   }
- ]
+ ],
+ "room_kinds": [
+  {
+   "name": "SUN ROOM",
+   "kind": "sunken",
+   "_note": "VR #60: the real (undrawn) sunroom north of the dining room sits a few steps DOWN from the main floor - the drawn tread ladder descends into it. kind sunken drops its slab to grade level like the garage."
+  }
+ ],
+ "_bridge_note": "second bridge (VR #60): pantry/bathroom divider centerline - adding the sunroom east wall shifted junction healing so the pantry loop leaked into the bathroom; pin the divider explicitly."
 }

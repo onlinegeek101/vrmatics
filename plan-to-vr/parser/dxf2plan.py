@@ -611,6 +611,19 @@ def main():
     fx_layers = args.fixture_layers or f"1.{args.floor}FURN"
     n_fx = add_fixtures(plan, args.input, fx_layers.split(","))
 
+    # explicit room-kind overrides from the GT sidecar. Used where the
+    # architectural reality isn't derivable from the label - e.g. the
+    # sunken sunroom (VR #60) whose slab sits at grade like the garage.
+    for rk in (gt.get("room_kinds") or []):
+        key = rk["name"].strip().upper()
+        n = 0
+        for r in plan["rooms"]:
+            if (r.get("name") or "").strip().upper() == key:
+                r["kind"] = rk["kind"]
+                n += 1
+        print(f"fix: room_kind {rk['name']} -> {rk['kind']} ({n})" if n
+              else f"fix: room_kind {rk['name']} UNMATCHED")
+
     # room material themes from the GT sidecar (owner's material photos).
     # Each entry: {"name": "KITCHEN"} (applies to every room with that name)
     # or {"near": [x, y], "tol": 60} (nearest room centroid), plus

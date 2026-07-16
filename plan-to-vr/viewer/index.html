@@ -1164,7 +1164,8 @@ function buildPlan(plan) {
   const hasGarage = rooms.some(r => (r.kind || '') === 'garage');
   gradeM = (footprintWorld && hasGarage) ? GRADE_M : 0;
   lowPolysWorld = gradeM
-    ? roomPolysWorld.filter((p, i) => (rooms[i].kind || '') === 'garage')
+    ? roomPolysWorld.filter((p, i) =>
+        ['garage', 'sunken'].includes(rooms[i].kind || ''))
     : [];
   ground.position.y = -gradeM - 0.025;
 
@@ -1918,10 +1919,12 @@ function buildPlan(plan) {
     geo.rotateX(-Math.PI / 2);
     const kind = r.kind || 'room';
     const mat = floorFinish(r.theme && r.theme.floor)
-      || ((kind === 'bath' || kind === 'laundry' || kind === 'mud') ? roomTileMat
+      || ((kind === 'bath' || kind === 'laundry' || kind === 'mud'
+           || kind === 'sunken') ? roomTileMat
       : (kind === 'garage') ? slabMat : roomWoodMat);
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.y = (kind === 'garage' ? -gradeM : 0) + 0.004;
+    mesh.position.y =
+      ((kind === 'garage' || kind === 'sunken') ? -gradeM : 0) + 0.004;
     mesh.receiveShadow = true;
     group.add(mesh);
     laserTargets.push(mesh);
