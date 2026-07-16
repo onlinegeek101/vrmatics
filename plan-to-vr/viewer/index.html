@@ -483,6 +483,35 @@ function fixtureMaterial(name) {
 // than featureless boxes. All local: floor at y=0, front toward +z.
 function buildFixture(f) {
   const w = f.size[0] * IN2M, d = f.size[1] * IN2M, h = (f.height || 30) * IN2M;
+  // furnishing stub: massing block + "NEED ASSET" label until a real
+  // (open-source) model is vendored for it - see tools/furnishings.md
+  if (f.stub) {
+    const g = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+      std({ color: 0xcbb28a, roughness: 0.85 }));
+    box.position.y = h / 2;
+    box.castShadow = box.receiveShadow = true;
+    g.add(box);
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 160;
+    const x = c.getContext('2d');
+    x.fillStyle = '#20242b'; x.fillRect(0, 0, 512, 160);
+    x.fillStyle = '#ffd34d'; x.font = 'bold 34px sans-serif';
+    x.fillText('NEED ASSET', 16, 46);
+    x.fillStyle = '#fff'; x.font = '22px sans-serif';
+    const words = String(f.stub).split(' '); let line = '', yy = 84;
+    for (const wd of words) {
+      if ((line + wd).length > 38) { x.fillText(line, 16, yy); yy += 28; line = ''; }
+      line += wd + ' ';
+    }
+    x.fillText(line, 16, yy);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(w, 0.9), Math.max(w, 0.9) * 160 / 512),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.DoubleSide }));
+    plate.position.set(0, h + 0.25, 0);
+    g.add(plate);
+    laserTargets.push(box);
+    return g;
+  }
   const name = (f.name || '').split('$').pop().toUpperCase();
   const g = new THREE.Group();
   const add = (geo, mat, x, y, z) => {

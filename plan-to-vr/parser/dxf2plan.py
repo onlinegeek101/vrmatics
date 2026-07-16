@@ -662,6 +662,13 @@ def main():
         except Exception:
             pass
 
+    # homeowner-specified furnishings (fireplaces, cubbies...) ride the
+    # fixtures pipeline: placement, rendering, and collision for free.
+    # Entries without a vendored asset carry stub:"label" and render as a
+    # labeled massing block in the viewer.
+    for f in gt.get("furnishings", []):
+        plan.setdefault("fixtures", []).append(dict(f))
+
     if gt.get("palette"):
         plan["palette"] = gt["palette"]
     plan["source"] = {"kind": "dxf", "floor": args.floor}

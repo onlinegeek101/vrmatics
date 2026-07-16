@@ -114,5 +114,49 @@
    262,
    68
   ]
+ ],
+ "furnishings": [
+  {
+   "name": "FURN-FIREPLACE",
+   "center": [
+    246,
+    -25
+   ],
+   "size": [
+    30,
+    70
+   ],
+   "height": 96,
+   "rotation": 0,
+   "stub": "two-sided fireplace living/sunroom: cherry paneled surround, slate arch face, copper hood (photo 3611); fieldstone + oak mantel option (photo 3610)"
+  },
+  {
+   "name": "FURN-CUBBIES",
+   "center": [
+    -284,
+    -50
+   ],
+   "size": [
+    14,
+    60
+   ],
+   "height": 84,
+   "rotation": 0,
+   "stub": "stained-pine mudroom cubbies with bench and hooks (photo 3602)"
+  },
+  {
+   "name": "FURN-SOFA",
+   "center": [
+    120,
+    -180
+   ],
+   "size": [
+    90,
+    40
+   ],
+   "height": 32,
+   "rotation": 0,
+   "stub": "brown leather sectional sofa (photo 3611)"
+  }
  ]
 }
