@@ -113,16 +113,17 @@
   {
    "name": "FURN-FIREPLACE",
    "center": [
-    246,
-    -25
+    262,
+    -184
    ],
    "size": [
-    30,
-    70
+    55,
+    54
    ],
    "height": 96,
    "rotation": 0,
-   "stub": "two-sided fireplace living/sunroom: cherry paneled surround, slate arch face, copper hood (photo 3611); fieldstone + oak mantel option (photo 3610)"
+   "stub": "two-sided fireplace living/sunroom: cherry paneled surround, slate arch face, copper hood (photo 3611); fieldstone + oak mantel option (photo 3610)",
+   "_placement": "DXF-authoritative: the two hatched masses on 1.1DRWDWS x[234,289] y[-215,-153] straddling the living/sunroom wall"
   },
   {
    "name": "FURN-CUBBIES",
