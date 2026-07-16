@@ -78,6 +78,12 @@
     border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
     font: 13px system-ui, sans-serif; cursor: pointer;
   }
+  #home-btn {
+    position: fixed; top: 12px; right: 200px; z-index: 40;
+    background: rgba(20,24,34,.85); color: #dfe6f3;
+    border: 1px solid #39415a; border-radius: 8px; padding: 8px 12px;
+    font: 13px system-ui, sans-serif; cursor: pointer;
+  }
   #notes-panel {
     position: fixed; top: 52px; right: 96px; z-index: 40; width: 340px;
     max-height: 60vh; overflow-y: auto; background: rgba(20,24,34,.95);
@@ -128,7 +134,7 @@
   <div class="row"><span>fixtures</span><span id="hud-fixtures">0</span></div>
   <div class="row"><span>rooms</span><span id="hud-rooms">0</span></div>
   <div class="warn" id="hud-warn"></div>
-  <div class="keys">WASD move · mouse look · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · hold <b>V</b> voice note · drag-drop a plan.json</div>
+  <div class="keys">WASD move · mouse look · <b>click</b> a door/furniture to restyle or swap its model · <b>C</b> ceiling · <b>F</b> furniture · <b>T</b> auto tour · <b>M</b> plan view · <b>1/2/3</b> 3D/lines/sheet layers · hold <b>V</b> voice note · <b>⌂</b> return to start · drag-drop a plan.json</div>
 </div>
 
 <div id="drop-hint">drop a plan.json anywhere to load it</div>
@@ -139,6 +145,7 @@
 <button id="map-btn" title="top-down plan view (M)">▦ plan</button>
 <button id="notes-btn" title="voice notes (hold V or left trigger to record)">🎤 0</button>
 <button id="issue-btn" title="file a GitHub issue from right here (X in VR)">⚑</button>
+<button id="home-btn" title="return to start">⌂</button>
 <div id="notes-panel" hidden></div>
 <div id="map-layers" hidden>
   <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
@@ -2399,7 +2406,8 @@ if (IS_TOUCH) {
   const touchHelp =
     '<b>move your phone</b> to look around · <b>2-finger pan</b> move · ' +
     '<b>pinch</b> walk forward/back · <b>double-tap</b> auto walkthrough · ' +
-    '<b>long-press</b> return to start';
+    '<b>long-press</b> a door/furniture to restyle or swap its model · ' +
+    '<b>⌂</b> return to start';
   document.getElementById('overlay-help').innerHTML = touchHelp;
   document.querySelector('#hud .keys').innerHTML = touchHelp;
 }
@@ -2413,7 +2421,8 @@ overlay.addEventListener('click', () => {
 controls.addEventListener('lock', () => overlay.style.display = 'none');
 controls.addEventListener('unlock', () => {
   const dm = document.getElementById('door-menu');
-  if (dm && !dm.hidden) return;      // per-door style picker owns the cursor
+  const fm = document.getElementById('fixt-menu');
+  if ((dm && !dm.hidden) || (fm && !fm.hidden)) return;   // a picker owns the cursor
   if (!renderer.xr.isPresenting && !mapMode) overlay.style.display = 'flex';
 });
 
@@ -3280,6 +3289,7 @@ function toggleMap(on) {
   document.getElementById('map-layers').hidden = !mapMode;
 }
 document.getElementById('map-btn').addEventListener('click', () => toggleMap());
+document.getElementById('home-btn').addEventListener('click', () => resetToStart());
 
 addEventListener('wheel', e => {
   if (!mapMode) return;
@@ -3504,8 +3514,18 @@ function cancelLongPress() {
 
 const el = renderer.domElement;
 let lastTap = { t: 0, x: 0, y: 0 };
+function closeCtxMenus() {
+  for (const id of ['door-menu', 'fixt-menu']) {
+    const m = document.getElementById(id);
+    if (m) { m.hidden = true; m.style.display = 'none'; }
+  }
+}
+function ctxOpen() {
+  return window.PLAN2VR_CTX ? window.PLAN2VR_CTX.ctxMenuOpen() : false;
+}
 el.addEventListener('pointerdown', e => {
   if (e.pointerType !== 'touch' || renderer.xr.isPresenting) return;
+  if (ctxOpen()) { closeCtxMenus(); return; }   // tap behind an open picker dismisses it
   touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   touch.lastCentroid = null;
   touch.lastDist = null;
@@ -3522,7 +3542,13 @@ el.addEventListener('pointerdown', e => {
     }
     lastTap = { t: now, x: e.clientX, y: e.clientY };
     touch.startXY = { x: e.clientX, y: e.clientY };
-    touch.longPress = setTimeout(() => { touch.longPress = null; resetToStart(); }, 650);
+    // long-press a door/fixture -> its picker (the asset wheel, outside VR).
+    // "return to start" moved to the ⌂ HUD button (it used to live here).
+    touch.longPress = setTimeout(() => {
+      touch.longPress = null;
+      if (window.PLAN2VR_CTX && touch.startXY)
+        window.PLAN2VR_CTX.openContextAtScreen(touch.startXY.x, touch.startXY.y);
+    }, 550);
   } else {
     cancelLongPress();
   }
@@ -3530,6 +3556,7 @@ el.addEventListener('pointerdown', e => {
 
 el.addEventListener('pointermove', e => {
   if (e.pointerType !== 'touch' || !touch.pts.has(e.pointerId)) return;
+  if (ctxOpen()) return;             // a picker is up: don't steer the camera behind it
   const prev = touch.pts.get(e.pointerId);
   touch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -4715,16 +4742,25 @@ function fixtureWheelPick() {
   return hit ? hit.object.userData.wheelId : null;
 }
 
-// commit a wheel choice to a fixture. Exposed so headless/2D can drive the
-// exact same path VR uses (WebXR can't run in a headless browser).
-function commitFixtureAsset(key, id) {
+// store a wheel/menu choice for a fixture (persist only). Returns false for
+// the no-op picks (cancel / nothing) so callers can skip the rebuild.
+function applyFixtureOverride(key, id) {
   if (id === '_cancel' || id == null) return false;
   if (id === '_default') delete perFixtureAssets[key];
   else if (id === '_schematic') perFixtureAssets[key] = '__none__';
   else perFixtureAssets[key] = id;
   localStorage.setItem('plan2vr-fixture-assets:' + currentPlanKey,
     JSON.stringify(perFixtureAssets));
-  pendingPlanRebuild = currentPlanKey;   // defer; rebuilding mid-XR-frame crashes the session
+  return true;
+}
+// VR wheel path. Inside an XR session the rebuild must wait for frame-top
+// (rebuilding mid-XR-frame crashes the session); outside XR (desktop /
+// headless) rebuild immediately, same as the 2D menu. Exposed so headless
+// can drive the exact same path.
+function commitFixtureAsset(key, id) {
+  if (!applyFixtureOverride(key, id)) return false;
+  if (renderer.xr.isPresenting) pendingPlanRebuild = currentPlanKey;
+  else fetchPlan(currentPlanKey);
   return true;
 }
 
@@ -5165,17 +5201,89 @@ doorStyle = localStorage.getItem('plan2vr-door-style') || 'raised6';
       if (!IS_TOUCH) controls.lock();
     };
   }
+  // per-fixture asset picker (the VR asset wheel, outside VR). Same idea as
+  // the door menu: pick a vendored model, "schematic" to force the outline
+  // render, or "use default" to drop the override - persisted per fixture,
+  // per plan. On desktop it opens on a crosshair-click; on touch, a
+  // long-press on the fixture (see the touch handler).
+  const fmenu = document.createElement('div');
+  fmenu.id = 'fixt-menu';
+  fmenu.hidden = true;
+  fmenu.style.cssText = menu.style.cssText;      // same look as the door menu
+  document.body.appendChild(fmenu);
+  function openFixtureMenu(key, name) {
+    const cur = perFixtureAssets[key];
+    const curId = cur === undefined ? '_default' : cur === '__none__' ? '_schematic' : cur;
+    const btn = (val, label, span) =>
+      `<button data-a="${val}" style="${span ? 'grid-column:1/-1;' : ''}padding:6px;` +
+      `border-radius:6px;border:1px solid #39435a;color:inherit;cursor:pointer;` +
+      `background:${val === curId ? '#2b6cb0' : '#232936'}">${label}</button>`;
+    fmenu.innerHTML = `<b style="grid-column:1/-1">${name || 'fixture'} — model</b>` +
+      ASSET_LIST.map(a => btn(a.id, a.label)).join('') +
+      btn('_schematic', 'schematic (outline)') +
+      btn('_default', 'use default', true) +
+      btn('_cancel', 'cancel', true);
+    fmenu.hidden = false;
+    fmenu.style.display = 'grid';
+    for (const b of fmenu.querySelectorAll('button')) b.onclick = () => {
+      const changed = applyFixtureOverride(key, b.dataset.a);
+      fmenu.hidden = true; fmenu.style.display = 'none';
+      if (changed) fetchPlan(currentPlanKey);
+      if (!IS_TOUCH && !renderer.xr.isPresenting) controls.lock();
+    };
+  }
+
+  // resolve a screen ray (NDC) to a door or fixture under it, nearest first
+  function contextPick(ndcX, ndcY) {
+    if (!planGroup) return null;
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    for (const hit of rc.intersectObjects(planGroup.children, true)) {
+      if (hit.distance > 4.5) break;             // out of arm's reach
+      let n = hit.object;
+      while (n && n !== planGroup &&
+             !(n.userData && (n.userData.doorKey || n.userData.fixtureKey))) n = n.parent;
+      if (n && n.userData && n.userData.doorKey)
+        return { kind: 'door', key: n.userData.doorKey };
+      if (n && n.userData && n.userData.fixtureKey)
+        return { kind: 'fixture', key: n.userData.fixtureKey, name: n.userData.fixtureName };
+    }
+    return null;
+  }
+  function ctxMenuOpen() { return !menu.hidden || !fmenu.hidden; }
+  function openContextFor(hit) {
+    if (hit.kind === 'door') openDoorMenu(hit.key);
+    else openFixtureMenu(hit.key, hit.name);
+  }
+  // desktop: crosshair (screen centre) while pointer-locked
+  function openContextCenter() {
+    const hit = contextPick(0, 0);
+    if (!hit) return false;
+    controls.unlock();
+    openContextFor(hit);
+    return true;
+  }
+  // touch: the point the finger is held on
+  function openContextAtScreen(clientX, clientY) {
+    const r = renderer.domElement.getBoundingClientRect();
+    const hit = contextPick(((clientX - r.left) / r.width) * 2 - 1,
+                            -((clientY - r.top) / r.height) * 2 + 1);
+    if (!hit) { toast('nothing to change here'); return false; }
+    openContextFor(hit);
+    return true;
+  }
+  window.PLAN2VR_CTX = { openContextCenter, openContextAtScreen, contextPick,
+    openFixtureMenu, openDoorMenu, ctxMenuOpen };
+  window.PLAN2VR_FIXT.openFixtureMenu = openFixtureMenu;
+
   addEventListener('mousedown', e => {
     if (!document.pointerLockElement || e.button !== 0 || !planGroup) return;
-    const rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const hit = rc.intersectObjects(planGroup.children, true)[0];
-    if (!hit || hit.distance > 4.5) return;      // nothing near the crosshair
-    let n = hit.object;
-    while (n && n !== planGroup && !(n.userData && n.userData.doorKey)) n = n.parent;
-    if (n && n.userData && n.userData.doorKey) {
-      controls.unlock();
-      openDoorMenu(n.userData.doorKey);
+    openContextCenter();                         // door OR fixture under the crosshair
+  });
+  addEventListener('keydown', e => {             // Esc closes an open picker
+    if (e.code === 'Escape' && ctxMenuOpen()) {
+      menu.hidden = fmenu.hidden = true;
+      menu.style.display = fmenu.style.display = 'none';
     }
   });
 }
