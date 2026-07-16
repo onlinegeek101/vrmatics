@@ -581,6 +581,10 @@ def main():
             if abs(gx * pax[0] + gy * pax[1]) < 0.9:
                 continue          # ends are beside each other, not in line
             ads.append(_adapt(p, q, min(pth, qth)))
+    # explicit GT bridges for corners the polygonizer misses (e.g. the
+    # living/sunroom divider's top corner) - [[x0,y0,x1,y1], ...]
+    for seg in gt.get("room_bridges", []):
+        ads.append(_adapt((seg[0], seg[1]), (seg[2], seg[3]), 4.0))
     rooms2 = X.detect_rooms(ads, plan.get("fixtures", []),
                             plan.setdefault("warnings", []))
     if len(rooms2) >= len(plan.get("rooms", [])):

@@ -104,6 +104,15 @@
  ],
  "palette": {
   "PLAY ROOM": "#b9c445",
-  "_note": "owners' accents from current-house photos; walls default to sage-olive globally"
- }
+  "_note": "accents from owners' current house: chartreuse playroom, deep-teal sunroom (their 'reading room')",
+  "SUNROOM": "#3f5661"
+ },
+ "room_bridges": [
+  [
+   259,
+   71,
+   262,
+   68
+  ]
+ ]
 }
