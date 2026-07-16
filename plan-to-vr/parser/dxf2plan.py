@@ -745,6 +745,31 @@ def main():
         plan["fixtures"] = [f for i, f in enumerate(fx) if keep[i]]
         report.setdefault("fixture_dedup", dropped)
 
+    # Vendored 3D models attach by location so they survive regeneration:
+    # a GT entry {"near":[x,y], "asset":"assets/sofa.glb"} tags the nearest
+    # surviving fixture with an `asset` path. The viewer loads that GLB at
+    # runtime, scales it to the fixture footprint, and falls back to the
+    # schematic render if it can't (missing file / blocked host). Placement
+    # stays DXF-authoritative - the model only replaces how the item looks.
+    for a in gt.get("assets", []):
+        nx, ny = a["near"]
+        cand = [f for i, f in enumerate(plan.get("fixtures", []))]
+        if not cand:
+            print("fix: asset UNMATCHED (no fixtures)")
+            continue
+        tgt = min(cand, key=lambda f: math.hypot(
+            f["center"][0] - nx, f["center"][1] - ny))
+        d = math.hypot(tgt["center"][0] - nx, tgt["center"][1] - ny)
+        tol = a.get("tol", 60.0)
+        if d <= tol:
+            tgt["asset"] = a["asset"]
+            if "rotation" in a:            # reorient a model to face the room
+                tgt["rotation"] = a["rotation"]
+            print(f"fix: asset {a['asset']} -> {tgt['name']} ({d:.0f}in)")
+        else:
+            print(f"fix: asset {a['asset']} UNMATCHED "
+                  f"(nearest {tgt['name']} {d:.0f}in > {tol:.0f})")
+
     if gt.get("palette"):
         plan["palette"] = gt["palette"]
     plan["source"] = {"kind": "dxf", "floor": args.floor}

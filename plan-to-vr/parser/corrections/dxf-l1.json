@@ -7096,5 +7096,16 @@
    },
    "_note": "owner: level with main floor (NOT sunken), laminate wood floor, white walls; north wall pushed 48in out"
   }
+ ],
+ "assets": [
+  {
+   "near": [
+    142,
+    -256
+   ],
+   "asset": "assets/sofa.glb",
+   "rotation": 0,
+   "_note": "leather sectional, living-room south wall; demo of runtime GLB pipeline (#61)"
+  }
  ]
 }
