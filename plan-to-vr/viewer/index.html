@@ -520,6 +520,8 @@ const gltfLoader = new GLTFLoader();
 // through the ceiling. Seated on the floor. Anything that fails to load
 // (missing file, blocked host) falls back to the schematic render below.
 function loadAssetInto(g, f, w, d, h) {
+  const remote = /^https?:/i.test(f.asset);       // a catalog URL, not a repo file
+  if (remote && typeof toast === 'function') toast('downloading model…');
   gltfLoader.load(f.asset, (gltf) => {
     const model = gltf.scene;
     let bb = new THREE.Box3().setFromObject(model);
@@ -4357,7 +4359,7 @@ function handleVRInput() {
           else {                        // no door under the beam? try a fixture
             const fh = laserFixtureHit();
             if (fh) { fixtureHold.key = fh.key; fixtureHold.node = fh.node;
-                      fixtureHold.t = 0; doorGlowOn(fh.node); }
+                      fixtureHold.name = fh.name; fixtureHold.t = 0; doorGlowOn(fh.node); }
           }
         }
         if (doorHold.key || fixtureHold.key) { laserCast(); }
@@ -4663,16 +4665,55 @@ Object.assign(window.PLAN2VR_DRAW, { openDoorWheel, closeDoorWheel, doorWheel,
 // vendored GLB models pops (+ "schematic" to force the DXF-outline render,
 // "use default" to drop the override, "cancel"). Pick one and THAT fixture
 // alone re-renders, persisted per plan in localStorage. Placement is never
-// touched - only which model draws at the fixture's spot. The asset list is
-// sourced from assets/assets.json so it can grow without code changes.
-let ASSET_LIST = [{ id: 'assets/sofa.glb', label: 'leather sofa', icon: 'sofa' }];
+// touched - only which model draws at the fixture's spot. The catalog is a
+// checked-in, tag-based manifest (assets/assets.json): each entry has an
+// `id` (a repo path OR any URL) and `tags`, and a fixture only surfaces the
+// models whose tags match its kind - so a fridge offers fridges, a sofa
+// offers sofas. `id` can point at a remote GLB (fetched on demand); host it
+// somewhere public + CORS-enabled, and check the license into CREDITS.md.
+let ASSET_LIST = [{ id: 'assets/sofa.glb', label: 'leather sofa', icon: 'sofa',
+  tags: ['sofa', 'seating', 'drawn'] }];
 fetch('assets/assets.json', { cache: 'no-store' })
   .then(r => (r.ok ? r.json() : null))
   .then(list => { if (Array.isArray(list) && list.length) ASSET_LIST = list; })
   .catch(() => {});
 
+// map a fixture name (FURN-FRIDGE, FURN-DRAWN...) to the catalog tags that
+// are relevant to it. Generic DRWDWS-drawn furniture ("FURN-DRAWN") is
+// living-room seating/tables, so it offers those.
+function fixtureTags(name) {
+  const n = (name || '').toUpperCase();
+  const t = new Set(['any']);
+  const has = s => n.includes(s), add = (...xs) => xs.forEach(x => t.add(x));
+  if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) add('sofa', 'seating');
+  if (has('CHAIR') || has('RECLIN')) add('chair', 'seating');
+  if (has('TABLE') || has('DESK')) add('table');
+  if (has('BED')) add('bed');
+  if (has('DRAWN')) add('seating', 'table', 'furniture');   // generic drawn piece
+  if (has('FRIDGE') || has('REFRIG')) add('fridge', 'appliance');
+  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) add('range', 'appliance');
+  if (has('DISHWASH')) add('dishwasher', 'appliance');
+  if (has('WASHER')) add('washer', 'appliance');
+  if (has('DRYER')) add('dryer', 'appliance');
+  if (has('TOILET') || has('WC')) add('toilet', 'bath');
+  if (has('SHOWER') || has('TUB') || has('BATH')) add('shower', 'tub', 'bath');
+  if (has('VANITY') || has('SINK') || has('LAV')) add('sink', 'vanity', 'bath');
+  if (has('ISLAND') || has('COUNTER') || has('CAB')) add('cabinet', 'counter', 'kitchen');
+  if (has('FIRE')) add('fireplace');
+  return t;
+}
+// catalog entries relevant to this fixture: tag overlap only, so a fixture
+// surfaces its own kind of model and nothing else. An untagged entry counts
+// as generic ("any") and always shows; if nothing matches, the menu shows
+// its empty-state rather than an irrelevant model.
+function assetsForFixture(name) {
+  const tags = fixtureTags(name);
+  return ASSET_LIST.filter(a => !a.tags || a.tags.length === 0
+    || a.tags.some(x => tags.has(x)));
+}
+
 const fixtureWheel = { stage: 0, group: null, items: [], key: null, prevTrig: false };
-const fixtureHold = { key: null, node: null, t: 0 };
+const fixtureHold = { key: null, node: null, name: null, t: 0 };
 
 function paintSofaIcon(x, X, Y, W, H) {
   x.fillStyle = '#20242e'; x.fillRect(X, Y, W, H);
@@ -4706,8 +4747,8 @@ function laserFixtureHit() {
   return null;
 }
 
-function fixtureAssetItems() {
-  return [...ASSET_LIST,
+function fixtureAssetItems(name) {
+  return [...assetsForFixture(name).map(a => Object.assign({}, a)),
     { id: '_schematic', label: 'schematic', meta: true },
     { id: '_default', label: 'use default', meta: true },
     { id: '_cancel', label: 'cancel', meta: true }];
@@ -4786,7 +4827,7 @@ function fixtureHoldTick(trigV) {
   if (trigV < 0.4) { fixtureHold.key = null; fixtureHold.t = 0; doorGlowOff(); return; }
   fixtureHold.t += vrDt;
   if (fixtureHold.t >= 0.45) {
-    openFixtureWheel(fixtureHold.key, fixtureAssetItems());
+    openFixtureWheel(fixtureHold.key, fixtureAssetItems(fixtureHold.name));
     fixtureWheel.stage = 1;
     fixtureWheel.prevTrig = true;     // require a fresh trigger pull to select
     fixtureHold.key = null; fixtureHold.t = 0;
@@ -4796,6 +4837,7 @@ function fixtureHoldTick(trigV) {
 window.PLAN2VR_FIXT = {
   openFixtureWheel, closeFixtureWheel, fixtureWheel, fixtureWheelPick,
   laserFixtureHit, commitFixtureAsset, fixtureAssetItems,
+  fixtureTags, assetsForFixture,
   get assetList() { return ASSET_LIST; },
   get overrides() { return perFixtureAssets; },
   // inspect the live scene: list fixtures with key/name/effective-asset
@@ -5226,8 +5268,10 @@ doorStyle = localStorage.getItem('plan2vr-door-style') || 'raised6';
       `<button data-a="${val}" style="${span ? 'grid-column:1/-1;' : ''}padding:6px;` +
       `border-radius:6px;border:1px solid #39435a;color:inherit;cursor:pointer;` +
       `background:${val === curId ? '#2b6cb0' : '#232936'}">${label}</button>`;
+    const cands = assetsForFixture(name);
     fmenu.innerHTML = `<b style="grid-column:1/-1">${name || 'fixture'} — model</b>` +
-      ASSET_LIST.map(a => btn(a.id, a.label)).join('') +
+      (cands.length ? cands.map(a => btn(a.id, a.label)).join('')
+        : '<span style="grid-column:1/-1;color:#9aa4b8">no models tagged for this fixture yet</span>') +
       btn('_schematic', 'schematic (outline)') +
       btn('_default', 'use default', true) +
       btn('_cancel', 'cancel', true);

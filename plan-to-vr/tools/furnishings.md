@@ -42,16 +42,53 @@ fixtures pipeline - placement, rendering, collision. Two tiers:
    download real models OUTSIDE the sandbox; the seed `sofa.glb` (leather
    sectional, living room) is authored in-repo as the pipeline demo.
 
-   **Swapping a model in VR (per-fixture, no rebuild).** Mirrors the
-   door-style wheel: hold the right trigger with the laser on a furniture
-   fixture -> a wheel of models (from `assets/assets.json`) plus
-   *schematic* (force the DXF-outline render), *use default* (drop the
-   override), and *cancel*. Picking one re-renders just that fixture and
-   persists per plan in `localStorage` (`plan2vr-fixture-assets:<plan>`) -
-   the GT `assets` list stays the authoritative baseline; the wheel is a
-   walkthrough-time override on top of it. Exposed on `window.PLAN2VR_FIXT`
-   (`commitFixtureAsset`, `fixtures()`, `openFixtureWheel`...) so the swap
-   is scriptable/headless-testable (WebXR can't run headless).
+   **Swapping a model at a fixture (per-fixture, no rebuild).** Point at a
+   furniture fixture and open its picker - hold the right trigger on it in
+   VR (wheel), crosshair-click it on desktop, or long-press it on touch
+   (2D menu). The picker offers the catalog models **relevant to that
+   fixture** (see the tag catalog below) plus *schematic* (force the
+   DXF-outline render), *use default* (drop the override), and *cancel*.
+   Picking one re-renders just that fixture and persists per plan in
+   `localStorage` (`plan2vr-fixture-assets:<plan>`) - the GT `assets` list
+   stays the authoritative baseline; the picker is a walkthrough-time
+   override on top of it. Exposed on `window.PLAN2VR_FIXT`
+   (`commitFixtureAsset`, `openFixtureMenu`, `fixtures()`,
+   `assetsForFixture`...) so the swap is scriptable / headless-testable
+   (WebXR can't run headless).
+
+   **The tag catalog (`viewer/assets/assets.json`).** A checked-in list of
+   candidate models; each fixture surfaces only the entries whose `tags`
+   overlap its kind (fridge->fridges, sofa->sofas; an untagged entry is
+   generic and always offered). `id` is a repo path OR any URL - a URL is
+   fetched **on demand** the first time that model is picked.
+
+   ```json
+   [
+    {"id": "assets/sofa.glb", "label": "leather sofa", "icon": "sofa",
+     "tags": ["sofa","seating","drawn"], "license": "CC0-1.0"}
+   ]
+   ```
+
+   Fixture->tag mapping lives in `fixtureTags()` in the viewer (derived
+   from the fixture name: `FURN-FRIDGE`->fridge, `FURN-TOILET`->toilet,
+   generic `FURN-DRAWN`->seating/table...). Add tags there when you add a
+   new fixture kind.
+
+   **Curating models (e.g. Meshy free / Poly Haven / Kenney).** For each
+   model: (1) confirm the license permits **redistribution** (repo is
+   public) and record it in `CREDITS.md`; (2) add a catalog entry with the
+   right `tags`. On the `id`:
+   - **Local file (recommended, most robust):** commit the `.glb` under
+     `viewer/assets/` and point `id` at it. No CORS/expiry/auth risk.
+   - **Remote URL:** only if the host serves the raw `.glb` **publicly with
+     CORS** and a stable link. Note: Meshy's *free/community library*
+     downloads are **account-gated and quota-limited** - those URLs are
+     behind a login (signed/expiring), so they will 403 when hotlinked from
+     the page; download the GLB (signed in) and commit it as a local file
+     instead. Meshy's *generation API* is a different thing (bearer key,
+     paid Pro tier, async) and can't be called from this static public page
+     without a key-holding proxy - do NOT put an API key in the repo.
+   Keep each GLB Quest-friendly: < ~2 MB, < ~50k tris.
 2. **Stub block**: no good open-source match yet -> `"stub": "<label>"`
    renders a massing box with a floating NEED-ASSET label naming what to
    find (and which inspiration photo it matches). The living-room leather

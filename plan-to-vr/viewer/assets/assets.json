@@ -1,3 +1,10 @@
 [
- { "id": "assets/sofa.glb", "label": "leather sofa", "icon": "sofa" }
+ {
+  "id": "assets/sofa.glb",
+  "label": "leather sofa",
+  "icon": "sofa",
+  "tags": ["sofa", "seating", "drawn"],
+  "source": "authored in-repo (trimesh)",
+  "license": "CC0-1.0"
+ }
 ]
