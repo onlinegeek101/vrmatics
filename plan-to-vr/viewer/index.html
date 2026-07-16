@@ -740,6 +740,19 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
     if (w > 30 * IN2M) {  // center mullion on wide windows
       boxOnWall(group, worldStart, dir, angle, mid, 1 * IN2M, (sill + head) / 2, head - sill, 0, depth * 0.4, trimMat);
     }
+    // prairie grille (the owner's windows throughout): one slim border bar
+    // ring inset from the frame - small marginal lites around a large clear
+    // center. A single ring across the whole window (not per sash) keeps
+    // narrow double-hung pairs from reading as bars.
+    const GB = 0.5 * IN2M, GIN = 4.5 * IN2M;
+    if (w >= 4 * GIN && head - sill >= 4 * GIN) {
+      for (const a of [lo + FT + GIN, hi - FT - GIN])   // vertical bars
+        boxOnWall(group, worldStart, dir, angle, a, GB,
+          (sill + head) / 2, head - sill - 2 * FT, 0, depth * 0.35, trimMat);
+      for (const yy of [sill + FT + GIN, head - FT - GIN]) // horizontal bars
+        boxOnWall(group, worldStart, dir, angle, mid, w - 2 * FT,
+          yy, GB, 0, depth * 0.35, trimMat);
+    }
     const glass = new THREE.Mesh(
       new THREE.BoxGeometry(w - 2 * FT, head - sill - 2 * FT, 0.25 * IN2M), glassMat);
     glass.position.set(
