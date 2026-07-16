@@ -936,6 +936,246 @@
    "height": 32,
    "rotation": 0,
    "stub": "brown leather sectional sofa (photo 3611)"
+  },
+  {
+   "name": "FURN-ISLAND",
+   "center": [
+    88,
+    -1
+   ],
+   "size": [
+    96,
+    42
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "3'6\" x 8' island (DXF note label)"
+  },
+  {
+   "name": "FURN-RANGE",
+   "center": [
+    169,
+    30
+   ],
+   "size": [
+    30,
+    26
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "36\" gas range (DXF note label)"
+  },
+  {
+   "name": "FURN-SINK",
+   "center": [
+    216,
+    4
+   ],
+   "size": [
+    30,
+    22
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "SInk (DXF note label)"
+  },
+  {
+   "name": "FURN-DISHWASHER",
+   "center": [
+    218,
+    -34
+   ],
+   "size": [
+    24,
+    24
+   ],
+   "height": 34.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "DW (DXF note label)"
+  },
+  {
+   "name": "FURN-COFFEE-BAR",
+   "center": [
+    22,
+    -94
+   ],
+   "size": [
+    24,
+    16
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "Coffee (DXF note label)"
+  },
+  {
+   "name": "FURN-BROOM-CAB",
+   "center": [
+    8,
+    -11
+   ],
+   "size": [
+    16,
+    24
+   ],
+   "height": 84.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "16\" Broom cab. (DXF note label)"
+  },
+  {
+   "name": "FURN-SINK",
+   "center": [
+    -215,
+    -168
+   ],
+   "size": [
+    30,
+    22
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "Sink (DXF note label)"
+  },
+  {
+   "name": "FURN-SINK",
+   "center": [
+    -182,
+    -153
+   ],
+   "size": [
+    30,
+    22
+   ],
+   "height": 36.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "Sink (DXF note label)"
+  },
+  {
+   "name": "FURN-WASHER",
+   "center": [
+    -109,
+    -176
+   ],
+   "size": [
+    27,
+    27
+   ],
+   "height": 38.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "Washer (DXF note label)"
+  },
+  {
+   "name": "FURN-DRYER",
+   "center": [
+    -135,
+    -175
+   ],
+   "size": [
+    27,
+    27
+   ],
+   "height": 38.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "Dryer (DXF note label)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    327,
+    -28
+   ],
+   "size": [
+    138,
+    123
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    -18,
+    -266
+   ],
+   "size": [
+    42,
+    44
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    -388,
+    29
+   ],
+   "size": [
+    61,
+    28
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    48,
+    152
+   ],
+   "size": [
+    42,
+    68
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    134,
+    152
+   ],
+   "size": [
+    42,
+    68
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
+  },
+  {
+   "name": "FURN-DRAWN",
+   "center": [
+    142,
+    -256
+   ],
+   "size": [
+    84,
+    30
+   ],
+   "height": 30.0,
+   "rotation": 0,
+   "auto": true,
+   "stub": "furniture drawn on the sheet (unlabeled linework)"
   }
  ],
  "rooms": [
