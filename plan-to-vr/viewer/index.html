@@ -2030,27 +2030,13 @@ function buildPlan(plan) {
     // room lays its own slab down at grade in the per-room loop below
     const floorShape = new THREE.Shape(
       footprintWorld.map(([fx, fz]) => new THREE.Vector2(fx, -fz)));
-    if (lowPolysWorld.length) {
-      const outerCCW = THREE.ShapeUtils.area(floorShape.getPoints()) > 0;
-      for (const poly of lowPolysWorld) {
-        // The garage sits ON the building perimeter, so its cutout shares
-        // edges with the outer contour - which breaks the triangulator
-        // (holes must be strictly interior) and spat out a big spanning
-        // triangle floating over the sunken slab (VR #44 "stupid plane").
-        // Inset each low hole ~5cm toward its own centroid so it never
-        // touches the outer boundary; the sliver hides under the wall.
-        const hcx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
-        const hcz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
-        const pts = poly.map(([hx, hz]) => {
-          const dx = hx - hcx, dz = hz - hcz, L = Math.hypot(dx, dz) || 1;
-          return new THREE.Vector2(hx - dx / L * 0.05, -(hz - dz / L * 0.05));
-        });
-        if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
-        const hole = new THREE.Path();
-        hole.setFromPoints(pts);
-        floorShape.holes.push(hole);
-      }
-    }
+    // NOTE: the garage/sunken slabs are NOT cut as holes here. They sit ON the
+    // building perimeter, so their cutouts share edges with the outer contour;
+    // earcut can't cut a boundary-touching hole and bridged it to a far corner,
+    // spitting out a big spanning triangle floating over the slab (VR #44/#66
+    // "stupid plane"). Insetting the hole only shrank the bridge, didn't remove
+    // it. Instead the low regions are carved AFTER triangulation, by dropping
+    // any slab triangle whose centroid lands over a sunken poly (see below).
     // down-stair openings punch through the footprint floor too
     for (const hr of floorHoles) {
       const pts = [
@@ -2088,6 +2074,37 @@ function buildPlan(plan) {
     }
     const geo = new THREE.ShapeGeometry(floorShape);
     geo.rotateX(-Math.PI / 2);
+    // carve the sunken (garage) regions out of the finished-floor slab by
+    // discarding triangles that sit over them. After rotateX(-90) a vertex
+    // (sx, sy, 0) lands at world (sx, 0, -sy), so position.x/z are world XZ and
+    // can be tested directly against lowPolysWorld. A triangle is dropped when
+    // a majority of its {centroid, 3 edge-midpoints} samples fall inside a low
+    // poly - robust to coarse triangles that straddle the garage edge.
+    if (lowPolysWorld.length) {
+      const gp = geo.attributes.position;
+      const idx = geo.index;
+      const triCount = (idx ? idx.count : gp.count) / 3;
+      const keep = [];
+      const overLow = (x, z) => {
+        for (const poly of lowPolysWorld) if (pointInPoly(x, z, poly)) return true;
+        return false;
+      };
+      for (let t = 0; t < triCount; t++) {
+        const a = idx ? idx.getX(t * 3) : t * 3;
+        const b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+        const c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+        const ax = gp.getX(a), az = gp.getZ(a);
+        const bx = gp.getX(b), bz = gp.getZ(b);
+        const cx2 = gp.getX(c), cz2 = gp.getZ(c);
+        let over = 0;
+        if (overLow((ax + bx + cx2) / 3, (az + bz + cz2) / 3)) over++;
+        if (overLow((ax + bx) / 2, (az + bz) / 2)) over++;
+        if (overLow((bx + cx2) / 2, (bz + cz2) / 2)) over++;
+        if (overLow((cx2 + ax) / 2, (cz2 + az) / 2)) over++;
+        if (over < 2) keep.push(a, b, c);
+      }
+      geo.setIndex(keep);
+    }
     floor = new THREE.Mesh(geo, rooms.length ? slabMat : floorMat);
   } else {
     floor = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, d + 0.3),
