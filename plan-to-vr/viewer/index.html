@@ -2005,7 +2005,18 @@ function buildPlan(plan) {
     if (lowPolysWorld.length) {
       const outerCCW = THREE.ShapeUtils.area(floorShape.getPoints()) > 0;
       for (const poly of lowPolysWorld) {
-        const pts = poly.map(([hx, hz]) => new THREE.Vector2(hx, -hz));
+        // The garage sits ON the building perimeter, so its cutout shares
+        // edges with the outer contour - which breaks the triangulator
+        // (holes must be strictly interior) and spat out a big spanning
+        // triangle floating over the sunken slab (VR #44 "stupid plane").
+        // Inset each low hole ~5cm toward its own centroid so it never
+        // touches the outer boundary; the sliver hides under the wall.
+        const hcx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
+        const hcz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+        const pts = poly.map(([hx, hz]) => {
+          const dx = hx - hcx, dz = hz - hcz, L = Math.hypot(dx, dz) || 1;
+          return new THREE.Vector2(hx - dx / L * 0.05, -(hz - dz / L * 0.05));
+        });
         if ((THREE.ShapeUtils.area(pts) > 0) === outerCCW) pts.reverse();
         const hole = new THREE.Path();
         hole.setFromPoints(pts);
