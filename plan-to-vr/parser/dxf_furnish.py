@@ -386,7 +386,35 @@ def room_at(rooms, x, y):
 
 # ---------------------------------------------------------------- labels
 
-def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts):
+def crop_segments(msp, layers, px, py, reach):
+    """Raw drawn segments near a point (incl. near-wall), absolute plan
+    inches - for label items / the fireplace that never formed a cluster,
+    so they still render their real linework instead of a catalog box."""
+    segs = []
+    for e in msp.query("LINE ARC CIRCLE ELLIPSE LWPOLYLINE"):
+        if e.dxf.layer not in layers:
+            continue
+        pts = ent_points(e)
+        if len(pts) < 2:
+            continue
+        mx = sum(p[0] for p in pts) / len(pts)
+        my = sum(p[1] for p in pts) / len(pts)
+        if math.hypot(mx - px, my - py) > reach:
+            continue
+        for i in range(len(pts) - 1):
+            a, b = pts[i], pts[i + 1]
+            if math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.4:
+                segs.append([a[0], a[1], b[0], b[1]])
+    return segs
+
+
+def rel_outline(segs, cx, cy, cap=160):
+    return [[round(s[0] - cx, 1), round(s[1] - cy, 1),
+             round(s[2] - cx, 1), round(s[3] - cy, 1)] for s in segs[:cap]]
+
+
+def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts,
+                geom_layers=None):
     labels = []
     for e in msp.query("TEXT"):
         if e.dxf.layer not in text_layers:
@@ -473,6 +501,11 @@ def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts):
                  "stub": f"{t} (DXF note label)"}
         if c is not None:
             entry["outline"] = c.outline(cx, cy)
+        elif geom_layers:
+            crop = crop_segments(msp, geom_layers, cx, cy,
+                                 max(w, d, 36) * 0.8)
+            if len(crop) >= 4:
+                entry["outline"] = rel_outline(crop, cx, cy)
         out.append(entry)
         if name in ("FURN-RANGE", "FURN-SINK", "FURN-DISHWASHER",
                     "FURN-ISLAND"):
@@ -539,10 +572,14 @@ def fireplace_items(msp, dw_layer, walls):
             continue
         if not walls.crosses(x0, x1, y0, y1):
             continue
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        crop = crop_segments(msp, {dw_layer}, cx, cy,
+                             max(x1 - x0, y1 - y0) / 2 + 10)
         out.append({"name": "FURN-FIREPLACE",
-                    "center": [round((x0 + x1) / 2), round((y0 + y1) / 2)],
+                    "center": [round(cx), round(cy)],
                     "size": [round(x1 - x0), round(y1 - y0)], "height": 96.0,
                     "rotation": 0, "auto": True,
+                    "outline": rel_outline(crop, cx, cy),
                     "stub": "fireplace: hatched chimney masses straddling "
                             "the wall (DXF)"})
     return out
@@ -616,7 +653,8 @@ def main():
 
     kitchen_pts = []
     items = label_items(msp, {notes_layer, rm_layer}, clusters, red_clusters,
-                        kitchen_pts)
+                        kitchen_pts,
+                        geom_layers={dw_layer, furn_layer, notes_layer})
     items += fireplace_items(msp, dw_layer, walls)
 
     # manual placements are authoritative: drop mined items landing on them
