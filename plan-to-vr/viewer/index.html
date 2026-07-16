@@ -276,6 +276,7 @@ let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
 let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
 let doorStyle = 'raised6';       // interior door style preset (#32)
 let perDoorStyles = {};          // per-door overrides, persisted per plan
+let perFixtureAssets = {};       // per-fixture GLB overrides, persisted per plan (#61 follow-up)
 let pendingPlanRebuild = null;   // deferred fetchPlan() request, drained at frame-top (avoids rebuilding mid-XR-frame)
 let currentPlanSource = null;               // plan.json "source" block, for notes
 
@@ -524,6 +525,13 @@ function loadAssetInto(g, f, w, d, h) {
     const fb = buildFixture(Object.assign({}, f, { asset: null }));
     while (fb.children.length) g.add(fb.children[0]);
   });
+}
+
+// Stable per-fixture id from its plan-inch center, so a VR asset override
+// re-binds to the same fixture across rebuilds (centers don't move; the
+// array index can, if dedup drops a neighbour).
+function fixtureKey(f) {
+  return `${Math.round(f.center[0])},${Math.round(f.center[1])}`;
 }
 
 function buildFixture(f) {
@@ -1345,6 +1353,10 @@ function buildPlan(plan) {
     perDoorStyles = JSON.parse(
       localStorage.getItem('plan2vr-door-styles:' + currentPlanKey) || '{}');
   } catch (e) { perDoorStyles = {}; }
+  try {
+    perFixtureAssets = JSON.parse(
+      localStorage.getItem('plan2vr-fixture-assets:' + currentPlanKey) || '{}');
+  } catch (e) { perFixtureAssets = {}; }
   clearPlan();
   collisionSegs = [];
   fixtureSegs = [];
@@ -2239,7 +2251,17 @@ function buildPlan(plan) {
   // fixtures: furniture / appliance stand-ins from CAD blocks (toggle F)
   fixtureGroup = new THREE.Group();
   for (const f of plan.fixtures || []) {
-    const g = buildFixture(f);
+    // per-fixture asset override (VR asset wheel, #61 follow-up): a stored
+    // GLB path swaps this fixture's model; '__none__' forces the schematic
+    // render even if the plan ships an asset; absent = use the plan default.
+    const fkey = fixtureKey(f);
+    const ov = perFixtureAssets[fkey];
+    const eff = ov === undefined ? f
+      : Object.assign({}, f, { asset: ov === '__none__' ? null : ov });
+    const g = buildFixture(eff);
+    g.userData.fixtureKey = fkey;
+    g.userData.fixtureName = f.name || 'fixture';
+    g.userData.asset = eff.asset || null;   // reflected for headless/inspection
     const pos = toWorld(f.center[0], f.center[1]);
     // sit the fixture on the floor BENEATH it: in a sunken room (the garage
     // slab) that is -gradeM, so garage furniture rests on the slab instead of
@@ -4284,15 +4306,26 @@ function handleVRInput() {
       if (doorWheel.stage) {
         doorWheelTick(trigV);
         laserCast(doorWheel.items);   // terminate the beam on the wheel cards, not the wall behind them
+      } else if (fixtureWheel.stage) {
+        fixtureWheelTick(trigV);
+        laserCast(fixtureWheel.items);
       } else if (doorHold.key) {
         doorHoldTick(trigV);
+        laserCast();
+      } else if (fixtureHold.key) {
+        fixtureHoldTick(trigV);
         laserCast();
       } else {
         if (!draw.active && trigV > 0.6) {
           const dh = laserDoorHit();
           if (dh) { doorHold.key = dh.key; doorHold.t = 0; doorGlowOn(dh.node); }
+          else {                        // no door under the beam? try a fixture
+            const fh = laserFixtureHit();
+            if (fh) { fixtureHold.key = fh.key; fixtureHold.node = fh.node;
+                      fixtureHold.t = 0; doorGlowOn(fh.node); }
+          }
         }
-        if (doorHold.key) { laserCast(); }
+        if (doorHold.key || fixtureHold.key) { laserCast(); }
         else {
           const inking = draw.active ? trigV > 0.4 : trigV > 0.6;
           if (inking) { draw.active = true; drawSample(); }
@@ -4484,12 +4517,14 @@ function wheelItemMesh(item) {
   const x = c.getContext('2d');
   x.fillStyle = '#161b26'; x.fillRect(0, 0, 256, 320);
   x.strokeStyle = '#4a86c8'; x.lineWidth = 6; x.strokeRect(3, 3, 250, 314);
-  const meta = item.id[0] === '_' || item.id === 'swap';
-  if (!meta) paintDoorIcon(x, item.id, 10, 10, 236, 244);
+  const meta = item.meta || item.id[0] === '_' || item.id === 'swap';
+  if (item.icon === 'sofa') paintSofaIcon(x, 10, 10, 236, 244);
+  else if (!meta) paintDoorIcon(x, item.id, 10, 10, 236, 244);
+  const labelOnly = meta && !item.icon;
   x.fillStyle = '#e8eefb';
-  x.font = (meta ? 'bold 34px' : 'bold 24px') + ' system-ui, sans-serif';
+  x.font = (labelOnly ? 'bold 34px' : 'bold 24px') + ' system-ui, sans-serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.fillText(item.label, 128, meta ? 160 : 288, 236);
+  x.fillText(item.label, 128, labelOnly ? 160 : 288, 236);
   const tex = new THREE.CanvasTexture(c);
   if (item.thumb) {        // optional open-licensed CDN thumbnail overlay
     const img = new Image();
@@ -4587,6 +4622,149 @@ function doorHoldTick(trigV) {
 Object.assign(window.PLAN2VR_DRAW, { openDoorWheel, closeDoorWheel, doorWheel,
   doorWheelPick, get doorStyleList() { return DOOR_STYLE_LIST; } });
 
+// ---------- per-fixture asset wheel (VR, #61 follow-up) -----------------
+// Same gesture as the door wheel, but on a furniture/appliance fixture:
+// hold RIGHT TRIGGER with the laser on a fixture -> after a beat a wheel of
+// vendored GLB models pops (+ "schematic" to force the DXF-outline render,
+// "use default" to drop the override, "cancel"). Pick one and THAT fixture
+// alone re-renders, persisted per plan in localStorage. Placement is never
+// touched - only which model draws at the fixture's spot. The asset list is
+// sourced from assets/assets.json so it can grow without code changes.
+let ASSET_LIST = [{ id: 'assets/sofa.glb', label: 'leather sofa', icon: 'sofa' }];
+fetch('assets/assets.json', { cache: 'no-store' })
+  .then(r => (r.ok ? r.json() : null))
+  .then(list => { if (Array.isArray(list) && list.length) ASSET_LIST = list; })
+  .catch(() => {});
+
+const fixtureWheel = { stage: 0, group: null, items: [], key: null, prevTrig: false };
+const fixtureHold = { key: null, node: null, t: 0 };
+
+function paintSofaIcon(x, X, Y, W, H) {
+  x.fillStyle = '#20242e'; x.fillRect(X, Y, W, H);
+  const bx = X + W * 0.12, bw = W * 0.76, by = Y + H * 0.42, bh = H * 0.30;
+  x.fillStyle = '#8a5a34';                                   // seat block
+  x.fillRect(bx, by, bw, bh);
+  x.fillStyle = '#9c6a40';                                   // back + arms
+  x.fillRect(bx, by - H * 0.22, bw, H * 0.24);               // backrest
+  x.fillRect(bx, by - H * 0.16, W * 0.10, bh + H * 0.16);    // left arm
+  x.fillRect(bx + bw - W * 0.10, by - H * 0.16, W * 0.10, bh + H * 0.16);
+  x.strokeStyle = '#5f3d1a'; x.lineWidth = 3;
+  x.strokeRect(bx, by - H * 0.22, bw, bh + H * 0.22);
+  x.fillStyle = '#3a281c';                                   // feet
+  x.fillRect(bx + W * 0.06, by + bh, W * 0.05, H * 0.06);
+  x.fillRect(bx + bw - W * 0.11, by + bh, W * 0.05, H * 0.06);
+}
+
+function laserFixtureHit() {
+  if (!planGroup) return null;
+  const o = new THREE.Vector3(), q = new THREE.Quaternion();
+  ctrlR.getWorldPosition(o); ctrlR.getWorldQuaternion(q);
+  const rc = new THREE.Raycaster(o,
+    new THREE.Vector3(0, 0, -1).applyQuaternion(q), 0.05, 6);
+  const hits = rc.intersectObjects(planGroup.children, true);
+  for (const hit of hits) {
+    let n = hit.object;
+    while (n && n !== planGroup && !(n.userData && n.userData.fixtureKey)) n = n.parent;
+    if (n && n.userData && n.userData.fixtureKey)
+      return { key: n.userData.fixtureKey, node: n, name: n.userData.fixtureName };
+  }
+  return null;
+}
+
+function fixtureAssetItems() {
+  return [...ASSET_LIST,
+    { id: '_schematic', label: 'schematic', meta: true },
+    { id: '_default', label: 'use default', meta: true },
+    { id: '_cancel', label: 'cancel', meta: true }];
+}
+
+function openFixtureWheel(key, items) {
+  closeFixtureWheel();
+  const g = new THREE.Group();
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  g.position.copy(cp).addScaledVector(fwd, 1.15);
+  g.position.y = cp.y - 0.05;
+  g.lookAt(cp);
+  const n = items.length;
+  const R = n > 8 ? 0.52 : n > 4 ? 0.42 : 0.22;
+  items.forEach((it, i) => {
+    const m = wheelItemMesh(it);
+    const a = Math.PI / 2 - (i / n) * Math.PI * 2;
+    m.position.set(Math.cos(a) * R, Math.sin(a) * R * 0.92, 0);
+    g.add(m);
+    fixtureWheel.items.push(m);
+  });
+  scene.add(g);
+  fixtureWheel.group = g;
+  fixtureWheel.key = key;
+}
+function closeFixtureWheel() {
+  if (fixtureWheel.group) scene.remove(fixtureWheel.group);
+  fixtureWheel.group = null; fixtureWheel.items = []; fixtureWheel.stage = 0;
+}
+function fixtureWheelPick() {
+  const o = new THREE.Vector3(), q = new THREE.Quaternion();
+  ctrlR.getWorldPosition(o); ctrlR.getWorldQuaternion(q);
+  const rc = new THREE.Raycaster(o,
+    new THREE.Vector3(0, 0, -1).applyQuaternion(q), 0.05, 5);
+  const hit = rc.intersectObjects(fixtureWheel.items, false)[0];
+  for (const m of fixtureWheel.items)
+    m.scale.setScalar(hit && m === hit.object ? 1.18 : 1);
+  return hit ? hit.object.userData.wheelId : null;
+}
+
+// commit a wheel choice to a fixture. Exposed so headless/2D can drive the
+// exact same path VR uses (WebXR can't run in a headless browser).
+function commitFixtureAsset(key, id) {
+  if (id === '_cancel' || id == null) return false;
+  if (id === '_default') delete perFixtureAssets[key];
+  else if (id === '_schematic') perFixtureAssets[key] = '__none__';
+  else perFixtureAssets[key] = id;
+  localStorage.setItem('plan2vr-fixture-assets:' + currentPlanKey,
+    JSON.stringify(perFixtureAssets));
+  pendingPlanRebuild = currentPlanKey;   // defer; rebuilding mid-XR-frame crashes the session
+  return true;
+}
+
+function fixtureWheelTick(trigV) {
+  const pick = fixtureWheelPick();
+  const rising = trigV > 0.6 && !fixtureWheel.prevTrig;
+  fixtureWheel.prevTrig = trigV > 0.6;
+  if (!rising) return;
+  const key = fixtureWheel.key;
+  closeFixtureWheel(); doorGlowOff();
+  if (commitFixtureAsset(key, pick)) vrMsg('fixture asset updated');
+}
+
+function fixtureHoldTick(trigV) {
+  if (trigV < 0.4) { fixtureHold.key = null; fixtureHold.t = 0; doorGlowOff(); return; }
+  fixtureHold.t += vrDt;
+  if (fixtureHold.t >= 0.45) {
+    openFixtureWheel(fixtureHold.key, fixtureAssetItems());
+    fixtureWheel.stage = 1;
+    fixtureWheel.prevTrig = true;     // require a fresh trigger pull to select
+    fixtureHold.key = null; fixtureHold.t = 0;
+  }
+}
+
+window.PLAN2VR_FIXT = {
+  openFixtureWheel, closeFixtureWheel, fixtureWheel, fixtureWheelPick,
+  laserFixtureHit, commitFixtureAsset, fixtureAssetItems,
+  get assetList() { return ASSET_LIST; },
+  get overrides() { return perFixtureAssets; },
+  // inspect the live scene: list fixtures with key/name/effective-asset
+  fixtures() {
+    const out = [];
+    if (fixtureGroup) for (const g of fixtureGroup.children)
+      if (g.userData && g.userData.fixtureKey)
+        out.push({ key: g.userData.fixtureKey, name: g.userData.fixtureName,
+                   asset: g.userData.asset || null });
+    return out;
+  },
+};
+
 function handleDoorGrip(handedness, ctrl, grip) {
   if (grip) {
     if (doorGrab.hand === null) {
@@ -4611,6 +4789,7 @@ function showVRHelp() {
   vrMsg([
     'Sticks: walk/turn · push R: teleport · grip: doors',
     'R trigger: laser draw · L trigger: record note',
+    'Hold R trigger on a door: restyle · on furniture: swap model',
     'X: file issue here · click R stick: height',
     'Hold B on a door: calibrate · Y: this help',
   ], 14);

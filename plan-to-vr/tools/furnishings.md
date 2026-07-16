@@ -36,6 +36,17 @@ fixtures pipeline - placement, rendering, collision. Two tiers:
    sandbox proxy blocks asset CDNs (Poly Haven/Kenney/GitHub raw), so
    download real models OUTSIDE the sandbox; the seed `sofa.glb` (leather
    sectional, living room) is authored in-repo as the pipeline demo.
+
+   **Swapping a model in VR (per-fixture, no rebuild).** Mirrors the
+   door-style wheel: hold the right trigger with the laser on a furniture
+   fixture -> a wheel of models (from `assets/assets.json`) plus
+   *schematic* (force the DXF-outline render), *use default* (drop the
+   override), and *cancel*. Picking one re-renders just that fixture and
+   persists per plan in `localStorage` (`plan2vr-fixture-assets:<plan>`) -
+   the GT `assets` list stays the authoritative baseline; the wheel is a
+   walkthrough-time override on top of it. Exposed on `window.PLAN2VR_FIXT`
+   (`commitFixtureAsset`, `fixtures()`, `openFixtureWheel`...) so the swap
+   is scriptable/headless-testable (WebXR can't run headless).
 2. **Stub block**: no good open-source match yet -> `"stub": "<label>"`
    renders a massing box with a floating NEED-ASSET label naming what to
    find (and which inspiration photo it matches). The living-room leather
