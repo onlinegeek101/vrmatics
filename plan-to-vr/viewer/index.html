@@ -274,6 +274,7 @@ let planOpeningsWorld = []; // door/window base segments in world XZ
 let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
 let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
 let doorStyle = 'raised6';       // interior door style preset (#32)
+let perDoorStyles = {};          // per-door overrides, persisted per plan
 let currentPlanSource = null;               // plan.json "source" block, for notes
 
 // ---------------------------------------------------------------- lights
@@ -867,10 +868,11 @@ function dressOpening(group, worldStart, dir, angle, lo, hi, op, depth, H, wallL
 // with thickness LT along local z. Cheap stile-and-rail read: a wood slab plus
 // a few proud, lighter raised panels per face and a brass knob at the latch
 // stile (owner's closet-door reference).
-function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar) {
+function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar, style) {
+  style = style || doorStyle;
   // leaf DRESSING is style-driven (#32: viewer door-style selector).
   // glassy styles get a glass core instead of a solid slab.
-  const glassy = doorStyle === 'french' || doorStyle === 'slider';
+  const glassy = style === 'french' || style === 'slider';
   if (!glassy) {
     const slab = new THREE.Mesh(new THREE.BoxGeometry(lw, leafH, LT), doorWoodMat);
     slab.position.set(x0 + lw / 2, leafH / 2, 0);
@@ -925,15 +927,15 @@ function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar) {
     }
   };
 
-  if (doorStyle === 'raised2') panelGrid(1, 2, true);
-  else if (doorStyle === 'shaker') panelGrid(lw > 0.5 ? 2 : 1, 3, false);
-  else if (doorStyle === 'flush') { /* bare slab */ }
-  else if (doorStyle === 'halfglass') {
+  if (style === 'raised2') panelGrid(1, 2, true);
+  else if (style === 'shaker') panelGrid(lw > 0.5 ? 2 : 1, 3, false);
+  else if (style === 'flush') { /* bare slab */ }
+  else if (style === 'halfglass') {
     panelGrid(1, 1, true);                       // reads as the lower panel
     glassPane(leafH * 0.55, leafH - fy, 2);
-  } else if (doorStyle === 'french' || doorStyle === 'slider') {
-    glassPane(fy, leafH - fy, doorStyle === 'french' ? 5 : 1);
-  } else if (doorStyle === 'louvered') {
+  } else if (style === 'french' || style === 'slider') {
+    glassPane(fy, leafH - fy, style === 'french' ? 5 : 1);
+  } else if (style === 'louvered') {
     const s0 = fy, s1 = leafH - fy, n = 14;
     for (let i = 0; i < n; i++) {
       const sl = new THREE.Mesh(new THREE.BoxGeometry(
@@ -944,7 +946,7 @@ function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar) {
     }
   } else panelGrid(lw > 0.5 ? 2 : 1, 3, true);   // raised6 (default)
 
-  if (doorStyle !== 'slider') {
+  if (style !== 'slider') {
     const kx = knobFar ? x0 + lw - 0.05 : x0 + 0.05;
     for (const zs of [1, -1]) {
       const k = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), brassMat);
@@ -960,16 +962,20 @@ function addPaneledLeaf(pivot, x0, lw, leafH, LT, knobFar) {
 function buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth, baseY, head, w) {
   const LT = 1.75 * IN2M;
   const leafH = head - 0.02;
+  // per-door override (crosshair-click a door to set; persisted per plan),
+  // falling back to the HUD dropdown's default style
+  const style = (op.key && perDoorStyles[op.key]) || doorStyle;
+  const tag = pv => { pv.userData.doorKey = op.key || ''; };
   // placement styles (#32): barn parks the leaf flat on the wall beside the
   // opening under a track; bifold folds half-leaf pairs back to each jamb;
   // slider leaves both glass panels in-plane. None of these swing.
-  if (doorStyle === 'barn') {
+  if (style === 'barn') {
     const pivot = new THREE.Group();
     pivot.position.set(worldStart.x + dir.x * lo, baseY, worldStart.z + dir.z * lo);
     pivot.rotation.y = angle;
     const off = depth / 2 + LT;                 // ride just off the wall face
     const leaf = new THREE.Group(); leaf.position.z = off; pivot.add(leaf);
-    addPaneledLeaf(leaf, -w * 0.55, w * 0.6, leafH, LT, true);
+    addPaneledLeaf(leaf, -w * 0.55, w * 0.6, leafH, LT, true, style); tag(pivot);
     const track = new THREE.Mesh(new THREE.BoxGeometry(w * 1.7, 0.05, 0.05),
       applianceMat);
     track.position.set(w * 0.25, head + 0.09, off);
@@ -977,30 +983,30 @@ function buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth,
     group.add(pivot);
     return;
   }
-  if (doorStyle === 'bifold') {
+  if (style === 'bifold') {
     const half = w / 2 - 0.01, quarter = half / 2, fold = 1.15; // ~66deg open
     for (const sideSign of [-1, 1]) {
       const jamb = sideSign < 0 ? lo : hi;
       const p1 = new THREE.Group();
       p1.position.set(worldStart.x + dir.x * jamb, baseY, worldStart.z + dir.z * jamb);
       p1.rotation.y = angle + (sideSign < 0 ? 0 : Math.PI) + (sideSign < 0 ? 1 : -1) * fold;
-      addPaneledLeaf(p1, 0, quarter, leafH, LT, false);
+      addPaneledLeaf(p1, 0, quarter, leafH, LT, false, style); tag(p1);
       const p2 = new THREE.Group();               // return panel of the V
       p2.position.set(quarter, 0, 0);
       p2.rotation.y = (sideSign < 0 ? -1 : 1) * 2 * fold;
-      addPaneledLeaf(p2, 0, quarter, leafH, LT, true);
+      addPaneledLeaf(p2, 0, quarter, leafH, LT, true, style);
       p1.add(p2);
       group.add(p1);
     }
     return;
   }
-  if (doorStyle === 'slider') {
+  if (style === 'slider') {
     for (const [a0, zs] of [[lo + 0.01, 1], [lo + w / 2 - 0.01, -1]]) {
       const pivot = new THREE.Group();
       pivot.position.set(worldStart.x + dir.x * a0, baseY, worldStart.z + dir.z * a0);
       pivot.rotation.y = angle;
       const leaf = new THREE.Group(); leaf.position.z = zs * LT * 0.7; pivot.add(leaf);
-      addPaneledLeaf(leaf, 0, w / 2, leafH, LT, false);
+      addPaneledLeaf(leaf, 0, w / 2, leafH, LT, false, style); tag(pivot);
       group.add(pivot);
     }
     return;
@@ -1012,7 +1018,7 @@ function buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth,
       pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
       const theta0 = angle + (sideSign < 0 ? 0 : Math.PI);   // closed, leaf toward centre
       pivot.rotation.y = theta0;
-      addPaneledLeaf(pivot, 0.01, w / 2 - 0.02, leafH, LT, true);
+      addPaneledLeaf(pivot, 0.01, w / 2 - 0.02, leafH, LT, true, style); tag(pivot);
       group.add(pivot);
       doorLeaves.push({ pivot, theta0, rotSign: sideSign < 0 ? 1 : -1, len: w / 2 - 0.02, head, open: 0 });
     }
@@ -1026,7 +1032,7 @@ function buildInteriorWoodDoor(group, worldStart, dir, angle, lo, hi, op, depth,
     const lw = w - 0.02;
     const pivot = new THREE.Group();
     pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
-    addPaneledLeaf(pivot, 0.01, lw, leafH, LT, true);
+    addPaneledLeaf(pivot, 0.01, lw, leafH, LT, true, style); tag(pivot);
     const open0 = op.shut ? 0 : Math.PI / 2;
     pivot.rotation.y = theta0 + rotSign * open0;
     group.add(pivot);
@@ -1073,7 +1079,7 @@ function buildExteriorEntry(group, worldStart, dir, angle, lo, hi, op, depth, ba
       pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
       const theta0 = angle + (sideSign < 0 ? 0 : Math.PI);
       pivot.rotation.y = theta0;
-      addPaneledLeaf(pivot, 0.01, dW / 2 - 0.02, leafH, LT, true);
+      addPaneledLeaf(pivot, 0.01, dW / 2 - 0.02, leafH, LT, true, 'raised6');
       group.add(pivot);
       doorLeaves.push({ pivot, theta0, rotSign: sideSign < 0 ? 1 : -1, len: dW / 2 - 0.02, head: doorHead, open: 0 });
     }
@@ -1084,7 +1090,7 @@ function buildExteriorEntry(group, worldStart, dir, angle, lo, hi, op, depth, ba
     const pivot = new THREE.Group();
     pivot.position.set(worldStart.x + dir.x * hingeA, baseY, worldStart.z + dir.z * hingeA);
     pivot.rotation.y = theta0;
-    addPaneledLeaf(pivot, 0.01, dW - 0.02, leafH, LT, true);
+    addPaneledLeaf(pivot, 0.01, dW - 0.02, leafH, LT, true, 'raised6');
     group.add(pivot);
     doorLeaves.push({ pivot, theta0, rotSign: hingeLo ? 1 : -1, len: dW - 0.02, head: doorHead, open: 0 });
   }
@@ -1249,6 +1255,10 @@ function addPiece(group, worldStart, dir, angle, a0, a1, zb, zt, depth, wallH) {
 }
 
 function buildPlan(plan) {
+  try {
+    perDoorStyles = JSON.parse(
+      localStorage.getItem('plan2vr-door-styles:' + currentPlanKey) || '{}');
+  } catch (e) { perDoorStyles = {}; }
   clearPlan();
   collisionSegs = [];
   fixtureSegs = [];
@@ -1773,8 +1783,9 @@ function buildPlan(plan) {
       // collision, so the bay is walk/drive-through (the yard is at the same
       // garage grade and the foundation is already gapped here).
       // base segment for VR calibration anchoring
+      op.key = wi + ':' + Math.round(lo / IN2M);
       planOpeningsWorld.push({
-        key: wi + ':' + Math.round(lo / IN2M),
+        key: op.key,
         type: op.type,
         ax: worldStart.x + dir.x * lo, az: worldStart.z + dir.z * lo,
         bx: worldStart.x + dir.x * hi, bz: worldStart.z + dir.z * hi,
@@ -2253,6 +2264,8 @@ overlay.addEventListener('click', () => {
 });
 controls.addEventListener('lock', () => overlay.style.display = 'none');
 controls.addEventListener('unlock', () => {
+  const dm = document.getElementById('door-menu');
+  if (dm && !dm.hidden) return;      // per-door style picker owns the cursor
   if (!renderer.xr.isPresenting && !mapMode) overlay.style.display = 'flex';
 });
 
@@ -4135,14 +4148,30 @@ function handleVRInput() {
     } else if (src.handedness === 'right') {
       // laser pointer: light touch aims, squeeze inks onto the surface.
       // Hysteresis (start >0.6, keep until <0.4) stops trigger jitter
-      // from chopping one gesture into many little strokes
+      // from chopping one gesture into many little strokes.
+      // A pull STARTING on a door goes to the door-style wheel instead.
       const trigV = gp.buttons[0] ? gp.buttons[0].value : 0;
-      const inking = draw.active ? trigV > 0.4 : trigV > 0.6;
-      if (inking) { draw.active = true; drawSample(); }
-      else {
-        if (draw.active) drawFinish();
-        if (trigV > 0.05 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
-        else laserOff();
+      if (doorWheel.stage) {
+        doorWheelTick(trigV);
+        laserCast();
+      } else if (doorHold.key) {
+        doorHoldTick(trigV);
+        laserCast();
+      } else {
+        if (!draw.active && trigV > 0.6) {
+          const dh = laserDoorHit();
+          if (dh) { doorHold.key = dh.key; doorHold.t = 0; doorGlowOn(dh.node); }
+        }
+        if (doorHold.key) { laserCast(); }
+        else {
+          const inking = draw.active ? trigV > 0.4 : trigV > 0.6;
+          if (inking) { draw.active = true; drawSample(); }
+          else {
+            if (draw.active) drawFinish();
+            if (trigV > 0.05 || (gp.buttons[0] && gp.buttons[0].touched)) laserCast();
+            else laserOff();
+          }
+        }
       }
       if (btnEdge('right', gp, 3)) resetHeight();   // stick click
       if (stickY < -0.6) {                 // push forward -> teleport aim
@@ -4196,6 +4225,238 @@ function doorGrabUpdate(ctrl) {
   d.open = Math.max(0, Math.min(DOOR_MAX, delta));
   d.pivot.rotation.y = d.theta0 + d.rotSign * d.open;
 }
+// ------------- per-door style wheel (VR primary flow, #32 follow-up) ------
+// Hold RIGHT TRIGGER with the laser on a door: the door highlights, and
+// after a beat a context wheel pops (swap / cancel). "Swap" opens a second
+// wheel of alternative styles - sourced from door-styles.json so the list
+// can grow without code changes - pick one and that door alone restyles,
+// persisted per plan. Trigger-drawing is untouched anywhere off a door.
+let DOOR_STYLE_LIST = [];
+{
+  const sel = document.getElementById('door-style');
+  DOOR_STYLE_LIST = [...sel.options].map(o =>
+    ({ id: o.value, label: o.textContent.replace('doors: ', '') }));
+  fetch('door-styles.json', { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(list => {
+      if (!Array.isArray(list) || !list.length) return;
+      DOOR_STYLE_LIST = list;
+      const cur = sel.value;
+      sel.innerHTML = list.map(s =>
+        `<option value="${s.id}">doors: ${s.label}</option>`).join('');
+      sel.value = list.some(s => s.id === cur) ? cur : list[0].id;
+    }).catch(() => {});
+}
+
+const doorWheel = { stage: 0, group: null, items: [], key: null, prevTrig: false };
+const doorHold = { key: null, t: 0, glow: null };
+
+function laserDoorHit() {
+  if (!planGroup) return null;
+  const o = new THREE.Vector3(), q = new THREE.Quaternion();
+  ctrlR.getWorldPosition(o); ctrlR.getWorldQuaternion(q);
+  const rc = new THREE.Raycaster(o,
+    new THREE.Vector3(0, 0, -1).applyQuaternion(q), 0.05, 6);
+  const hit = rc.intersectObjects(planGroup.children, true)[0];
+  if (!hit) return null;
+  let n = hit.object;
+  while (n && n !== planGroup && !(n.userData && n.userData.doorKey)) n = n.parent;
+  return (n && n.userData && n.userData.doorKey)
+    ? { key: n.userData.doorKey, node: n } : null;
+}
+
+function doorGlowOn(node) {
+  doorGlowOff();
+  const bb = new THREE.Box3().setFromObject(node);
+  const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+  const glow = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x + 0.04, size.y + 0.04, size.z + 0.04),
+    new THREE.MeshBasicMaterial({ color: 0x3da9ff, transparent: true,
+      opacity: 0.25, depthWrite: false }));
+  glow.position.copy(c);
+  scene.add(glow);
+  doorHold.glow = glow;
+}
+function doorGlowOff() {
+  if (doorHold.glow) { scene.remove(doorHold.glow); doorHold.glow = null; }
+}
+
+// A wheel card: door-style THUMBNAIL above a caption. The thumbnail is a
+// procedurally painted door face (matches the 3D styles); when the style
+// entry carries a `thumb` URL (door-styles.json - e.g. an open-licensed
+// CDN image) it loads over the painted icon, CORS permitting.
+function paintDoorIcon(x, st, X, Y, W, H) {
+  x.fillStyle = '#20242e'; x.fillRect(X, Y, W, H);
+  const dx = X + W * 0.22, dw = W * 0.56, dy = Y + H * 0.08, dh = H * 0.86;
+  x.fillStyle = '#8a5c2c'; x.fillRect(dx, dy, dw, dh);   // slab
+  x.strokeStyle = '#5f3d1a'; x.lineWidth = 3; x.strokeRect(dx, dy, dw, dh);
+  const glass = (gx, gy, gw, gh, cols, rows) => {
+    x.fillStyle = '#bcd6e8'; x.fillRect(gx, gy, gw, gh);
+    x.strokeStyle = '#8a5c2c'; x.lineWidth = 3;
+    for (let i = 1; i < cols; i++) {
+      x.beginPath(); x.moveTo(gx + gw * i / cols, gy);
+      x.lineTo(gx + gw * i / cols, gy + gh); x.stroke();
+    }
+    for (let i = 1; i < rows; i++) {
+      x.beginPath(); x.moveTo(gx, gy + gh * i / rows);
+      x.lineTo(gx + gw, gy + gh * i / rows); x.stroke();
+    }
+    x.strokeRect(gx, gy, gw, gh);
+  };
+  const panels = (cols, rows, raised) => {
+    const px = dw * 0.12, py = dh * 0.06;
+    const cw = (dw - px * (cols + 1)) / cols, ch = (dh - py * (rows + 1)) / rows;
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+      const ox = dx + px * (c + 1) + cw * c, oy = dy + py * (r + 1) + ch * r;
+      x.fillStyle = raised ? '#a9773c' : '#7a4f24';
+      x.fillRect(ox, oy, cw, ch);
+      x.strokeStyle = '#5f3d1a'; x.lineWidth = 2; x.strokeRect(ox, oy, cw, ch);
+      if (raised) {
+        x.fillStyle = '#c08a48';
+        x.fillRect(ox + cw * 0.18, oy + ch * 0.14, cw * 0.64, ch * 0.72);
+      }
+    }
+  };
+  if (st === 'raised6') panels(2, 3, true);
+  else if (st === 'raised2') panels(1, 2, true);
+  else if (st === 'shaker') panels(2, 3, false);
+  else if (st === 'flush') { /* bare slab */ }
+  else if (st === 'halfglass') {
+    panels(1, 1, true);
+    glass(dx + dw * 0.12, dy + dh * 0.08, dw * 0.76, dh * 0.38, 2, 2);
+  } else if (st === 'french') glass(dx + dw * 0.12, dy + dh * 0.06, dw * 0.76, dh * 0.88, 2, 5);
+  else if (st === 'louvered') {
+    x.strokeStyle = '#5f3d1a'; x.lineWidth = 3;
+    for (let i = 1; i <= 12; i++) {
+      const yy = dy + dh * i / 13;
+      x.beginPath(); x.moveTo(dx + dw * 0.1, yy); x.lineTo(dx + dw * 0.9, yy); x.stroke();
+    }
+  } else if (st === 'bifold') {
+    x.strokeStyle = '#5f3d1a'; x.lineWidth = 3;
+    x.beginPath(); x.moveTo(dx + dw / 2, dy); x.lineTo(dx + dw / 2, dy + dh); x.stroke();
+    panels(2, 2, true);
+  } else if (st === 'barn') {
+    x.fillStyle = '#3a3f47'; x.fillRect(dx - dw * 0.18, dy - H * 0.05, dw * 1.36, H * 0.045);
+    x.strokeStyle = '#5f3d1a'; x.lineWidth = 3;
+    x.beginPath(); x.moveTo(dx, dy); x.lineTo(dx + dw, dy + dh); x.stroke();
+    x.beginPath(); x.moveTo(dx + dw, dy); x.lineTo(dx, dy + dh); x.stroke();
+  } else if (st === 'slider') {
+    glass(dx - dw * 0.12, dy + dh * 0.04, dw * 0.6, dh * 0.9, 1, 1);
+    glass(dx + dw * 0.52, dy + dh * 0.08, dw * 0.6, dh * 0.9, 1, 1);
+  } else {   // generic / meta buttons
+    x.fillStyle = '#2a3140'; x.fillRect(dx, dy, dw, dh);
+  }
+}
+
+function wheelItemMesh(item) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 320;
+  const x = c.getContext('2d');
+  x.fillStyle = '#161b26'; x.fillRect(0, 0, 256, 320);
+  x.strokeStyle = '#4a86c8'; x.lineWidth = 6; x.strokeRect(3, 3, 250, 314);
+  const meta = item.id[0] === '_' || item.id === 'swap';
+  if (!meta) paintDoorIcon(x, item.id, 10, 10, 236, 244);
+  x.fillStyle = '#e8eefb';
+  x.font = (meta ? 'bold 34px' : 'bold 24px') + ' system-ui, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(item.label, 128, meta ? 160 : 288, 236);
+  const tex = new THREE.CanvasTexture(c);
+  if (item.thumb) {        // optional open-licensed CDN thumbnail overlay
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      x.drawImage(img, 10, 10, 236, 244);
+      tex.needsUpdate = true;
+    };
+    img.src = item.thumb;
+  }
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.20, 0.25),
+    new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  m.userData.wheelId = item.id;
+  return m;
+}
+
+function openDoorWheel(key, items) {
+  closeDoorWheel();
+  const g = new THREE.Group();
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const cp = new THREE.Vector3();
+  camera.getWorldPosition(cp);
+  g.position.copy(cp).addScaledVector(fwd, 1.15);
+  g.position.y = cp.y - 0.05;
+  g.lookAt(cp);
+  const n = items.length;
+  const R = n > 8 ? 0.52 : n > 4 ? 0.42 : 0.22;
+  items.forEach((it, i) => {
+    const m = wheelItemMesh(it);
+    const a = Math.PI / 2 - (i / n) * Math.PI * 2;   // start at 12 o'clock
+    m.position.set(Math.cos(a) * R, Math.sin(a) * R * 0.92, 0);
+    g.add(m);
+    doorWheel.items.push(m);
+  });
+  scene.add(g);
+  doorWheel.group = g;
+  doorWheel.key = key;
+}
+function closeDoorWheel() {
+  if (doorWheel.group) scene.remove(doorWheel.group);
+  doorWheel.group = null; doorWheel.items = []; doorWheel.stage = 0;
+}
+
+function doorWheelPick() {
+  const o = new THREE.Vector3(), q = new THREE.Quaternion();
+  ctrlR.getWorldPosition(o); ctrlR.getWorldQuaternion(q);
+  const rc = new THREE.Raycaster(o,
+    new THREE.Vector3(0, 0, -1).applyQuaternion(q), 0.05, 5);
+  const hit = rc.intersectObjects(doorWheel.items, false)[0];
+  for (const m of doorWheel.items)
+    m.scale.setScalar(hit && m === hit.object ? 1.18 : 1);
+  return hit ? hit.object.userData.wheelId : null;
+}
+
+function doorWheelTick(trigV) {
+  const pick = doorWheelPick();
+  const rising = trigV > 0.6 && !doorWheel.prevTrig;
+  doorWheel.prevTrig = trigV > 0.6;
+  if (!rising) return;
+  if (pick === null) { closeDoorWheel(); doorGlowOff(); return; }
+  if (doorWheel.stage === 1) {
+    if (pick === 'swap') {
+      const key = doorWheel.key;
+      openDoorWheel(key, [...DOOR_STYLE_LIST,
+        { id: '_default', label: 'use default' },
+        { id: '_cancel', label: 'cancel' }]);
+      doorWheel.stage = 2;
+    } else { closeDoorWheel(); doorGlowOff(); }
+    return;
+  }
+  // stage 2: commit a style for this door
+  if (pick === '_cancel') { closeDoorWheel(); doorGlowOff(); return; }
+  if (pick === '_default') delete perDoorStyles[doorWheel.key];
+  else perDoorStyles[doorWheel.key] = pick;
+  localStorage.setItem('plan2vr-door-styles:' + currentPlanKey,
+    JSON.stringify(perDoorStyles));
+  closeDoorWheel(); doorGlowOff();
+  fetchPlan(currentPlanKey);
+  vrMsg('door style updated');
+}
+
+function doorHoldTick(trigV) {
+  if (trigV < 0.4) { doorHold.key = null; doorHold.t = 0; doorGlowOff(); return; }
+  doorHold.t += vrDt;
+  if (doorHold.t >= 0.45) {
+    openDoorWheel(doorHold.key, [{ id: 'swap', label: 'swap style' },
+                                 { id: '_cancel', label: 'cancel' }]);
+    doorWheel.stage = 1;
+    doorWheel.prevTrig = true;      // require a fresh trigger pull to select
+    doorHold.key = null; doorHold.t = 0;
+  }
+}
+
+Object.assign(window.PLAN2VR_DRAW, { openDoorWheel, closeDoorWheel, doorWheel,
+  doorWheelPick, get doorStyleList() { return DOOR_STYLE_LIST; } });
+
 function handleDoorGrip(handedness, ctrl, grip) {
   if (grip) {
     if (doorGrab.hand === null) {
@@ -4545,7 +4806,10 @@ document.getElementById('plan-select').addEventListener('change', e => {
   fetchPlan(e.target.value);
 });
 
-// interior door style (#32): persisted, applied by rebuilding the plan
+// interior door style (#32): persisted, applied by rebuilding the plan.
+// The HUD dropdown sets the DEFAULT; crosshair-clicking a door opens a
+// per-door picker whose choice overrides the default for just that door
+// (persisted per plan in localStorage).
 doorStyle = localStorage.getItem('plan2vr-door-style') || 'raised6';
 {
   const sel = document.getElementById('door-style');
@@ -4555,6 +4819,51 @@ doorStyle = localStorage.getItem('plan2vr-door-style') || 'raised6';
     doorStyle = e.target.value;
     localStorage.setItem('plan2vr-door-style', doorStyle);
     if (currentPlanKey) fetchPlan(currentPlanKey);
+  });
+
+  const menu = document.createElement('div');
+  menu.id = 'door-menu';
+  menu.hidden = true;
+  menu.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);' +
+    'background:#181c24;color:#dfe6f2;padding:12px 14px;border-radius:10px;z-index:40;' +
+    'display:none;grid-template-columns:1fr 1fr;gap:6px;font:13px system-ui;min-width:300px';
+  document.body.appendChild(menu);
+  const styleIds = [...sel.options].map(o => [o.value, o.textContent.replace('doors: ', '')]);
+  const saveDoorStyles = () => localStorage.setItem(
+    'plan2vr-door-styles:' + currentPlanKey, JSON.stringify(perDoorStyles));
+  function openDoorMenu(key) {
+    const cur = perDoorStyles[key] || '';
+    menu.innerHTML = '<b style="grid-column:1/-1">this door’s style</b>' +
+      styleIds.map(([v, t]) =>
+        `<button data-s="${v}" style="padding:6px;border-radius:6px;border:1px solid #39435a;` +
+        `background:${v === (cur || doorStyle) ? '#2b6cb0' : '#232936'};color:inherit;cursor:pointer">${t}</button>`
+      ).join('') +
+      '<button data-s="" style="grid-column:1/-1;padding:6px;border-radius:6px;' +
+      'border:1px solid #39435a;background:#232936;color:inherit;cursor:pointer">use default</button>';
+    menu.hidden = false;
+    menu.style.display = 'grid';
+    for (const b of menu.querySelectorAll('button')) b.onclick = () => {
+      if (b.dataset.s) perDoorStyles[key] = b.dataset.s;
+      else delete perDoorStyles[key];
+      saveDoorStyles();
+      menu.hidden = true;
+      menu.style.display = 'none';
+      fetchPlan(currentPlanKey);
+      if (!IS_TOUCH) controls.lock();
+    };
+  }
+  addEventListener('mousedown', e => {
+    if (!document.pointerLockElement || e.button !== 0 || !planGroup) return;
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const hit = rc.intersectObjects(planGroup.children, true)[0];
+    if (!hit || hit.distance > 4.5) return;      // nothing near the crosshair
+    let n = hit.object;
+    while (n && n !== planGroup && !(n.userData && n.userData.doorKey)) n = n.parent;
+    if (n && n.userData && n.userData.doorKey) {
+      controls.unlock();
+      openDoorMenu(n.userData.doorKey);
+    }
   });
 }
 

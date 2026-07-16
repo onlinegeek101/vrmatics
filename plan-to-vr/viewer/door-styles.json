@@ -1,0 +1,12 @@
+[
+  {"id": "raised6",  "label": "raised 6-panel"},
+  {"id": "raised2",  "label": "raised 2-panel"},
+  {"id": "shaker",   "label": "shaker flat-panel"},
+  {"id": "flush",    "label": "flush slab"},
+  {"id": "halfglass","label": "half-glass"},
+  {"id": "french",   "label": "French (full glass)"},
+  {"id": "louvered", "label": "louvered"},
+  {"id": "bifold",   "label": "bifold"},
+  {"id": "barn",     "label": "barn / sliding"},
+  {"id": "slider",   "label": "glass slider"}
+]
