@@ -440,8 +440,35 @@ def rel_outline(segs, cx, cy, cap=160):
              round(s[2] - cx, 1), round(s[3] - cy, 1)] for s in segs[:cap]]
 
 
+# appliances drawn only as a counter line + label (no boxed symbol): the
+# cropped linework is just the wall-side counter edge, so they'd render
+# flat in the wall. Seat them as a catalog box, body pushed into the room.
+FREESTANDING = {"FURN-WASHER", "FURN-DRYER"}
+
+
+def seat_off_wall(walls, px, py, w, d):
+    """Nearest wall + inward direction (toward the label): return a centre
+    with the box's back against the wall face and its body in the room."""
+    best, bp = 1e18, None
+    for (x0, y0, x1, y1) in walls.segs:
+        dx, dy = x1 - x0, y1 - y0
+        L2 = dx * dx + dy * dy or 1.0
+        t = max(0.0, min(1.0, ((px - x0) * dx + (py - y0) * dy) / L2))
+        qx, qy = x0 + t * dx, y0 + t * dy
+        dist = math.hypot(px - qx, py - qy)
+        if dist < best:
+            best, bp = dist, (qx, qy)
+    if bp is None or best > 40:
+        return px, py
+    nx, ny = px - bp[0], py - bp[1]
+    n = math.hypot(nx, ny) or 1.0
+    nx, ny = nx / n, ny / n
+    depth = min(w, d)
+    return bp[0] + nx * (depth / 2 + 4), bp[1] + ny * (depth / 2 + 4)
+
+
 def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts,
-                geom_layers=None):
+                geom_layers=None, walls=None):
     labels = []
     for e in msp.query("TEXT"):
         if e.dxf.layer not in text_layers:
@@ -522,6 +549,15 @@ def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts,
                                        else 40)
         else:
             cx, cy, w, d = px, py, we, de
+        if name in FREESTANDING and walls is not None:
+            # counter-line-only appliance: seat a box off the wall, no
+            # outline (the drawn line is the wall-side counter edge)
+            cx, cy = seat_off_wall(walls, px, py, we, de)
+            out.append({"name": name, "center": [round(cx), round(cy)],
+                        "size": [round(we), round(de)], "height": h,
+                        "rotation": 0, "auto": True,
+                        "stub": f"{t} (DXF note label; seated off wall)"})
+            continue
         entry = {"name": name, "center": [round(cx), round(cy)],
                  "size": [round(w), round(d)], "height": h,
                  "rotation": 0, "auto": True,
@@ -682,7 +718,8 @@ def main():
     kitchen_pts = []
     items = label_items(msp, {notes_layer, rm_layer}, clusters, red_clusters,
                         kitchen_pts,
-                        geom_layers={dw_layer, furn_layer, notes_layer})
+                        geom_layers={dw_layer, furn_layer, notes_layer},
+                        walls=walls)
     items += fireplace_items(msp, dw_layer, walls)
 
     # manual placements are authoritative: drop mined items landing on them
