@@ -1594,7 +1594,11 @@ function buildPlan(plan) {
           scx = topX + px * sgn * width; scz = topZ + pz * sgn * width;
           lcx = topX + cx * (depth / 2) + px * sgn * (width / 2);
           lcz = topZ + cz * (depth / 2) + pz * sgn * (width / 2);
-          lw = width; ld = 2 * width + depth;
+          // landing bridges the first flight's top to the return flight
+          // (one width to the side) - NOT twice the width, which overhung
+          // ~a flight onto the far side and floated past the stairwell wall
+          // into the neighbouring room (VR #44 garage shard).
+          lw = width; ld = width + depth;
         } else {                                        // quarter turn: corner landing
           scx = topX + tx * width; scz = topZ + tz * width;
           lcx = topX + tx * (width / 2); lcz = topZ + tz * (width / 2);
