@@ -714,17 +714,27 @@ def main():
         return ox * oy / max(1.0, min(aw * ad, bw * bd))
 
     def _keep(a, b):                       # which of two overlapping to keep
+        ac, bc = a.get("cab"), b.get("cab")
+        ag = a["name"].endswith("DRAWN")
+        bg = b["name"].endswith("DRAWN")
+        if ac and bg:                      # a cabinet run beats a bare box
+            return a
+        if bc and ag:
+            return b
         ao, bo = bool(a.get("outline")), bool(b.get("outline"))
         if ao != bo:
             return a if ao else b
-        ag = a["name"].endswith("DRAWN")
-        bg = b["name"].endswith("DRAWN")
         if ag != bg:
             return b if ag else a
         return a
     fx = plan.get("fixtures", [])
     keep = [True] * len(fx)
     for i in range(len(fx)):
+        # cabinet runs always survive: a base + its upper stack at the same
+        # spot (they must not drop each other), and a long counter run must
+        # not be dropped by a small sink/range that sits in it.
+        if fx[i].get("cab"):
+            continue
         for j in range(len(fx)):
             if i != j and keep[i] and keep[j] and _ov(fx[i], fx[j]) > 0.4 \
                     and _keep(fx[i], fx[j]) is fx[j]:

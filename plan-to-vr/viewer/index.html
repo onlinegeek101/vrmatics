@@ -498,6 +498,33 @@ function fixtureMaterial(name) {
 // than featureless boxes. All local: floor at y=0, front toward +z.
 function buildFixture(f) {
   const w = f.size[0] * IN2M, d = f.size[1] * IN2M, h = (f.height || 30) * IN2M;
+  // base + upper cabinet runs mined off the DXF casework linework. Drawn
+  // as real casework (maple boxes + a granite counter) rather than the
+  // NEED-ASSET stub, at two elevations: base on the floor, uppers at the
+  // sill. The caller sets group rotation.y = wall angle, so the run's long
+  // axis (local +x = size[0]) lies along the wall.
+  if (f.cab === 'base' || f.cab === 'upper') {
+    const g = new THREE.Group();
+    g.userData.stub = true;                        // rides the furnish toggle
+    const box = (bw, bh, bd, mat, y) => {
+      const m = new THREE.Mesh(
+        new RoundedBoxGeometry(bw, bh, bd, 3,
+          Math.min(0.01, bw / 3, bh / 3, bd / 3)), mat);
+      m.position.set(0, y, 0);
+      m.castShadow = m.receiveShadow = true;
+      g.add(m); laserTargets.push(m);
+      return m;
+    };
+    if (f.cab === 'base') {
+      box(w, h, d, woodMat, h / 2);                          // maple casework
+      const CT = 1.5 * IN2M;                                 // granite counter
+      box(w + 0.03, CT, d + 0.03, counterMat, h + CT / 2);
+    } else {
+      const sill = (f.sill || 54) * IN2M;
+      box(w, h, d, woodMat, sill + h / 2);                   // upper, at sill
+    }
+    return g;
+  }
   // furnishing stub: massing block + "NEED ASSET" label until a real
   // (open-source) model is vendored for it - see tools/furnishings.md
   if (f.stub && f.outline && f.outline.length) {
@@ -2168,6 +2195,9 @@ function buildPlan(plan) {
     g.position.set(pos.x, fy, pos.z);
     g.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
     fixtureGroup.add(g);
+    // upper cabinets hang at the sill (~54") - you walk under them, so they
+    // get no floor-level collision capsule. Base cabinets keep theirs.
+    if (f.cab === 'upper') continue;
     // collision capsule along the long axis (rotation.y maps local +x to
     // (cos, -sin) and local +z to (sin, cos) in world XZ)
     const wM = (f.size[0] || 12) * IN2M, dM = (f.size[1] || 12) * IN2M;

@@ -1321,6 +1321,154 @@
    "stub": "5' vanity (DXF note label)"
   },
   {
+   "name": "FURN-BASE-CAB",
+   "cab": "base",
+   "center": [
+    16,
+    213
+   ],
+   "size": [
+    27,
+    25
+   ],
+   "height": 36,
+   "rotation": -0.4,
+   "auto": true,
+   "stub": "base cabinets + counter (DXF)"
+  },
+  {
+   "name": "FURN-UPPER-CAB",
+   "cab": "upper",
+   "sill": 54,
+   "center": [
+    28,
+    -88
+   ],
+   "size": [
+    32,
+    13
+   ],
+   "height": 30,
+   "rotation": 179.6,
+   "auto": true,
+   "stub": "upper cabinets (DXF)"
+  },
+  {
+   "name": "FURN-BASE-CAB",
+   "cab": "base",
+   "center": [
+    115,
+    -5
+   ],
+   "size": [
+    72,
+    24
+   ],
+   "height": 36,
+   "rotation": -90.1,
+   "auto": true,
+   "stub": "base cabinets + counter (DXF)"
+  },
+  {
+   "name": "FURN-UPPER-CAB",
+   "cab": "upper",
+   "sill": 54,
+   "center": [
+    93,
+    -24
+   ],
+   "size": [
+    110,
+    12
+   ],
+   "height": 30,
+   "rotation": -90.1,
+   "auto": true,
+   "stub": "upper cabinets (DXF)"
+  },
+  {
+   "name": "FURN-BASE-CAB",
+   "cab": "base",
+   "center": [
+    -149,
+    -172
+   ],
+   "size": [
+    33,
+    24
+   ],
+   "height": 36,
+   "rotation": -179.9,
+   "auto": true,
+   "stub": "base cabinets + counter (DXF)"
+  },
+  {
+   "name": "FURN-UPPER-CAB",
+   "cab": "upper",
+   "sill": 54,
+   "center": [
+    -157,
+    -165
+   ],
+   "size": [
+    49,
+    9
+   ],
+   "height": 30,
+   "rotation": -179.9,
+   "auto": true,
+   "stub": "upper cabinets (DXF)"
+  },
+  {
+   "name": "FURN-UPPER-CAB",
+   "cab": "upper",
+   "sill": 54,
+   "center": [
+    17,
+    -20
+   ],
+   "size": [
+    119,
+    12
+   ],
+   "height": 30,
+   "rotation": 89.9,
+   "auto": true,
+   "stub": "upper cabinets (DXF)"
+  },
+  {
+   "name": "FURN-BASE-CAB",
+   "cab": "base",
+   "center": [
+    -85,
+    17
+   ],
+   "size": [
+    29,
+    26
+   ],
+   "height": 36,
+   "rotation": 0.0,
+   "auto": true,
+   "stub": "base cabinets + counter (DXF)"
+  },
+  {
+   "name": "FURN-BASE-CAB",
+   "cab": "base",
+   "center": [
+    112,
+    -62
+   ],
+   "size": [
+    34,
+    26
+   ],
+   "height": 36,
+   "rotation": -90.0,
+   "auto": true,
+   "stub": "base cabinets + counter (DXF)"
+  },
+  {
    "name": "FURN-TOILET",
    "center": [
     -91,

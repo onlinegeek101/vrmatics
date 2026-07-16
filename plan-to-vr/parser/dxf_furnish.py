@@ -649,6 +649,149 @@ def fireplace_items(msp, dw_layer, walls):
     return out
 
 
+# ---------------------------------------------------------------- cabinets
+
+# circulation / outdoor rooms a cabinet run must never land in (the garage
+# and stairs are the hard exclusions; kitchen/bath/laundry/mud/pantry/
+# closet + any other named room are all fair game).
+CAB_EXCLUDE_ROOMS = {"GARAGE", "STAIR", "STAIRS", "FOYER", "PORCH",
+                     "DECK", "PATIO", "BALCONY"}
+# depth-from-wall-FACE bands (inches): a base counter front sits ~22-26"
+# off the wall, an upper cabinet ~10-14". Measured from the face, not the
+# centreline, so wall thickness drops out.
+CAB_BANDS = ((21.0, 26.5, "base"), (9.0, 14.5, "upper"))
+
+
+def cabinet_runs(msp, dw_layer, plan_path):
+    """Base + upper cabinet runs read straight off the DRWDWS linework.
+
+    Cabinet casework is drawn as wall-parallel lines at two depths - the
+    base counter front (~24") and the (often dashed) upper fronts (~12").
+    We walk the plan's wall CENTRELINES as reference axes (not the raw DXF
+    wall FACE lines, which are two-per-wall and would double every run),
+    collect DRWDWS segments parallel to each wall inside a depth band,
+    merge them along the wall (dashed uppers close up gaps <= 10"), pick
+    the side that faces INTO a room, and emit one run per side. Stair
+    treads, the garage, and exterior faces are excluded; a final dedup by
+    (rounded centre, angle, kind) drops runs two near-parallel walls both
+    caught."""
+    if not plan_path:
+        return []
+    try:
+        plan = json.load(open(plan_path))
+    except Exception:
+        return []
+    walls = [(w["start"][0], w["start"][1], w["end"][0], w["end"][1],
+              w.get("thickness", 6.0)) for w in plan.get("walls", [])]
+    rooms = [(r["name"].upper(), r["polygon"]) for r in plan.get("rooms", [])
+             if r.get("name") and r.get("polygon")]
+    stair_polys = [s["polygon"] for s in plan.get("stairs", [])
+                   if s.get("polygon")]
+
+    def room_at(x, y):
+        for nm, poly in rooms:
+            if in_poly(poly, x, y):
+                return nm
+        return ""
+
+    lines = []
+    for e in msp.query("LINE"):
+        if e.dxf.layer != dw_layer:
+            continue
+        (x0, y0, _), (x1, y1, _) = e.dxf.start, e.dxf.end
+        L = math.hypot(x1 - x0, y1 - y0)
+        if L < 6:
+            continue
+        lines.append((x0, y0, x1, y1, L))
+
+    runs = []
+    for (wx0, wy0, wx1, wy1, th) in walls:
+        wl = math.hypot(wx1 - wx0, wy1 - wy0)
+        if wl < 24:
+            continue
+        ux, uy = (wx1 - wx0) / wl, (wy1 - wy0) / wl
+        nx, ny = -uy, ux
+        for dlo, dhi, kind in CAB_BANDS:
+            side_segs = {1: [], -1: []}
+            for (x0, y0, x1, y1, L) in lines:
+                ex, ey = (x1 - x0) / L, (y1 - y0) / L
+                if abs(ex * ux + ey * uy) < 0.985:      # not wall-parallel
+                    continue
+                mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+                off = (mx - wx0) * nx + (my - wy0) * ny
+                dface = abs(off) - th / 2
+                if not (dlo <= dface <= dhi):
+                    continue
+                side = 1 if off > 0 else -1
+                a0 = (x0 - wx0) * ux + (y0 - wy0) * uy
+                a1 = (x1 - wx0) * ux + (y1 - wy0) * uy
+                lo, hi = sorted((a0, a1))
+                if hi < -4 or lo > wl + 4:
+                    continue
+                side_segs[side].append((max(0.0, lo), min(wl, hi), dface))
+            for side, segs in side_segs.items():
+                if not segs:
+                    continue
+                segs.sort()
+                merged, cur = [], None
+                for (lo, hi, dep) in segs:
+                    if cur and lo <= cur[1] + 10:       # dashed-gap merge
+                        cur = (cur[0], max(cur[1], hi), cur[2] + [dep])
+                    else:
+                        if cur:
+                            merged.append(cur)
+                        cur = (lo, hi, [dep])
+                if cur:
+                    merged.append(cur)
+                for (lo, hi, deps) in merged:
+                    if hi - lo < 24:                    # too short for a run
+                        continue
+                    mid = (lo + hi) / 2
+                    dep = sorted(deps)[len(deps) // 2]  # median depth
+                    # a point just inside the room on this side of the wall
+                    tx = wx0 + ux * mid + nx * side * (th / 2 + 8)
+                    ty = wy0 + uy * mid + ny * side * (th / 2 + 8)
+                    room = room_at(tx, ty)
+                    if not room or room in CAB_EXCLUDE_ROOMS:
+                        continue                        # exterior / garage
+                    cx = wx0 + ux * mid + nx * side * (th / 2 + dep / 2)
+                    cy = wy0 + uy * mid + ny * side * (th / 2 + dep / 2)
+                    if any(in_poly(p, cx, cy) for p in stair_polys):
+                        continue                        # stair treads
+                    runs.append({
+                        "kind": kind, "cx": cx, "cy": cy,
+                        "len": hi - lo, "depth": round(dep),
+                        "angle": round(math.degrees(math.atan2(uy, ux)), 1),
+                        "room": room})
+
+    # dedup by (rounded centre, angle mod 180, kind): two near-parallel
+    # walls can both catch one run - keep the longer.
+    best = {}
+    for r in runs:
+        key = (round(r["cx"] / 8), round(r["cy"] / 8),
+               round((r["angle"] % 180) / 5), r["kind"])
+        if key not in best or r["len"] > best[key]["len"]:
+            best[key] = r
+
+    out = []
+    for r in best.values():
+        if r["kind"] == "base":
+            out.append({
+                "name": "FURN-BASE-CAB", "cab": "base",
+                "center": [round(r["cx"]), round(r["cy"])],
+                "size": [round(r["len"]), r["depth"]], "height": 36,
+                "rotation": r["angle"], "auto": True,
+                "stub": "base cabinets + counter (DXF)"})
+        else:
+            out.append({
+                "name": "FURN-UPPER-CAB", "cab": "upper", "sill": 54,
+                "center": [round(r["cx"]), round(r["cy"])],
+                "size": [round(r["len"]), r["depth"]], "height": 30,
+                "rotation": r["angle"], "auto": True,
+                "stub": "upper cabinets (DXF)"})
+    return out
+
+
 # ---------------------------------------------------------------- classify
 
 def classify(c, room, kitchen_pts):
@@ -721,6 +864,19 @@ def main():
                         geom_layers={dw_layer, furn_layer, notes_layer},
                         walls=walls)
     items += fireplace_items(msp, dw_layer, walls)
+
+    # base + upper cabinet runs read off the DRWDWS casework linework. They
+    # are more specific than a generic FURN-DRAWN box, so drop any unlabeled
+    # cluster a cabinet run covers before adding the runs.
+    cab_items = cabinet_runs(msp, dw_layer, args.plan)
+    if cab_items:
+        cab_boxes = [(c["center"][0], c["center"][1],
+                      c["size"][0], c["size"][1]) for c in cab_items]
+        items = [f for f in items
+                 if not (f["name"].endswith("DRAWN")
+                         and covered(f["center"][0], f["center"][1],
+                                     f["size"][0], f["size"][1], cab_boxes))]
+        items += cab_items
 
     # manual placements are authoritative: drop mined items landing on them
     manual_boxes = [(f["center"][0], f["center"][1],
