@@ -340,6 +340,8 @@ def add_stairs(plan, path, geom_layers, gt, stair_labels):
               "treads": treads, "direction": direction}
         if down:
             st["down"] = True
+        if matched and g.get("top"):
+            st["top"] = g["top"]   # e.g. "slab": flight starts at the low slab
         out.append(st)
     # flush end: the architect's termination circle marks the tread that is
     # level with THIS floor's plane (the flight travels away from it, up or
@@ -615,14 +617,29 @@ def main():
     # architectural reality isn't derivable from the label - e.g. the
     # sunken sunroom (VR #60) whose slab sits at grade like the garage.
     for rk in (gt.get("room_kinds") or []):
-        key = rk["name"].strip().upper()
         n = 0
-        for r in plan["rooms"]:
-            if (r.get("name") or "").strip().upper() == key:
-                r["kind"] = rk["kind"]
-                n += 1
-        print(f"fix: room_kind {rk['name']} -> {rk['kind']} ({n})" if n
-              else f"fix: room_kind {rk['name']} UNMATCHED")
+        if "near" in rk:
+            nx, ny = rk["near"]
+            best, bd = None, rk.get("tol", 80)
+            for r in plan["rooms"]:
+                poly = r["polygon"]
+                rcx = sum(p[0] for p in poly) / len(poly)
+                rcy = sum(p[1] for p in poly) / len(poly)
+                d = math.hypot(rcx - nx, rcy - ny)
+                if d < bd:
+                    best, bd = r, d
+            if best is not None:
+                best["kind"] = rk["kind"]
+                n = 1
+        else:
+            key = rk["name"].strip().upper()
+            for r in plan["rooms"]:
+                if (r.get("name") or "").strip().upper() == key:
+                    r["kind"] = rk["kind"]
+                    n += 1
+        tgt = rk.get("name") or rk.get("near")
+        print(f"fix: room_kind {tgt} -> {rk['kind']} ({n})" if n
+              else f"fix: room_kind {tgt} UNMATCHED")
 
     # room material themes from the GT sidecar (owner's material photos).
     # Each entry: {"name": "KITCHEN"} (applies to every room with that name)

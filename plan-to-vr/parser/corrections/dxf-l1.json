@@ -11,7 +11,8 @@
     -1,
     0
    ],
-   "_note": "garage/mudroom run down to basement, bottom at the east end"
+   "_note": "garage/mudroom run down to basement, bottom at the east end. VR #44: the whole garage is sunken - this flight STARTS at the slab (top: slab) and descends to the basement from there.",
+   "top": "slab"
   },
   {
    "near": [
@@ -20,7 +21,7 @@
    ],
    "down": true,
    "force": true,
-   "_note": "4-tread step-down from the main floor into the garage level (garage->house connector, VR note #16); force so the DXF tread ladder here renders even though no STAIR text label sits within 110in"
+   "_note": "VR #44 rework: the drawn 4-tread ladder IS the full flight - up from the garage slab to a small platform at main-floor level outside the mudroom door (owner markup: platform north of the treads, nothing south of them)."
   },
   {
    "near": [
@@ -394,7 +395,17 @@
    "stub": "furniture drawn on the sheet (unlabeled linework)"
   }
  ],
- "room_kinds": [],
+ "room_kinds": [
+  {
+   "near": [
+    -240,
+    20
+   ],
+   "kind": "sunken",
+   "tol": 80,
+   "_note": "VR #44: the garage-side STAIR room (basement flight) sits on the sunken slab like the rest of the garage."
+  }
+ ],
  "_bridge_note": "second bridge (VR #60): pantry/bathroom divider centerline - adding the sunroom east wall shifted junction healing so the pantry loop leaked into the bathroom; pin the divider explicitly.",
  "room_themes": [
   {

@@ -1483,55 +1483,52 @@ function buildPlan(plan) {
       const dir = st.down ? -1 : 1;           // down descends, up climbs
       const N = tr.length;
       // DOWN-flight onto a modeled low slab (the garage): the drawn ladder
-      // footprint becomes a LANDING at floor level, and a solid flight
-      // continues off its far edge, descending to the slab (VR #16/#42/#44:
-      // "a landing that goes to there, then stairs approximately where they
-      // are going all the way down to the ground off of the landing").
+      // IS the flight (VR #44 rework, owner markup): a small PLATFORM at
+      // floor level sits behind the flush end (outside the house door), and
+      // the drawn treads step down from it to the slab. Nothing renders
+      // beyond the drawn ladder - no synthesized second flight.
       if (st.down) {
         const bcx = tr.reduce((a, t) => a + t.mx, 0) / N;
         const bcz = tr.reduce((a, t) => a + t.mz, 0) / N;
         const slabY = baseGroundAt(bcx, bcz);
-        if (slabY < -0.05) {
+        if (slabY < -0.05 && st.top !== 'slab') {
           const width = tr.reduce((a, t) => Math.max(a, t.len), 0);
           const ux2 = -cz, uz2 = cx;                 // tread (long) axis
           const rotY = -Math.atan2(uz2, ux2);
-          const span = (tr[N - 1].mx - tr[0].mx) * cx +
-                       (tr[N - 1].mz - tr[0].mz) * cz + depth;
-          const lcx = tr[0].mx + cx * (span / 2 - depth / 2);
-          const lcz = tr[0].mz + cz * (span / 2 - depth / 2);
-          const land = new THREE.Mesh(
-            new THREE.BoxGeometry(width, -slabY, span), stMat);
-          land.position.set(lcx, slabY / 2, lcz);
-          land.rotation.y = rotY;
-          land.castShadow = land.receiveShadow = true;
-          group.add(land); laserTargets.push(land);
-          stairSteps.push({ cx: lcx, cz: lcz, ux: ux2, uz: uz2, kx: cx, kz: cz,
-                            hl: width / 2, hd: span / 2, top: 0 });
-          // the flight off the landing's far edge, solid risers to the slab
-          const n = Math.max(3, Math.ceil(-slabY / riserM));
-          const rise = -slabY / (n + 1), stepD = 0.27;
-          const ex = tr[0].mx + cx * (span - depth / 2);
-          const ez = tr[0].mz + cz * (span - depth / 2);
-          for (let k = 1; k <= n; k++) {
-            const top = -k * rise;
-            const mxw = ex + cx * (k - 0.5) * stepD;
-            const mzw = ez + cz * (k - 0.5) * stepD;
+          const platD = 0.86;                        // small landing platform
+          const pcx = tr[0].mx - cx * platD / 2;
+          const pcz = tr[0].mz - cz * platD / 2;
+          const plat = new THREE.Mesh(
+            new THREE.BoxGeometry(width, -slabY, platD), stMat);
+          plat.position.set(pcx, slabY / 2, pcz);
+          plat.rotation.y = rotY;
+          plat.castShadow = plat.receiveShadow = true;
+          group.add(plat); laserTargets.push(plat);
+          stairSteps.push({ cx: pcx, cz: pcz, ux: ux2, uz: uz2, kx: cx, kz: cz,
+                            hl: width / 2, hd: platD / 2, top: 0 });
+          const rise = -slabY / N;                   // drawn ladder = flight
+          tr.forEach((t, i) => {
+            const top = slabY + rise * (N - 1 - i);  // t0 highest, last at slab
+            const mxw = t.mx + cx * depth / 2, mzw = t.mz + cz * depth / 2;
             const m = new THREE.Mesh(
-              new THREE.BoxGeometry(width, top - slabY, stepD), stMat);
-            m.position.set(mxw, (top + slabY) / 2, mzw);
+              new THREE.BoxGeometry(t.len, top - slabY + treadThick, depth), stMat);
+            m.position.set(mxw, (top + slabY - treadThick) / 2 + treadThick / 2, mzw);
             m.rotation.y = rotY;
             m.castShadow = m.receiveShadow = true;
             group.add(m); laserTargets.push(m);
             stairSteps.push({ cx: mxw, cz: mzw, ux: ux2, uz: uz2,
-                              kx: cx, kz: cz, hl: width / 2, hd: stepD / 2, top });
-          }
+                              kx: cx, kz: cz, hl: t.len / 2, hd: depth / 2, top });
+          });
           continue;
         }
       }
-      // each tread is a solid step block; tread 0 sits flush at floor 0
+      // each tread is a solid step block; tread 0 sits flush at the flight's
+      // base level - floor 0, or the sunken slab when the plan says
+      // top:"slab" (the garage's basement run, VR #44)
+      const baseE = st.top === 'slab' ? -gradeM : 0;
       tr.forEach((t, i) => {
-        const top = dir * i * riserM;                 // walkable surface
-        const prev = dir * (i - 1) * riserM;
+        const top = baseE + dir * i * riserM;         // walkable surface
+        const prev = baseE + dir * (i - 1) * riserM;
         let h, yc;
         if (i === 0) { h = treadThick; yc = top - treadThick / 2; }
         else { h = Math.abs(top - prev); yc = (top + prev) / 2; }
@@ -1638,7 +1635,11 @@ function buildPlan(plan) {
           // garage at grade)? then the slab cut-out already opens the floor -
           // the treads simply descend onto it, no shaft/hole/rail needed.
           const bc = baseGroundAt((rect.x0 + rect.x1) / 2, (rect.z0 + rect.z1) / 2);
-          if (bc >= -0.05) {
+          // top:"slab" = the flight STARTS on the sunken slab (the garage's
+          // basement run, VR #44) and descends below it - same open-shaft
+          // treatment, everything shifted down to the slab base.
+          const baseE2 = st.top === 'slab' ? -gradeM : 0;
+          if (bc >= -0.05 || st.top === 'slab') {
             // a true storey-to-storey descent: cut a floor opening and line
             // it as an OPEN shaft (side walls + a floor below) so the
             // descending treads stay visible - a solid dark box would swallow
@@ -1650,7 +1651,7 @@ function buildPlan(plan) {
             const mkSide = (px2, pz2, w2, d2) => {
               const s2 = new THREE.Mesh(
                 new THREE.BoxGeometry(w2, wallH, d2), wellMat);
-              s2.position.set(px2, -wallH / 2, pz2);
+              s2.position.set(px2, baseE2 - wallH / 2, pz2);
               group.add(s2);
             };
             mkSide(sx, rect.z0 + 0.01, rw, 0.02);   // shaft side walls
@@ -1659,9 +1660,9 @@ function buildPlan(plan) {
             mkSide(rect.x1 - 0.01, sz, 0.02, rd);
             const bot = new THREE.Mesh(
               new THREE.BoxGeometry(rw, 0.02, rd), wellMat);
-            bot.position.set(sx, -wallH, sz);
+            bot.position.set(sx, baseE2 - wallH, sz);
             group.add(bot);
-            const railH = 0.92, railMk = (ax, az, bx, bz) => {
+            const railH = baseE2 + 0.92, railMk = (ax, az, bx, bz) => {
               const len = Math.hypot(bx - ax, bz - az);
               const r = new THREE.Mesh(new THREE.BoxGeometry(len, 0.04, 0.04), railMat);
               r.position.set((ax + bx) / 2, railH, (az + bz) / 2);
@@ -4790,7 +4791,8 @@ function fetchPlan(url) {
   fetch(url, { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(plan => { currentPlanKey = url; loadPlan(plan); })
-    .catch(() => {
+    .catch((e) => {
+      console.error('PLAN BUILD FAILED:', e && (e.stack || e.message || e));
       // file:// or missing plan.json - fall back to the embedded copy
       if (window.PLAN_TO_VR_EMBEDDED) loadPlan(window.PLAN_TO_VR_EMBEDDED);
       else showError(

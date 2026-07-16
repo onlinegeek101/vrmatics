@@ -1376,7 +1376,7 @@
      47.031
     ]
    ],
-   "kind": "room",
+   "kind": "sunken",
    "area": 5641.6,
    "name": "STAIR"
   },
@@ -1950,7 +1950,8 @@
     -1,
     0
    ],
-   "down": true
+   "down": true,
+   "top": "slab"
   },
   {
    "polygon": [
