@@ -703,18 +703,6 @@
  ],
  "fixtures": [
   {
-   "name": "FIXT-TOILET19",
-   "center": [
-    98.0,
-    51.5
-   ],
-   "size": [
-    28.0,
-    19.0
-   ],
-   "rotation": 0.0
-  },
-  {
    "name": "FURN-SHOWER",
    "center": [
     220,

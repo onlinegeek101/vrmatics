@@ -699,6 +699,42 @@ def main():
     for f in gt.get("furnishings", []):
         plan.setdefault("fixtures", []).append(dict(f))
 
+    # Dedup the two fixture sources: extract's INSERT blocks (named, no
+    # outline) and dxf_furnish's mined furnishings (outline linework) both
+    # land in plan["fixtures"] and double up in dense corners. On overlap
+    # keep the richer one - a real outline beats a box, and a named block
+    # beats a generic FURN-DRAWN.
+    def _ov(a, b):
+        (ax, ay), (aw, ad) = a["center"], a["size"]
+        (bx, by), (bw, bd) = b["center"], b["size"]
+        ox = min(ax + aw / 2, bx + bw / 2) - max(ax - aw / 2, bx - bw / 2)
+        oy = min(ay + ad / 2, by + bd / 2) - max(ay - ad / 2, by - bd / 2)
+        if ox <= 0 or oy <= 0:
+            return 0.0
+        return ox * oy / max(1.0, min(aw * ad, bw * bd))
+
+    def _keep(a, b):                       # which of two overlapping to keep
+        ao, bo = bool(a.get("outline")), bool(b.get("outline"))
+        if ao != bo:
+            return a if ao else b
+        ag = a["name"].endswith("DRAWN")
+        bg = b["name"].endswith("DRAWN")
+        if ag != bg:
+            return b if ag else a
+        return a
+    fx = plan.get("fixtures", [])
+    keep = [True] * len(fx)
+    for i in range(len(fx)):
+        for j in range(len(fx)):
+            if i != j and keep[i] and keep[j] and _ov(fx[i], fx[j]) > 0.4 \
+                    and _keep(fx[i], fx[j]) is fx[j]:
+                keep[i] = False
+                break
+    dropped = keep.count(False)
+    if dropped:
+        plan["fixtures"] = [f for i, f in enumerate(fx) if keep[i]]
+        report.setdefault("fixture_dedup", dropped)
+
     if gt.get("palette"):
         plan["palette"] = gt["palette"]
     plan["source"] = {"kind": "dxf", "floor": args.floor}
