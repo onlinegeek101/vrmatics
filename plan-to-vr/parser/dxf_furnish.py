@@ -386,10 +386,34 @@ def room_at(rooms, x, y):
 
 # ---------------------------------------------------------------- labels
 
-def crop_segments(msp, layers, px, py, reach):
+def _clip_seg(ax, ay, bx, by, x0, x1, y0, y1):
+    """Liang-Barsky clip of a segment to an axis-aligned box; None if out."""
+    dx, dy = bx - ax, by - ay
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, ax - x0), (dx, x1 - ax), (-dy, ay - y0), (dy, y1 - ay)):
+        if p == 0:
+            if q < 0:
+                return None
+            continue
+        r = q / p
+        if p < 0:
+            t0 = max(t0, r)
+        else:
+            t1 = min(t1, r)
+        if t0 > t1:
+            return None
+    return [ax + t0 * dx, ay + t0 * dy, ax + t1 * dx, ay + t1 * dy]
+
+
+def crop_segments(msp, layers, px, py, reach, box=None):
     """Raw drawn segments near a point (incl. near-wall), absolute plan
     inches - for label items / the fireplace that never formed a cluster,
-    so they still render their real linework instead of a catalog box."""
+    so they still render their real linework instead of a catalog box.
+    `box` = (halfw, halfd) clips each segment to the item footprint, so an
+    appliance never inherits the full length of the counter run it sits
+    on (the washer/dryer spanning-bar bug)."""
+    hw, hd = box if box else (reach, reach)
+    x0, x1, y0, y1 = px - hw, px + hw, py - hd, py + hd
     segs = []
     for e in msp.query("LINE ARC CIRCLE ELLIPSE LWPOLYLINE"):
         if e.dxf.layer not in layers:
@@ -403,8 +427,11 @@ def crop_segments(msp, layers, px, py, reach):
             continue
         for i in range(len(pts) - 1):
             a, b = pts[i], pts[i + 1]
-            if math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.4:
-                segs.append([a[0], a[1], b[0], b[1]])
+            if math.hypot(b[0] - a[0], b[1] - a[1]) < 0.4:
+                continue
+            cl = _clip_seg(a[0], a[1], b[0], b[1], x0, x1, y0, y1)
+            if cl and math.hypot(cl[2] - cl[0], cl[3] - cl[1]) >= 0.4:
+                segs.append(cl)
     return segs
 
 
@@ -503,7 +530,8 @@ def label_items(msp, text_layers, clusters, red_clusters, kitchen_pts,
             entry["outline"] = c.outline(cx, cy)
         elif geom_layers:
             crop = crop_segments(msp, geom_layers, cx, cy,
-                                 max(w, d, 36) * 0.8)
+                                 max(w, d, 36) * 0.8,
+                                 box=(w / 2 + 4, d / 2 + 4))
             if len(crop) >= 4:
                 entry["outline"] = rel_outline(crop, cx, cy)
         out.append(entry)
