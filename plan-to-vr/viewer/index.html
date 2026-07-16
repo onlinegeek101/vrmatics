@@ -275,6 +275,7 @@ let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
 let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
 let doorStyle = 'raised6';       // interior door style preset (#32)
 let perDoorStyles = {};          // per-door overrides, persisted per plan
+let pendingPlanRebuild = null;   // deferred fetchPlan() request, drained at frame-top (avoids rebuilding mid-XR-frame)
 let currentPlanSource = null;               // plan.json "source" block, for notes
 
 // ---------------------------------------------------------------- lights
@@ -2404,14 +2405,18 @@ const _visUp = ob => {   // raycaster ignores the visible flag; we don't
 // visuals, and return what it hit (walls, floors, stairs, lawn ...)
 const _lo = new THREE.Vector3(), _lq = new THREE.Quaternion();
 const _ld = new THREE.Vector3();
-function laserCast() {
+function laserCast(extraTargets) {
   ctrlR.getWorldPosition(_lo);
   ctrlR.getWorldQuaternion(_lq);
   _ld.set(0, 0, -1).applyQuaternion(_lq);
   _ray.set(_lo, _ld);
   // explicit flat target list (walls, floors, stairs, doors, lawn) -
-  // testing every trim board recursively cost whole frames on Quest
-  const hit = _ray.intersectObjects(laserTargets, false)
+  // testing every trim board recursively cost whole frames on Quest.
+  // extraTargets (e.g. an open door-style wheel) take priority so the beam
+  // stops at the card instead of shooting through it to the wall behind.
+  const targets = extraTargets && extraTargets.length
+    ? extraTargets.concat(laserTargets) : laserTargets;
+  const hit = _ray.intersectObjects(targets, false)
     .find(h => _visUp(h.object)) || null;
   const ex = hit ? hit.point.x : _lo.x + _ld.x * 6;
   const ey = hit ? hit.point.y : _lo.y + _ld.y * 6;
@@ -4226,7 +4231,7 @@ function handleVRInput() {
       const trigV = gp.buttons[0] ? gp.buttons[0].value : 0;
       if (doorWheel.stage) {
         doorWheelTick(trigV);
-        laserCast();
+        laserCast(doorWheel.items);   // terminate the beam on the wheel cards, not the wall behind them
       } else if (doorHold.key) {
         doorHoldTick(trigV);
         laserCast();
@@ -4511,7 +4516,7 @@ function doorWheelTick(trigV) {
   localStorage.setItem('plan2vr-door-styles:' + currentPlanKey,
     JSON.stringify(perDoorStyles));
   closeDoorWheel(); doorGlowOff();
-  fetchPlan(currentPlanKey);
+  pendingPlanRebuild = currentPlanKey;   // defer rebuild to frame-top; rebuilding mid-XR-frame crashes the session
   vrMsg('door style updated');
 }
 
@@ -4784,6 +4789,9 @@ function renderSpectator() {
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
+  if (pendingPlanRebuild) {           // drain a deferred scene rebuild before touching the scene this frame
+    const p = pendingPlanRebuild; pendingPlanRebuild = null; fetchPlan(p);
+  }
   if (renderer.xr.isPresenting) { vrDt = dt; handleVRInput(); }
   else if (tour.active) { tourStep(dt); applyGyroTour(); }
   else if (mapMode) mapMove(dt);
