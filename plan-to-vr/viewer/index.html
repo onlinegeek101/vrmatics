@@ -510,17 +510,24 @@ const gltfLoader = new GLTFLoader();
 
 // A furnishing/fixture may name a real 3D model via `asset` (a repo path
 // like "assets/sofa.glb", or any URL). It loads at RUNTIME - drop a GLB in
-// and set the field, no rebuild - and is scaled to fit the item's footprint
-// (uniform, so it never distorts) and seated on the floor. Anything that
-// fails to load (missing file, blocked host) falls back to the schematic
-// render below, so the model is always at worst the DXF outline it replaces.
+// and set the field, no rebuild - and is sized to the SCHEMATIC it replaces:
+// the plan footprint matches exactly (model x -> width, z -> depth), so the
+// asset reads at the same size as the DXF outline from above and shares its
+// collision capsule. (Authoring convention: model length along +x, depth
+// along +z.) Height scales with the footprint - the geometric mean of the
+// two plan scales, so a stretched footprint doesn't squish/stretch it
+// vertically - and is capped to the schematic height so it never pokes
+// through the ceiling. Seated on the floor. Anything that fails to load
+// (missing file, blocked host) falls back to the schematic render below.
 function loadAssetInto(g, f, w, d, h) {
   gltfLoader.load(f.asset, (gltf) => {
     const model = gltf.scene;
     let bb = new THREE.Box3().setFromObject(model);
-    const sz = bb.getSize(new THREE.Vector3());
-    const s = Math.min(w / (sz.x || 1), d / (sz.z || 1), h / (sz.y || 1));
-    model.scale.setScalar(s > 0 ? s : 1);
+    const dim = bb.getSize(new THREE.Vector3());
+    const sx = w / (dim.x || 1), sd = d / (dim.z || 1);   // fill the footprint
+    let sy = Math.sqrt(sx * sd);                           // proportional height
+    if (h > 0) sy = Math.min(sy, h / (dim.y || 1));        // but within schematic box
+    model.scale.set(sx > 0 ? sx : 1, sy > 0 ? sy : 1, sd > 0 ? sd : 1);
     bb = new THREE.Box3().setFromObject(model);
     const c = bb.getCenter(new THREE.Vector3());
     model.position.set(-c.x, -bb.min.y, -c.z);   // centred on footprint, on floor
@@ -2268,6 +2275,7 @@ function buildPlan(plan) {
     const g = buildFixture(eff);
     g.userData.fixtureKey = fkey;
     g.userData.fixtureName = f.name || 'fixture';
+    g.userData.fixtureSize = f.size;        // schematic footprint (plan inches)
     g.userData.asset = eff.asset || null;   // reflected for headless/inspection
     const pos = toWorld(f.center[0], f.center[1]);
     // sit the fixture on the floor BENEATH it: in a sunken room (the garage
@@ -4796,7 +4804,7 @@ window.PLAN2VR_FIXT = {
     if (fixtureGroup) for (const g of fixtureGroup.children)
       if (g.userData && g.userData.fixtureKey)
         out.push({ key: g.userData.fixtureKey, name: g.userData.fixtureName,
-                   asset: g.userData.asset || null });
+                   asset: g.userData.asset || null, size: g.userData.fixtureSize || null });
     return out;
   },
 };

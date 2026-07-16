@@ -6,10 +6,15 @@ fixtures pipeline - placement, rendering, collision. Two tiers:
 
 1. **Real asset**: a `.glb` in `viewer/assets/` is loaded at RUNTIME by
    the viewer (`GLTFLoader`, vendored `three` under `viewer/vendor/` -
-   same version, NOT a CDN), uniformly scaled to the fixture's footprint
-   and seated on the floor. Anything that fails to load (missing file,
-   blocked host) falls back to the schematic DXF-outline render, so the
-   model is at worst the linework it replaces. Assets are committed to the
+   same version, NOT a CDN), **sized to the schematic it replaces** and
+   seated on the floor. The plan footprint matches exactly - model +x maps
+   to the fixture width, +z to its depth (author models length-along-x,
+   depth-along-z) - so the asset reads at the same size as the DXF outline
+   from above and shares its collision capsule; height scales with the
+   footprint (geometric mean, capped to the schematic height). Anything
+   that fails to load (missing file, blocked host) falls back to the
+   schematic DXF-outline render, so the model is at worst the linework it
+   replaces. Assets are committed to the
    repo, so they MUST be redistributable:
    - Poly Haven (CC0, PBR furniture/props, quality first choice)
    - Kenney.nl furniture kit + KayKit / Quaternius (CC0 low-poly)
