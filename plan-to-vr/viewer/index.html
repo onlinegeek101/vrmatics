@@ -500,6 +500,29 @@ function buildFixture(f) {
   const w = f.size[0] * IN2M, d = f.size[1] * IN2M, h = (f.height || 30) * IN2M;
   // furnishing stub: massing block + "NEED ASSET" label until a real
   // (open-source) model is vendored for it - see tools/furnishings.md
+  if (f.stub && f.outline && f.outline.length) {
+    // ShareCAD parity: extrude the item's ACTUAL drawn linework (segments
+    // are centre-relative plan inches; plan +y -> world -z) so the stub
+    // sits exactly on the sheet symbol instead of a guessed bounding box.
+    const g = new THREE.Group();
+    g.userData.stub = true;
+    const H = Math.max(0.25, (f.height || 30) * IN2M);
+    const mat = std({ color: 0x9c7c50, roughness: 0.7,
+                      transparent: true, opacity: 0.85 });
+    for (const s of f.outline) {
+      const ax = s[0] * IN2M, az = -s[1] * IN2M;
+      const bx = s[2] * IN2M, bz = -s[3] * IN2M;
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.02) continue;
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(len, H, 0.016), mat);
+      fin.position.set((ax + bx) / 2, H / 2, (az + bz) / 2);
+      fin.rotation.y = Math.atan2(-(bz - az), bx - ax);
+      fin.castShadow = fin.receiveShadow = true;
+      g.add(fin);
+      laserTargets.push(fin);
+    }
+    return g;
+  }
   if (f.stub) {
     // placeholder massing: the NEED-ASSET label tiles the whole surface
     // like a material, so it reads from any angle/distance in VR
