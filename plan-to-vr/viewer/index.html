@@ -2150,7 +2150,11 @@ function buildPlan(plan) {
   for (const f of plan.fixtures || []) {
     const g = buildFixture(f);
     const pos = toWorld(f.center[0], f.center[1]);
-    g.position.set(pos.x, 0, pos.z);
+    // sit the fixture on the floor BENEATH it: in a sunken room (the garage
+    // slab) that is -gradeM, so garage furniture rests on the slab instead of
+    // floating ~0.71m up at house level and reading as half-buried (VR #44).
+    const fy = baseGroundAt(pos.x, pos.z);
+    g.position.set(pos.x, fy, pos.z);
     g.rotation.y = (f.rotation || 0) * Math.PI / 180;  // plan y-flip keeps sense
     fixtureGroup.add(g);
     // collision capsule along the long axis (rotation.y maps local +x to
