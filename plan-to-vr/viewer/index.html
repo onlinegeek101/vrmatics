@@ -4555,9 +4555,12 @@ function wheelItemMesh(item) {
   x.fillStyle = '#161b26'; x.fillRect(0, 0, 256, 320);
   x.strokeStyle = '#4a86c8'; x.lineWidth = 6; x.strokeRect(3, 3, 250, 314);
   const meta = item.meta || item.id[0] === '_' || item.id === 'swap';
+  // a catalog model id is a path/URL (has a "/" or "."); door-style ids
+  // ('raised6', 'shaker'...) are not - only those get the painted door face.
+  const isModel = !meta && /[/.]/.test(item.id);
   if (item.icon === 'sofa') paintSofaIcon(x, 10, 10, 236, 244);
-  else if (!meta) paintDoorIcon(x, item.id, 10, 10, 236, 244);
-  const labelOnly = meta && !item.icon;
+  else if (!meta && !isModel) paintDoorIcon(x, item.id, 10, 10, 236, 244);
+  const labelOnly = (meta || isModel) && !item.icon;
   x.fillStyle = '#e8eefb';
   x.font = (labelOnly ? 'bold 34px' : 'bold 24px') + ' system-ui, sans-serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
@@ -4687,17 +4690,18 @@ function fixtureTags(name) {
   const has = s => n.includes(s), add = (...xs) => xs.forEach(x => t.add(x));
   if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) add('sofa', 'seating');
   if (has('CHAIR') || has('RECLIN')) add('chair', 'seating');
-  if (has('TABLE') || has('DESK')) add('table');
+  if (has('TABLE') || has('DESK')) add('table', 'seating');
   if (has('BED')) add('bed');
-  if (has('DRAWN')) add('seating', 'table', 'furniture');   // generic drawn piece
-  if (has('FRIDGE') || has('REFRIG')) add('fridge', 'appliance');
-  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) add('range', 'appliance');
-  if (has('DISHWASH')) add('dishwasher', 'appliance');
-  if (has('WASHER')) add('washer', 'appliance');
-  if (has('DRYER')) add('dryer', 'appliance');
-  if (has('TOILET') || has('WC')) add('toilet', 'bath');
-  if (has('SHOWER') || has('TUB') || has('BATH')) add('shower', 'tub', 'bath');
-  if (has('VANITY') || has('SINK') || has('LAV')) add('sink', 'vanity', 'bath');
+  if (has('DRAWN')) add('seating', 'table');            // generic drawn piece: sofa/chair/table
+  if (has('FRIDGE') || has('REFRIG')) add('fridge');
+  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) add('range');
+  if (has('DISHWASH')) add('dishwasher');
+  if (has('WASHER') && !has('DISHWASH')) add('washer');   // 'DISHWASHER' contains 'WASHER'
+  if (has('DRYER')) add('dryer');
+  if (has('TOILET') || has('WC')) add('toilet');
+  if (has('SHOWER')) add('shower');
+  if (has('TUB') || has('BATHTUB')) add('tub', 'shower');
+  if (has('VANITY') || has('SINK') || has('LAV')) add('sink', 'vanity');
   if (has('ISLAND') || has('COUNTER') || has('CAB')) add('cabinet', 'counter', 'kitchen');
   if (has('FIRE')) add('fireplace');
   return t;

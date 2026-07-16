@@ -1,10 +1,15 @@
 [
- {
-  "id": "assets/sofa.glb",
-  "label": "leather sofa",
-  "icon": "sofa",
-  "tags": ["sofa", "seating", "drawn"],
-  "source": "authored in-repo (trimesh)",
-  "license": "CC0-1.0"
- }
+ { "id": "assets/sofa.glb",       "label": "leather sofa",  "icon": "sofa", "tags": ["sofa", "seating"],  "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/bed.glb",        "label": "bed",           "tags": ["bed"],              "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/table.glb",      "label": "table",         "tags": ["table", "seating"], "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/chair.glb",      "label": "chair",         "tags": ["chair", "seating"], "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/fridge.glb",     "label": "refrigerator",  "tags": ["fridge"],           "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/range.glb",      "label": "range / stove", "tags": ["range"],            "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/dishwasher.glb", "label": "dishwasher",    "tags": ["dishwasher"],       "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/washer.glb",     "label": "washer",        "tags": ["washer"],           "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/dryer.glb",      "label": "dryer",         "tags": ["dryer"],            "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/toilet.glb",     "label": "toilet",        "tags": ["toilet"],           "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/vanity.glb",     "label": "vanity / sink", "tags": ["sink", "vanity"],   "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/shower.glb",     "label": "shower",        "tags": ["shower"],           "source": "authored in-repo (trimesh)", "license": "CC0-1.0" },
+ { "id": "assets/tub.glb",        "label": "bathtub",       "tags": ["tub"],              "source": "authored in-repo (trimesh)", "license": "CC0-1.0" }
 ]
