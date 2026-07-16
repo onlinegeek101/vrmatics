@@ -100,8 +100,8 @@
   },
   {
    "start": [
-    214.053,
-    297.875
+    214.051,
+    345.875
    ],
    "end": [
     214.061,
@@ -256,8 +256,8 @@
   },
   {
    "start": [
-    -19.235,
-    297.889
+    -19.152,
+    345.878
    ],
    "end": [
     -19.644,
@@ -413,11 +413,11 @@
   {
    "start": [
     -21.448,
-    294.812
+    342.812
    ],
    "end": [
     217.081,
-    292.991
+    340.991
    ],
    "thickness": 6.03,
    "height": 96.0
@@ -478,7 +478,7 @@
   },
   {
    "wall_index": 8,
-   "position": 0.158,
+   "position": 0.3067,
    "width": 35.0,
    "type": "window",
    "sill": 30.0,
@@ -486,7 +486,7 @@
   },
   {
    "wall_index": 8,
-   "position": 0.6506,
+   "position": 0.7123,
    "width": 107.0,
    "type": "window",
    "sill": 30.0,
@@ -722,7 +722,7 @@
   },
   {
    "wall_index": 21,
-   "position": 0.1484,
+   "position": 0.2911,
    "width": 34.99,
    "type": "window",
    "sill": 30.0,
@@ -730,7 +730,7 @@
   },
   {
    "wall_index": 21,
-   "position": 0.8374,
+   "position": 0.8646,
    "width": 34.03,
    "type": "door",
    "sill": 0.0,
@@ -738,7 +738,7 @@
    "hinge": 1,
    "swing": -1,
    "leaf": 31.9,
-   "hinge_at": 215.7
+   "hinge_at": 263.7
   },
   {
    "wall_index": 22,
@@ -840,32 +840,32 @@
    "wall_index": 34,
    "position": 0.1567,
    "width": 41.89,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 34,
    "position": 0.3828,
    "width": 41.89,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 34,
    "position": 0.6089,
    "width": 41.88,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   },
   {
    "wall_index": 34,
    "position": 0.835,
    "width": 41.89,
-   "type": "window",
-   "sill": 30.0,
+   "type": "opening",
+   "sill": 0.0,
    "head": 80.0
   }
  ],
@@ -1150,7 +1150,7 @@
      224.102
     ],
     [
-     -19.371,
+     -19.368,
      225.325
     ],
     [
@@ -1159,7 +1159,7 @@
     ]
    ],
    "kind": "room",
-   "area": 28192.7,
+   "area": 28193.0,
    "name": "PLAY ROOM"
   },
   {
@@ -1204,16 +1204,16 @@
      70.979
     ],
     [
-     -19.371,
+     -19.368,
      225.325
     ],
     [
-     214.029,
+     214.034,
      227.013
     ]
    ],
    "kind": "room",
-   "area": 36241.2,
+   "area": 36241.3,
    "name": "DINING ROOM"
   },
   {
@@ -1254,25 +1254,28 @@
   {
    "polygon": [
     [
-     214.016,
-     292.99
+     214.014,
+     340.99
     ],
     [
-     214.029,
+     214.034,
      227.013
     ],
     [
-     -19.371,
+     -19.368,
      225.325
     ],
     [
-     -19.259,
-     294.795
+     -19.176,
+     342.795
     ]
    ],
-   "kind": "sunken",
-   "area": 15802.5,
-   "name": "SUN ROOM"
+   "kind": "room",
+   "area": 26997.9,
+   "name": "SUN ROOM",
+   "theme": {
+    "floor": "laminate"
+   }
   }
  ],
  "footprint": [
@@ -1329,60 +1332,60 @@
    228.508
   ],
   [
-   -21.23,
-   291.798
+   -21.148,
+   339.797
   ],
   [
    -24.484,
-   291.823
+   339.823
   ],
   [
    -24.438,
-   297.848
+   345.848
   ],
   [
-   -21.22,
-   297.823
+   -21.137,
+   345.822
   ],
   [
-   -21.216,
-   299.877
+   -21.134,
+   347.867
   ],
   [
-   -17.246,
-   299.87
+   -17.164,
+   347.86
   ],
   [
-   -17.25,
-   297.793
+   -17.167,
+   345.792
   ],
   [
-   211.016,
-   296.05
+   211.015,
+   344.05
   ],
   [
-   211.016,
-   300.911
+   211.014,
+   348.911
   ],
   [
-   217.089,
-   300.912
+   217.087,
+   348.912
   ],
   [
-   217.089,
-   296.004
+   217.088,
+   344.004
   ],
   [
    220.116,
-   295.981
+   343.981
   ],
   [
    220.071,
-   289.956
+   337.956
   ],
   [
-   217.09,
-   289.979
+   217.088,
+   337.979
   ],
   [
    217.097,
@@ -1578,76 +1581,9 @@
   "orphan line not paired into a wall: (-26.6,224.0)->(-21.3,224.0)",
   "orphan line not paired into a wall: (-26.6,224.0)->(-21.3,224.0)",
   "5 paired piece(s) shorter than 12\" dropped (likely jamb caps, not walls)",
-  "7 wide gap(s) had no door/window evidence; kept as full-height cased openings"
+  "11 wide gap(s) had no door/window evidence; kept as full-height cased openings"
  ],
  "stairs": [
-  {
-   "polygon": [
-    [
-     -16.6,
-     267.6
-    ],
-    [
-     36.9,
-     267.6
-    ],
-    [
-     36.9,
-     295.6
-    ],
-    [
-     -16.6,
-     295.6
-    ]
-   ],
-   "treads": [
-    [
-     [
-      -16.6,
-      267.6
-     ],
-     [
-      31.4,
-      267.6
-     ]
-    ],
-    [
-     [
-      -16.6,
-      277.6
-     ],
-     [
-      31.4,
-      277.6
-     ]
-    ],
-    [
-     [
-      -16.6,
-      287.6
-     ],
-     [
-      31.4,
-      287.6
-     ]
-    ],
-    [
-     [
-      -5.0,
-      295.6
-     ],
-     [
-      36.9,
-      295.6
-     ]
-    ]
-   ],
-   "direction": [
-    0,
-    1
-   ],
-   "down": true
-  },
   {
    "polygon": [
     [
@@ -2059,19 +1995,20 @@
    "is_primary": true
   }
  ],
- "palette": {
-  "PLAY ROOM": "#b9c445",
-  "_note": "accents from owners' current house: chartreuse playroom, deep-teal sunroom (their 'reading room')",
-  "SUNROOM": "#3f5661"
- },
- "source": {
-  "kind": "dxf",
-  "floor": "1"
- },
  "underlay": {
   "file": "home-l1.png",
   "x0": -780.55,
   "y1": 268.9,
   "in_per_px": 0.48
+ },
+ "palette": {
+  "PLAY ROOM": "#b9c445",
+  "_note": "accents from owners' current house: chartreuse playroom, deep-teal sunroom (their 'reading room')",
+  "SUNROOM": "#3f5661",
+  "SUN ROOM": "#f4f2ec"
+ },
+ "source": {
+  "kind": "dxf",
+  "floor": "1"
  }
 }

@@ -24,19 +24,6 @@
   },
   {
    "near": [
-    7,
-    264
-   ],
-   "_note": "VR #60: steps down from the dining door INTO the sunken sunroom (was: exterior stoop to grade - the sunroom exists but was not drawn on A1.1)",
-   "down": true,
-   "direction": [
-    0,
-    1
-   ],
-   "force": true
-  },
-  {
-   "near": [
     -97,
     -232
    ],
@@ -105,7 +92,8 @@
  "palette": {
   "PLAY ROOM": "#b9c445",
   "_note": "accents from owners' current house: chartreuse playroom, deep-teal sunroom (their 'reading room')",
-  "SUNROOM": "#3f5661"
+  "SUNROOM": "#3f5661",
+  "SUN ROOM": "#f4f2ec"
  },
  "room_bridges": [
   [
@@ -165,12 +153,15 @@
    "stub": "brown leather sectional sofa (photo 3611)"
   }
  ],
- "room_kinds": [
+ "room_kinds": [],
+ "_bridge_note": "second bridge (VR #60): pantry/bathroom divider centerline - adding the sunroom east wall shifted junction healing so the pantry loop leaked into the bathroom; pin the divider explicitly.",
+ "room_themes": [
   {
    "name": "SUN ROOM",
-   "kind": "sunken",
-   "_note": "VR #60: the real (undrawn) sunroom north of the dining room sits a few steps DOWN from the main floor - the drawn tread ladder descends into it. kind sunken drops its slab to grade level like the garage."
+   "theme": {
+    "floor": "laminate"
+   },
+   "_note": "owner: level with main floor (NOT sunken), laminate wood floor, white walls; north wall pushed 48in out"
   }
- ],
- "_bridge_note": "second bridge (VR #60): pantry/bathroom divider centerline - adding the sunroom east wall shifted junction healing so the pantry loop leaked into the bathroom; pin the divider explicitly."
+ ]
 }

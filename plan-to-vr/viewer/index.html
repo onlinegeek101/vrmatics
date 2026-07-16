@@ -651,6 +651,7 @@ function floorFinish(name) {
   else if (name === 'slab') m = slabMat;
   else if (name === 'maple') { m = roomWoodMat.clone(); m.color.set(0xe6c9a0); }
   else if (name === 'slate') { m = roomTileMat.clone(); m.color.set(0x62685e); m.roughness = 0.55; }
+  else if (name === 'laminate') { m = roomWoodMat.clone(); m.color.set(0xdcc79e); m.roughness = 0.4; }
   else if (/^#/.test(name)) { m = roomWoodMat.clone(); m.color.set(name); }
   themedFloorMats.set(name, m);
   return m;
