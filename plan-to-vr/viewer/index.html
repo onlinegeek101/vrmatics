@@ -132,6 +132,7 @@
   <button data-layer="geom" class="on" title="3D geometry (1)">3D</button>
   <button data-layer="lines" title="plan linework (2)">lines</button>
   <button data-layer="sheet" title="source sheet underlay (3)">sheet</button>
+  <button data-layer="stubs" class="on" title="placeholder furnishings (4)">todo</button>
 </div>
 <div id="overlay">
   <div class="card">
@@ -486,30 +487,37 @@ function buildFixture(f) {
   // furnishing stub: massing block + "NEED ASSET" label until a real
   // (open-source) model is vendored for it - see tools/furnishings.md
   if (f.stub) {
+    // placeholder massing: the NEED-ASSET label tiles the whole surface
+    // like a material, so it reads from any angle/distance in VR
     const g = new THREE.Group();
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 256;
+    const x = c.getContext('2d');
+    x.fillStyle = '#3a3f47'; x.fillRect(0, 0, 512, 256);
+    x.strokeStyle = '#565c66'; x.lineWidth = 3; x.strokeRect(4, 4, 504, 248);
+    x.fillStyle = '#ffd34d'; x.font = 'bold 42px sans-serif';
+    x.fillText('NEED ASSET', 16, 54);
+    x.fillStyle = '#f2f2f2'; x.font = '23px sans-serif';
+    const words = String(f.stub).split(' ');
+    let line = '', yy = 100;
+    for (const wd of words) {
+      if ((line + wd).length > 36 && yy < 240) {
+        x.fillText(line, 16, yy); yy += 30; line = '';
+      }
+      line += wd + ' ';
+    }
+    if (yy < 250) x.fillText(line.slice(0, 40), 16, yy);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(Math.max(1, Math.round(Math.max(w, d) / 1.15)),
+                   Math.max(1, Math.round(h / 0.6)));
     const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-      std({ color: 0xcbb28a, roughness: 0.85 }));
+      std({ map: tex, color: 0xffffff, roughness: 0.85 }));
     box.position.y = h / 2;
     box.castShadow = box.receiveShadow = true;
     g.add(box);
-    const c = document.createElement('canvas');
-    c.width = 512; c.height = 160;
-    const x = c.getContext('2d');
-    x.fillStyle = '#20242b'; x.fillRect(0, 0, 512, 160);
-    x.fillStyle = '#ffd34d'; x.font = 'bold 34px sans-serif';
-    x.fillText('NEED ASSET', 16, 46);
-    x.fillStyle = '#fff'; x.font = '22px sans-serif';
-    const words = String(f.stub).split(' '); let line = '', yy = 84;
-    for (const wd of words) {
-      if ((line + wd).length > 38) { x.fillText(line, 16, yy); yy += 28; line = ''; }
-      line += wd + ' ';
-    }
-    x.fillText(line, 16, yy);
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(w, 0.9), Math.max(w, 0.9) * 160 / 512),
-      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.DoubleSide }));
-    plate.position.set(0, h + 0.25, 0);
-    g.add(plate);
     laserTargets.push(box);
+    g.userData.stub = true;
     return g;
   }
   const name = (f.name || '').split('$').pop().toUpperCase();
@@ -587,7 +595,7 @@ let planOverlay = null;      // 2D plan linework, shown in map view
 let underlayMesh = null;     // raster of the source sheet under the model
 let planSizeM = { w: 10, h: 10 };
 let planOffset = { cx: 0, cy: 0 };   // recenter offsets, plan inches
-const layerState = { geom: true, lines: false, sheet: false };
+const layerState = { geom: true, lines: false, sheet: false, stubs: true };
 let doorLeaves = [];    // grabbable hinged doors: {pivot, theta0, rotSign, len, head, open}
 let laserTargets = [];  // big drawable surfaces only - keeps the laser
                         // raycast cheap on Quest (no per-trim-board tests)
@@ -2151,6 +2159,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Digit1') { layerState.geom = !layerState.geom; applyLayers(); }
   if (e.code === 'Digit2') { layerState.lines = !layerState.lines; applyLayers(); }
   if (e.code === 'Digit3') { layerState.sheet = !layerState.sheet; applyLayers(); }
+  if (e.code === 'Digit4') { layerState.stubs = !layerState.stubs; applyLayers(); }
   if (e.code === 'KeyT') toggleTour();
   else if (tour.active && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) stopTour();
 });
@@ -2949,6 +2958,9 @@ function fitMapCam() {
 
 function applyLayers() {
   if (planOverlay) planOverlay.visible = layerState.lines;
+  if (fixtureGroup)
+    for (const ch of fixtureGroup.children)
+      if (ch.userData.stub) ch.visible = layerState.stubs;
   if (underlayMesh) underlayMesh.visible = layerState.sheet;
   if (planGroup) {
     for (const ch of planGroup.children) {
