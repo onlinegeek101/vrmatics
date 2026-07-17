@@ -83,7 +83,7 @@
     -54.468,
     -96.293
    ],
-   "thickness": 4.02,
+   "thickness": 3.99,
    "height": 96.0
   },
   {
@@ -232,18 +232,6 @@
   },
   {
    "start": [
-    -79.669,
-    -130.324
-   ],
-   "end": [
-    -51.305,
-    -130.324
-   ],
-   "thickness": 6.1,
-   "height": 96.0
-  },
-  {
-   "start": [
     -125.037,
     84.986
    ],
@@ -388,6 +376,18 @@
   },
   {
    "start": [
+    -79.669,
+    -129.025
+   ],
+   "end": [
+    -55.169,
+    -129.025
+   ],
+   "thickness": 4.0,
+   "height": 96.0
+  },
+  {
+   "start": [
     -81.694,
     -179.977
    ],
@@ -462,8 +462,8 @@
   },
   {
    "wall_index": 6,
-   "position": 0.2923,
-   "width": 37.93,
+   "position": 0.3236,
+   "width": 43.18,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,
@@ -721,7 +721,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 20,
+   "wall_index": 19,
    "position": 0.463,
    "width": 33.97,
    "type": "door",
@@ -733,7 +733,7 @@
    "hinge_at": 44.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.2911,
    "width": 34.99,
    "type": "window",
@@ -741,7 +741,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 22,
+   "wall_index": 21,
    "position": 0.8646,
    "width": 34.03,
    "type": "door",
@@ -753,7 +753,7 @@
    "hinge_at": 263.7
   },
   {
-   "wall_index": 23,
+   "wall_index": 22,
    "position": 0.2029,
    "width": 165.67,
    "type": "opening",
@@ -761,7 +761,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 23,
+   "wall_index": 22,
    "position": 0.5937,
    "width": 250.4,
    "type": "window",
@@ -769,7 +769,7 @@
    "head": 80.0
   },
   {
-   "wall_index": 23,
+   "wall_index": 22,
    "position": 0.9546,
    "width": 38.0,
    "type": "door",
@@ -781,7 +781,7 @@
    "hinge_at": 539.1
   },
   {
-   "wall_index": 25,
+   "wall_index": 24,
    "position": 0.8016,
    "width": 37.97,
    "type": "door",
@@ -793,7 +793,7 @@
    "hinge_at": 127.9
   },
   {
-   "wall_index": 27,
+   "wall_index": 26,
    "position": 0.539,
    "width": 33.95,
    "type": "door",
@@ -8446,6 +8446,7 @@
   "orphan line not paired into a wall: (-184.7,-84.2)->(-184.6,-78.8)",
   "orphan line not paired into a wall: (-121.3,-88.2)->(-83.6,-88.2)",
   "orphan line not paired into a wall: (-1.1,2.0)->(3.0,2.0)",
+  "orphan line not paired into a wall: (-55.4,-124.1)->(-51.3,-124.1)",
   "orphan line not paired into a wall: (-81.8,-32.1)->(-46.6,-32.1)",
   "orphan line not paired into a wall: (2.9,-29.7)->(2.9,-36.1)",
   "orphan line not paired into a wall: (-184.7,-88.2)->(-155.0,-88.2)",
