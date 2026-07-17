@@ -39,10 +39,12 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const IN2M = 0.0254;
 const WALL_TH = 5, WALL_H = 96, HEAD = 84, SILL = 30, CEIL = 96;   // inches
-const DXF = './sample-house.dxf';
+let DXF = './sample-house.dxf';   // active plan (swapped by the layout picker)
 
 // ---------------------------------------------------------------- DXF parse
 // Minimal reader for the entities this pipeline uses: LINE, LWPOLYLINE, TEXT.
@@ -92,14 +94,28 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8fb2d8);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
-scene.add(new THREE.HemisphereLight(0xbcd6f2, 0x555045, 1.1));
-const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
-sun.position.set(6, 12, 4); sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 40 });
-scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xbcd6f2, 0x555045, 0.6));
+const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
+const SUN_DIR = new THREE.Vector3(6, 12, 4);
+sun.position.copy(SUN_DIR); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0002;
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 60 });
+scene.add(sun); scene.add(sun.target);
+
+// --- image-based lighting: a soft indoor env from RoomEnvironment (PMREM) ---
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.65;
+
+// --- sky dome, sun placed to match the directional light ---
+const sky = new Sky();
+sky.scale.setScalar(4000); scene.add(sky);
+Object.assign(sky.material.uniforms.turbidity, { value: 4 });
+Object.assign(sky.material.uniforms.rayleigh, { value: 1.2 });
+Object.assign(sky.material.uniforms.mieCoefficient, { value: 0.005 });
+Object.assign(sky.material.uniforms.mieDirectionalG, { value: 0.8 });
+sky.material.uniforms.sunPosition.value.copy(SUN_DIR).normalize();
 
 // simple orbit around the house centre
 const target = new THREE.Vector3(6.1, 0, -4.6);
@@ -138,11 +154,14 @@ function mats(styled) {
     stair: new THREE.MeshStandardMaterial({ color: 0x9c6a40, roughness: 0.7 }),
     glass: new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.35 }),
     leaf: new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 }),
+    ceil: new THREE.MeshStandardMaterial({ color: 0xf3f0ea, roughness: 0.95, side: THREE.BackSide }),
+    trim: new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.6 }),
+    styled: true,
   };
   const flat = new THREE.MeshStandardMaterial({ color: 0x9aa2ad, roughness: 1 });
   return { grade: { '-24': flat, '0': flat }, wall: flat, stair: flat,
     glass: new THREE.MeshStandardMaterial({ color: 0x88b0c0, transparent: true, opacity: 0.3 }),
-    leaf: flat };
+    leaf: flat, ceil: flat, trim: flat, styled: false };
 }
 
 // ---------------------------------------------------------------- geometry helpers
@@ -236,6 +255,7 @@ function build() {
     const solid = (x1_, z1_, x2_, z2_, y0, y1) => {           // wall + collider
       root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH, y0, y1, M.wall));
       colliders.push({ ax: x1_, az: z1_, bx: x2_, bz: z2_, hw });
+      if (M.styled) root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH + 1.4, y0, y0 + 4 * IN2M, M.trim)); // baseboard
     };
     if (!mine.length) { solid(ax, az, bx, bz, base, top); continue; }
     // solid sub-walls between openings, header over each, apron under windows
@@ -256,9 +276,29 @@ function build() {
       } else if (o.kind === 'door') {
         root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.5, base, headY, M.leaf));              // leaf (pass through)
       }
+      if (M.styled && o.kind !== 'opening') {               // proud casing frame (jambs + head)
+        const jw = 3 * IN2M, ct = WALL_TH + 2, headC = headY + 3 * IN2M;
+        root.add(boxBetween(...P(s), ...P(Math.min(e, s + jw)), ct, base, headC, M.trim));
+        root.add(boxBetween(...P(Math.max(s, e - jw)), ...P(e), ct, base, headC, M.trim));
+        root.add(boxBetween(sx, sz, ex, ez, ct, headY, headC, M.trim));
+      }
       cut = e;
     }
     if (cut < len) { const [x, z] = P(cut); solid(x, z, bx, bz, base, top); }
+  }
+
+  // 5a. CEILINGS + room lights (styling layer) — one per grade region
+  if (on.materials) for (const r of regions) {
+    const shp = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), -wz(y))));
+    const cg = new THREE.ShapeGeometry(shp); cg.rotateX(-Math.PI / 2);
+    const cm = new THREE.Mesh(cg, M.ceil);
+    cm.position.y = r.elev * IN2M + CEIL * IN2M;
+    cm.receiveShadow = true; root.add(cm);
+    const cxs = r.pts.map(p => p[0]), cys = r.pts.map(p => p[1]);
+    const ccx = (Math.min(...cxs) + Math.max(...cxs)) / 2, ccy = (Math.min(...cys) + Math.max(...cys)) / 2;
+    const pl = new THREE.PointLight(0xffe8c4, 6, 9, 2);
+    pl.position.set(wx(ccx), r.elev * IN2M + (CEIL - 10) * IN2M, wz(ccy));
+    root.add(pl);
   }
 
   // 4. STAIRS + landing — footprint rect; rise = the grade drop between its two
