@@ -27,6 +27,8 @@
 <div id="panel">
   <h1>plan-to-vr <span style="color:#4a86c8">v2</span></h1>
   <div class="sub">DXF layers built into 3D, in order. Toggle a layer to add/remove its stage.</div>
+  <select id="planpick" style="width:100%;margin-bottom:10px;background:#232b3d;color:#dfe6f2;
+    border:1px solid #2f3850;border-radius:7px;padding:6px 8px;font:13px system-ui;cursor:pointer"></select>
   <div id="layers"></div>
 </div>
 <div id="hint">orbit: drag / scroll, <b>click a door</b> to open it · <b>🚶 walk</b>: click to enter, <b>WASD</b> move, mouse look, <b>Shift</b> run, <b>E</b>/click door, <b>Esc</b> exit · toggle any DXF layer on the left</div>
@@ -81,6 +83,60 @@ function parseDXF(text) {
   return ents;
 }
 const byLayer = (ents, lay) => ents.filter(e => e.layer === lay);
+
+// ---------------------------------------------------------------- plan JSON adapter
+// The committed plans/*.json (v1's processed schema, PII-free) are rendered by
+// synthesizing the same DXF-style entities parseDXF() would emit, so build()
+// consumes them unchanged: footprint→TOPO slab, walls→WALL lines,
+// openings→OPENING rects (color by type), fixtures→FURN rect + label, stairs→STAIR.
+function fixtureAssetName(name) {
+  const n = (name || '').toUpperCase();
+  const has = s => n.includes(s);
+  if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) return 'sofa';
+  if (has('BED')) return 'bed';
+  if (has('COFFEE') || has('TABLE') || has('DESK') || has('DINING')) return 'table';
+  if (has('CHAIR') || has('RECLIN')) return 'chair';
+  if (has('FRIDGE') || has('REFRIG')) return 'fridge';
+  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) return 'range';
+  if (has('DISHWASH')) return 'dishwasher';
+  if (has('WASHER')) return 'washer';
+  if (has('DRYER')) return 'dryer';
+  if (has('TOILET') || has('WC')) return 'toilet';
+  if (has('SHOWER')) return 'shower';
+  if (has('TUB') || has('BATHTUB')) return 'tub';
+  if (has('VANITY') || has('SINK') || has('LAV')) return 'vanity';
+  return '';                                    // unknown → labelled fallback box
+}
+function entsFromJSON(j) {
+  const E = [];
+  const push = o => E.push(Object.assign({ type: '', layer: '0', color: 256, elev: 0, pts: [], text: '', h: 0 }, o));
+  if (j.footprint && j.footprint.length >= 3)
+    push({ type: 'LWPOLYLINE', layer: 'TOPO', elev: 0, pts: j.footprint.map(p => [p[0], p[1]]) });
+  for (const w of j.walls || [])
+    push({ type: 'LINE', layer: 'WALL', pts: [[w.start[0], w.start[1]], [w.end[0], w.end[1]]] });
+  for (const o of j.openings || []) {
+    const w = (j.walls || [])[o.wall_index]; if (!w) continue;
+    const ax = w.start[0], ay = w.start[1], bx = w.end[0], by = w.end[1];
+    const t = o.position, cx = ax + (bx - ax) * t, cy = ay + (by - ay) * t;
+    const L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L, half = o.width / 2;
+    const color = o.type === 'door' ? 1 : o.type === 'window' ? 5 : 2;
+    push({ type: 'LWPOLYLINE', layer: 'OPENING', color, pts: [[cx - ux * half, cy - uy * half], [cx + ux * half, cy + uy * half]] });
+  }
+  for (const s of j.stairs || [])
+    if (s.polygon) push({ type: 'LWPOLYLINE', layer: 'STAIR', pts: s.polygon.map(p => [p[0], p[1]]) });
+  for (const f of j.fixtures || []) {
+    const [cx, cy] = f.center, [w, d] = f.size;
+    push({ type: 'LWPOLYLINE', layer: 'FURN', pts: [[cx - w / 2, cy - d / 2], [cx + w / 2, cy - d / 2], [cx + w / 2, cy + d / 2], [cx - w / 2, cy + d / 2]] });
+    push({ type: 'TEXT', layer: 'FURN', text: fixtureAssetName(f.name), pts: [[cx, cy]] });
+  }
+  E._spawn = (() => {                            // primary camera → walker spawn
+    const c = (j.cameras || []).find(c => c.is_primary) || (j.cameras || [])[0];
+    if (!c) return null;
+    const rot = c.rotation || 0;
+    return { px: c.position[0], py: c.position[1], yaw: Math.abs(rot) > 6.5 ? rot * Math.PI / 180 : rot };
+  })();
+  return E;
+}
 
 // plan inches -> world metres. plan +y is north; map to -z so north is -z.
 const wx = x => x * IN2M;
@@ -396,17 +452,49 @@ for (const st of STAGES) {
   layersEl.appendChild(el);
 }
 
-// ---------------------------------------------------------------- go
-fetch(DXF).then(r => r.text()).then(txt => {
-  ENTS = parseDXF(txt);
-  const counts = {};
-  for (const e of ENTS) counts[e.layer] = (counts[e.layer] || 0) + 1;
-  console.log('DXF layers parsed:', counts);
-  build();
-}).catch(e => {
-  document.getElementById('err').style.display = 'grid';
-  document.getElementById('err').textContent = 'Could not load ' + DXF + ' — ' + e.message;
-});
+// ---------------------------------------------------------------- plan library + loader
+const PLANS = [
+  { name: 'Sample House (DXF)',    src: './sample-house.dxf' },
+  { name: 'Home — Floor 1',        src: './plans/home-l1.json' },
+  { name: 'Home — Floor 2',        src: './plans/home-l2.json' },
+  { name: 'Home — Reno Big Laundry', src: './plans/home-l1-biglaundry.json' },
+  { name: 'Duplex — Level 1',      src: './plans/duplex-l1.json' },
+  { name: 'Duplex — Level 2',      src: './plans/duplex-l2.json' },
+  { name: 'CECO',                  src: './plans/ceco.json' },
+  { name: 'ZInD 000',              src: './plans/zind-000.json' },
+];
+function framePlan(spawn) {                     // fit orbit to the plan + set walk spawn
+  let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
+  for (const w of byLayer(ENTS, 'WALL')) for (const [x, y] of w.pts) {
+    const X = wx(x), Z = wz(y);
+    minx = Math.min(minx, X); maxx = Math.max(maxx, X); minz = Math.min(minz, Z); maxz = Math.max(maxz, Z);
+  }
+  if (minx > maxx) { minx = -5; maxx = 5; minz = -5; maxz = 5; }
+  const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2, span = Math.max(maxx - minx, maxz - minz);
+  target.set(cx, 1.2, cz); dist = Math.max(6, span * 1.15);
+  if (spawn) { walker.x = wx(spawn.px); walker.z = wz(spawn.py); walker.yaw = spawn.yaw; }
+  else { walker.x = wx(410); walker.z = wz(120); walker.yaw = 3.2; }        // sample house: great room
+  walker.y = groundAt(walker.x, walker.z) + 1.62;
+  place();
+}
+let loadTok = 0;
+function loadPlan(src) {
+  const tok = ++loadTok, isJSON = /\.json(\?|$)/.test(src);
+  const errEl = document.getElementById('err');
+  fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return isJSON ? r.json() : r.text(); }).then(data => {
+    if (tok !== loadTok) return;
+    ENTS = isJSON ? entsFromJSON(data) : parseDXF(data);
+    DXF = src; build(); framePlan(isJSON ? ENTS._spawn : null);
+    errEl.style.display = 'none';
+  }).catch(e => {
+    if (tok !== loadTok) return;
+    errEl.style.display = 'grid'; errEl.textContent = 'Could not load ' + src + ' — ' + e.message;
+  });
+}
+const pick = document.getElementById('planpick');
+PLANS.forEach((p, i) => { const o = document.createElement('option'); o.value = p.src; o.textContent = p.name; pick.appendChild(o); });
+pick.onchange = () => loadPlan(pick.value);
+loadPlan(PLANS[0].src);
 
 // ---------------------------------------------------------------- walk mode
 let mode = 'orbit';
