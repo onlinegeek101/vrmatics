@@ -1,0 +1,340 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>plan-to-vr v2 — DXF layers → 3D</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#1a1e26; color:#dfe6f2;
+    font:14px system-ui,sans-serif; overflow:hidden; }
+  #c { position:fixed; inset:0; display:block; }
+  #panel { position:fixed; top:12px; left:12px; z-index:10; width:250px;
+    background:rgba(20,24,34,.9); border:1px solid #2f3850; border-radius:12px; padding:12px 14px; }
+  #panel h1 { font-size:15px; margin:0 0 2px; }
+  #panel .sub { color:#8b95ac; font-size:11px; margin-bottom:10px; }
+  .layer { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:8px;
+    cursor:pointer; user-select:none; border:1px solid transparent; }
+  .layer:hover { background:#232b3d; }
+  .layer .sw { width:14px; height:14px; border-radius:4px; flex:none; box-shadow:inset 0 0 0 1px #0004; }
+  .layer .nm { flex:1; }
+  .layer .st { font-size:16px; width:18px; text-align:center; }
+  .layer.off { opacity:.45; }
+  .layer.off .nm { text-decoration:line-through; }
+  .step { color:#5f6b85; font:10px ui-monospace,monospace; width:14px; text-align:right; }
+  #hint { position:fixed; bottom:10px; left:12px; z-index:10; color:#6b7488;
+    font:11px ui-monospace,monospace; }
+  #err { position:fixed; inset:0; display:none; place-items:center; color:#ff9a9a; padding:30px; text-align:center; }
+</style>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1>plan-to-vr <span style="color:#4a86c8">v2</span></h1>
+  <div class="sub">DXF layers built into 3D, in order. Toggle a layer to add/remove its stage.</div>
+  <div id="layers"></div>
+</div>
+<div id="hint">drag to orbit · scroll to zoom · the pipeline builds top-down: grade → walls → openings → stairs → materials → furniture</div>
+<div id="err"></div>
+
+<script async src="./vendor/es-module-shims.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const IN2M = 0.0254;
+const WALL_TH = 5, WALL_H = 96, HEAD = 84, SILL = 30, CEIL = 96;   // inches
+const DXF = './sample-house.dxf';
+
+// ---------------------------------------------------------------- DXF parse
+// Minimal reader for the entities this pipeline uses: LINE, LWPOLYLINE, TEXT.
+// Groups the ENTITIES section by layer; keeps color (62) + polyline elevation
+// (38) so the grade layer can carry per-region floor height in Z.
+function parseDXF(text) {
+  const L = text.split(/\r\n|\r|\n/);
+  const pairs = [];
+  for (let i = 0; i + 1 < L.length; i += 2) pairs.push([L[i].trim(), L[i + 1]]);
+  let s = 0;
+  for (let i = 0; i < pairs.length - 1; i++)
+    if (pairs[i][0] === '2' && pairs[i][1] === 'ENTITIES') { s = i + 1; break; }
+  const ents = [];
+  let cur = null;
+  for (let i = s; i < pairs.length; i++) {
+    const [code, val] = pairs[i];
+    if (code === '0') {
+      if (val === 'ENDSEC') break;
+      cur = { type: val, layer: '0', color: 256, elev: 0, pts: [], text: '', h: 0 };
+      ents.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    if (code === '8') cur.layer = val;
+    else if (code === '62') cur.color = parseInt(val);
+    else if (code === '38') cur.elev = parseFloat(val);
+    else if (code === '1') cur.text = val;
+    else if (code === '40') cur.h = parseFloat(val);
+    else if (code === '10') cur._x = parseFloat(val);
+    else if (code === '20') cur.pts.push([cur._x, parseFloat(val)]);
+    else if (code === '11') cur._x2 = parseFloat(val);
+    else if (code === '21') cur.pts.push([cur._x2, parseFloat(val)]);
+  }
+  return ents;
+}
+const byLayer = (ents, lay) => ents.filter(e => e.layer === lay);
+
+// plan inches -> world metres. plan +y is north; map to -z so north is -z.
+const wx = x => x * IN2M;
+const wz = y => -y * IN2M;
+
+// ---------------------------------------------------------------- three setup
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fb2d8);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500);
+scene.add(new THREE.HemisphereLight(0xbcd6f2, 0x555045, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
+sun.position.set(6, 12, 4); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 40 });
+scene.add(sun);
+
+// simple orbit around the house centre
+const target = new THREE.Vector3(6.1, 0, -4.6);
+let az = -0.7, pol = 0.9, dist = 16;
+function place() {
+  camera.position.set(
+    target.x + dist * Math.sin(pol) * Math.cos(az),
+    target.y + dist * Math.cos(pol),
+    target.z + dist * Math.sin(pol) * Math.sin(az));
+  camera.lookAt(target);
+}
+let drag = null;
+canvas.addEventListener('pointerdown', e => drag = { x: e.clientX, y: e.clientY });
+addEventListener('pointerup', () => drag = null);
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  az -= (e.clientX - drag.x) * 0.008;
+  pol = Math.max(0.15, Math.min(1.45, pol - (e.clientY - drag.y) * 0.006));
+  drag = { x: e.clientX, y: e.clientY }; place();
+});
+addEventListener('wheel', e => { dist = Math.max(4, Math.min(40, dist * (e.deltaY > 0 ? 1.1 : 0.9))); place(); }, { passive: true });
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize(); place();
+
+// ---------------------------------------------------------------- materials
+function mats(styled) {
+  if (styled) return {
+    grade: {
+      '-24': new THREE.MeshStandardMaterial({ color: 0x8a8d92, roughness: 0.95 }),  // garage concrete
+      '0': new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.7 }),      // main wood
+    },
+    wall: new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.9 }),
+    stair: new THREE.MeshStandardMaterial({ color: 0x9c6a40, roughness: 0.7 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.35 }),
+    leaf: new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 }),
+  };
+  const flat = new THREE.MeshStandardMaterial({ color: 0x9aa2ad, roughness: 1 });
+  return { grade: { '-24': flat, '0': flat }, wall: flat, stair: flat,
+    glass: new THREE.MeshStandardMaterial({ color: 0x88b0c0, transparent: true, opacity: 0.3 }),
+    leaf: flat };
+}
+
+// ---------------------------------------------------------------- geometry helpers
+function boxBetween(x1, z1, x2, z2, th, y0, y1, m) {
+  const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz);
+  const g = new THREE.BoxGeometry(len, (y1 - y0), th * IN2M);
+  const mesh = new THREE.Mesh(g, m);
+  mesh.position.set((x1 + x2) / 2, (y0 + y1) / 2, (z1 + z2) / 2);
+  mesh.rotation.y = -Math.atan2(dz, dx);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+// grade region containing a plan point (for wall/furniture base height)
+function gradeAt(regions, px, py) {
+  for (const r of regions) if (pointIn(r.pts, px, py)) return r.elev;
+  return 0;
+}
+function pointIn(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// ---------------------------------------------------------------- pipeline stages
+const STAGES = [
+  { id: 'grade', name: 'topography', color: '#8a8d92', step: '1' },
+  { id: 'walls', name: 'walls', color: '#e9e3d6', step: '2' },
+  { id: 'openings', name: 'doors / windows', color: '#d64550', step: '3' },
+  { id: 'stairs', name: 'stairs + landings', color: '#7a5bd6', step: '4' },
+  { id: 'materials', name: 'materials / styling', color: '#c8a24a', step: '5' },
+  { id: 'furniture', name: 'furniture', color: '#4aa24a', step: '6' },
+];
+const on = { grade: true, walls: true, openings: true, stairs: true, materials: true, furniture: true };
+
+let ENTS = null, root = null;
+const gltf = new GLTFLoader();
+
+function build() {
+  if (root) scene.remove(root);
+  root = new THREE.Group(); scene.add(root);
+  const M = mats(on.materials);
+  const regions = byLayer(ENTS, 'TOPO').map(e => ({ pts: e.pts, elev: e.elev }));
+
+  // 1. TOPOGRAPHY — a floor slab per region at its elevation
+  if (on.grade) for (const r of regions) {
+    const shape = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), wz(y))));
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.1, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);                       // lie flat in xz
+    const key = String(Math.round(r.elev));
+    const mesh = new THREE.Mesh(g, (M.grade[key] || M.grade['0']));
+    mesh.position.y = r.elev * IN2M;
+    mesh.receiveShadow = true; root.add(mesh);
+  }
+
+  // wall base sits on the grade beneath its midpoint
+  const walls = byLayer(ENTS, 'WALL').filter(e => e.type === 'LINE');
+  const openings = byLayer(ENTS, 'OPENING').map(e => {
+    const xs = e.pts.map(p => p[0]), ys = e.pts.map(p => p[1]);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+    const kind = e.color === 1 ? 'door' : e.color === 5 ? 'window' : 'opening';
+    return { cx, cy, len: Math.max(w, h), horiz: w >= h, kind };
+  });
+
+  // 2/3. WALLS (+ carve OPENINGS when that layer is on)
+  if (on.walls) for (const w of walls) {
+    const [x1, y1] = w.pts[0], [x2, y2] = w.pts[1];
+    const base = gradeAt(regions, (x1 + x2) / 2, (y1 + y2) / 2) * IN2M;
+    const top = base + WALL_H * IN2M;
+    const ax = wx(x1), az = wz(y1), bx = wx(x2), bz = wz(y2);
+    const len = Math.hypot(bx - ax, bz - az);
+    const ux = (bx - ax) / len, uz = (bz - az) / len;
+
+    // openings that lie on this wall (centre within ~4in, along the span)
+    const mine = on.openings ? openings.filter(o => {
+      const ox = wx(o.cx), oz = wz(o.cy);
+      const t = ((ox - ax) * ux + (oz - az) * uz);
+      const perp = Math.hypot(ox - (ax + ux * t), oz - (az + uz * t));
+      o._t = t; return perp < 5 * IN2M && t > 0 && t < len;
+    }).sort((a, b) => a._t - b._t) : [];
+
+    if (!mine.length) { root.add(boxBetween(ax, az, bx, bz, WALL_TH, base, top, M.wall)); continue; }
+    // solid sub-walls between openings, header over each opening, sill wall under windows
+    let cut = 0;
+    const P = (t) => [ax + ux * t, az + uz * t];
+    for (const o of mine) {
+      const half = (o.len / 2) * IN2M;
+      const s = o._t - half, e = o._t + half;
+      if (s > cut) { const [x, z] = P(cut), [x2_, z2_] = P(s); root.add(boxBetween(x, z, x2_, z2_, WALL_TH, base, top, M.wall)); }
+      const [ox, oz] = P(o._t), [sx, sz] = P(s), [ex, ez] = P(e);
+      const headY = base + HEAD * IN2M;
+      if (headY < top) root.add(boxBetween(sx, sz, ex, ez, WALL_TH, headY, top, M.wall));     // header
+      if (o.kind === 'window') {
+        const sillY = base + SILL * IN2M;
+        root.add(boxBetween(sx, sz, ex, ez, WALL_TH, base, sillY, M.wall));                    // apron
+        root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.4, sillY, headY, M.glass));            // glazing
+      } else if (o.kind === 'door') {
+        const leaf = boxBetween(sx, sz, ex, ez, WALL_TH * 0.5, base, headY, M.leaf);           // door leaf
+        root.add(leaf);
+      }
+      cut = e;
+    }
+    if (cut < len) { const [x, z] = P(cut); root.add(boxBetween(x, z, bx, bz, WALL_TH, base, top, M.wall)); }
+  }
+
+  // 4. STAIRS + landing — footprint rect + UP text = ascent direction
+  if (on.stairs) {
+    const foot = byLayer(ENTS, 'STAIR').find(e => e.type === 'LWPOLYLINE');
+    const up = byLayer(ENTS, 'STAIR').find(e => e.type === 'TEXT');
+    if (foot) {
+      const xs = foot.pts.map(p => p[0]), ys = foot.pts.map(p => p[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const base = gradeAt(regions, (x0 + x1) / 2, (y0 + y1) / 2) * IN2M;
+      const alongY = (y1 - y0) >= (x1 - x0);            // run direction
+      const runLen = (alongY ? (y1 - y0) : (x1 - x0));
+      const width = (alongY ? (x1 - x0) : (y1 - y0));
+      const asc = up ? ((alongY ? up.pts[0][1] > (y0 + y1) / 2 : up.pts[0][0] > (x0 + x1) / 2) ? 1 : -1) : 1;
+      const N = 12, riseTot = 108, run = runLen / N;
+      for (let i = 0; i < N; i++) {
+        const t0 = (asc > 0 ? y0 : y1) + asc * run * i;
+        const cx = alongY ? (x0 + x1) / 2 : (asc > 0 ? x0 : x1) + asc * run * i;
+        const cy = alongY ? t0 : (y0 + y1) / 2;
+        const g = new THREE.BoxGeometry((alongY ? width : run) * IN2M, (riseTot / N) * (i + 1) * IN2M, (alongY ? run : width) * IN2M);
+        const m = new THREE.Mesh(g, M.stair);
+        m.position.set(wx(cx), base + (riseTot / N) * (i + 1) / 2 * IN2M, wz(cy));
+        m.castShadow = m.receiveShadow = true; root.add(m);
+      }
+    }
+  }
+
+  // 6. FURNITURE — labelled rects → GLB from the asset catalog (fallback box)
+  if (on.furniture) {
+    const rects = byLayer(ENTS, 'FURN').filter(e => e.type === 'LWPOLYLINE');
+    const labels = byLayer(ENTS, 'FURN').filter(e => e.type === 'TEXT');
+    for (const r of rects) {
+      const xs = r.pts.map(p => p[0]), ys = r.pts.map(p => p[1]);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const w = (Math.max(...xs) - Math.min(...xs)) * IN2M, d = (Math.max(...ys) - Math.min(...ys)) * IN2M;
+      const lab = labels.reduce((b, t) => {
+        const dx = t.pts[0][0] - cx, dy = t.pts[0][1] - cy; const dd = dx * dx + dy * dy;
+        return (!b || dd < b.dd) ? { name: t.text.toLowerCase(), dd } : b; }, null);
+      const base = gradeAt(regions, cx, cy) * IN2M;
+      const grp = new THREE.Group(); grp.position.set(wx(cx), base, wz(cy)); root.add(grp);
+      const name = lab ? lab.name : '';
+      gltf.load(`./assets/${name}.glb`, g => {
+        const model = g.scene;
+        let bb = new THREE.Box3().setFromObject(model); const sz = bb.getSize(new THREE.Vector3());
+        const s = Math.min(w / (sz.x || 1), d / (sz.z || 1));
+        model.scale.setScalar(s > 0 ? s : 1);
+        bb = new THREE.Box3().setFromObject(model); const c = bb.getCenter(new THREE.Vector3());
+        model.position.set(-c.x, -bb.min.y, -c.z);
+        model.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+        grp.add(model);
+      }, undefined, () => {                                // fallback: labelled box
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d),
+          new THREE.MeshStandardMaterial({ color: 0x6a7a55, roughness: 0.9 }));
+        m.position.y = 0.2; m.castShadow = true; grp.add(m);
+      });
+    }
+  }
+  window.__V2_READY = true;
+}
+
+// ---------------------------------------------------------------- layer UI
+const layersEl = document.getElementById('layers');
+for (const st of STAGES) {
+  const el = document.createElement('div');
+  el.className = 'layer';
+  el.innerHTML = `<span class="step">${st.step}</span>
+    <span class="sw" style="background:${st.color}"></span>
+    <span class="nm">${st.name}</span><span class="st">●</span>`;
+  el.onclick = () => { on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
+    el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; build(); };
+  layersEl.appendChild(el);
+}
+
+// ---------------------------------------------------------------- go
+fetch(DXF).then(r => r.text()).then(txt => {
+  ENTS = parseDXF(txt);
+  const counts = {};
+  for (const e of ENTS) counts[e.layer] = (counts[e.layer] || 0) + 1;
+  console.log('DXF layers parsed:', counts);
+  build();
+}).catch(e => {
+  document.getElementById('err').style.display = 'grid';
+  document.getElementById('err').textContent = 'Could not load ' + DXF + ' — ' + e.message;
+});
+
+renderer.setAnimationLoop(() => renderer.render(scene, camera));
+window.__V2 = { rebuild: build, on };
+</script>
