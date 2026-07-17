@@ -511,13 +511,115 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE' && mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.0); if (d) toggleDoor(d.key); }
 });
 
+// ---------------------------------------------------------------- WebXR (VR)
+// Inline entry button + a dolly rig holding the camera; thumbstick smooth
+// locomotion reuses the same collide()/groundAt() as desktop walk, so walls
+// and stairs behave identically in the headset. (Matches v1: no addon button,
+// controllers polled from session.inputSources each frame.)
+renderer.xr.enabled = true;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const dolly = new THREE.Group(); scene.add(dolly);
+const ctrlL = renderer.xr.getController(0);
+const ctrlR = renderer.xr.getController(1);
+dolly.add(ctrlL, ctrlR);
+function makeRay() {
+  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
+  return new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x53d0ff, transparent: true, opacity: 0.7 }));
+}
+for (const c of [ctrlL, ctrlR]) {
+  c.add(makeRay());
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.09, 10),
+    new THREE.MeshStandardMaterial({ color: 0x222831, roughness: 0.6 }));
+  grip.rotation.x = -Math.PI / 2; c.add(grip);
+}
+let vrSnapReady = true;
+const prevTrig = { left: false, right: false };
+const vrRay = new THREE.Raycaster(); vrRay.far = 5;
+const _o = new THREE.Vector3(), _q = new THREE.Quaternion(), _d = new THREE.Vector3();
+function vrPointDoor(ctrl) {
+  ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+  vrRay.set(_o, _d);
+  for (const h of vrRay.intersectObjects(doors.map(d => d.leaf), false)) {
+    let n = h.object; while (n && !n.userData.doorKey) n = n.parent;
+    if (n && n.userData.doorKey) return n.userData.doorKey;
+  }
+  return null;
+}
+function rotatePlayerVR(head, angle) {                 // snap-turn about the head, not the rig origin
+  dolly.position.sub(head).applyAxisAngle(Y_AXIS, angle).add(head);
+  dolly.rotation.y += angle;
+}
+const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE.Vector3();
+function vrTick(dt) {
+  const session = renderer.xr.getSession(); if (!session) return;
+  camera.getWorldPosition(_head);
+  for (const src of session.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    const ax = gp.axes;
+    const sx = ax.length >= 4 ? ax[2] : ax[0], sy = ax.length >= 4 ? ax[3] : ax[1];
+    const ctrl = src.handedness === 'left' ? ctrlL : ctrlR;
+    if (src.handedness === 'left') {                   // smooth head-relative walking
+      const dx = Math.abs(sx) > 0.15 ? sx : 0, dy = Math.abs(sy) > 0.15 ? sy : 0;
+      if (dx || dy) {
+        camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+        _side.set(-_fwd.z, 0, _fwd.x);
+        const sp = (gp.buttons[1] && gp.buttons[1].value > 0.6 ? 3.8 : 2.2) * dt;
+        const c = collide(_head.x + _fwd.x * -dy * sp + _side.x * dx * sp,
+                          _head.z + _fwd.z * -dy * sp + _side.z * dx * sp);
+        dolly.position.x += c[0] - _head.x; dolly.position.z += c[1] - _head.z;
+      }
+    } else if (src.handedness === 'right') {           // snap turn
+      if (Math.abs(sx) > 0.7 && vrSnapReady) { rotatePlayerVR(_head, sx > 0 ? -Math.PI / 4 : Math.PI / 4); vrSnapReady = false; }
+      else if (Math.abs(sx) < 0.3) vrSnapReady = true;
+    }
+    const trig = !!(gp.buttons[0] && gp.buttons[0].value > 0.6);   // trigger: toggle a door you point at
+    if (trig && !prevTrig[src.handedness]) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
+    prevTrig[src.handedness] = trig;
+  }
+  camera.getWorldPosition(_head);                      // follow the floor / step up + down
+  dolly.position.y = groundAt(_head.x, _head.z);
+}
+renderer.xr.addEventListener('sessionstart', () => {
+  dolly.add(camera); camera.position.set(0, 0, 0);
+  dolly.position.set(walker.x, groundAt(walker.x, walker.z), walker.z);
+  dolly.rotation.set(0, walker.yaw, 0);
+  document.getElementById('panel').style.display = 'none';
+});
+renderer.xr.addEventListener('sessionend', () => {
+  scene.add(camera); document.getElementById('panel').style.display = '';
+  mode = 'orbit'; place();
+});
+(async () => {
+  let xrmode = null;
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    try { if (await navigator.xr.isSessionSupported('immersive-vr')) xrmode = 'immersive-vr'; } catch (e) {}
+  }
+  const b = document.createElement('button');
+  b.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:10;color:#cfe;' +
+    'background:#12303f;border:1px solid #3a6;border-radius:9px;padding:9px 15px;font:14px system-ui;cursor:pointer';
+  b.textContent = xrmode ? '🥽 Enter VR' : '🥽 VR N/A';
+  document.body.appendChild(b);
+  if (!xrmode) { b.style.opacity = 0.5; return; }
+  let session = null;
+  b.onclick = async () => {
+    if (session) { session.end(); return; }
+    try {
+      session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+      session.addEventListener('end', () => { session = null; b.textContent = '🥽 Enter VR'; });
+      await renderer.xr.setSession(session);
+      b.textContent = '🚪 Exit VR';
+    } catch (e) { b.textContent = '🥽 VR failed'; session = null; }
+  };
+})();
+
 let prevT = 0;
 renderer.setAnimationLoop((t) => {
   const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
-  if (mode === 'walk') walkTick(dt);
+  if (renderer.xr.isPresenting) vrTick(dt);
+  else if (mode === 'walk') walkTick(dt);
   doorTick(dt);
   renderer.render(scene, camera);
 });
-window.__V2 = { rebuild: build, on, walker, groundAt, colliders,
+window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor };
 </script>
