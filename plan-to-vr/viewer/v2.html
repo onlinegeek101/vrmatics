@@ -31,7 +31,7 @@
     border:1px solid #2f3850;border-radius:7px;padding:6px 8px;font:13px system-ui;cursor:pointer"></select>
   <div id="layers"></div>
 </div>
-<div id="hint">orbit: drag / scroll, <b>click a door</b> to open it · <b>🚶 walk</b>: click to enter, <b>WASD</b> move, mouse look, <b>Shift</b> run, <b>E</b>/click door, <b>Esc</b> exit · toggle any DXF layer on the left</div>
+<div id="hint">orbit: drag / scroll, <b>click a door</b> to open, <b>click furniture</b> to swap its model · <b>🚶 walk</b>: click enter, <b>WASD</b> move, <b>E</b> door, <b>Q</b> swap furniture, <b>Esc</b> exit · toggle any DXF layer left</div>
 <div id="err"></div>
 
 <script async src="./vendor/es-module-shims.js"></script>
@@ -232,6 +232,25 @@ function boxBetween(x1, z1, x2, z2, th, y0, y1, m) {
   return mesh;
 }
 
+function fallbackBox(w, d) {                     // labelled schematic stand-in
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d),
+    new THREE.MeshStandardMaterial({ color: 0x6a7a55, roughness: 0.9 }));
+  m.position.y = 0.2; m.castShadow = true; return m;
+}
+function loadFixtureModel(grp, id, w, d) {       // GLB scaled to the schematic footprint, else box
+  if (!id) { grp.add(fallbackBox(w, d)); return; }
+  gltf.load('./' + id.replace(/^\.?\//, ''), g => {
+    const model = g.scene;
+    let bb = new THREE.Box3().setFromObject(model); const sz = bb.getSize(new THREE.Vector3());
+    const s = Math.min(w / (sz.x || 1), d / (sz.z || 1));
+    model.scale.setScalar(s > 0 ? s : 1);
+    bb = new THREE.Box3().setFromObject(model); const c = bb.getCenter(new THREE.Vector3());
+    model.position.set(-c.x, -bb.min.y, -c.z);
+    model.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    grp.add(model);
+  }, undefined, () => grp.add(fallbackBox(w, d)));
+}
+
 // grade region containing a plan point (for wall/furniture base height)
 function gradeAt(regions, px, py) {
   for (const r of regions) if (pointIn(r.pts, px, py)) return r.elev;
@@ -264,6 +283,40 @@ const colliders = [];     // 2D wall segments {ax,az,bx,bz,hw} for walk collisio
 let doors = [];           // hinged door leaves {key,pivot,closedRot,angle,target,open,seg}
 const doorState = {};     // key -> open? persisted across rebuilds/layer toggles
 const DOOR_OPEN = -Math.PI / 2;   // swing angle when open
+let fixtures = [];        // {key,name,w,d,cx,cy,group} placed this build
+let fixtureColliders = []; // footprint edges, only while the furniture layer is on
+let perFixtureAssets = {}; // key -> catalog id | '__none__' (schematic); persisted per plan
+let pendingRebuild = false; // XR can't rebuild mid-frame; defer to the loop top
+
+// tag catalog (assets.json) — which models a given fixture can wear (ported from v1)
+let ASSET_LIST = [];
+fetch('assets/assets.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+  .then(l => { if (Array.isArray(l) && l.length) ASSET_LIST = l; }).catch(() => {});
+function fixtureTags(name) {
+  const n = (name || '').toUpperCase(), t = new Set(['any']), has = s => n.includes(s), add = (...xs) => xs.forEach(x => t.add(x));
+  if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) add('sofa', 'seating');
+  if (has('CHAIR') || has('RECLIN')) add('chair', 'seating');
+  if (has('TABLE') || has('DESK') || has('COFFEE')) add('table', 'seating');
+  if (has('BED')) add('bed');
+  if (has('DRAWN')) add('seating', 'table');
+  if (has('FRIDGE') || has('REFRIG')) add('fridge');
+  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) add('range');
+  if (has('DISHWASH')) add('dishwasher');
+  if (has('WASHER') && !has('DISHWASH')) add('washer');
+  if (has('DRYER')) add('dryer');
+  if (has('TOILET') || has('WC')) add('toilet');
+  if (has('SHOWER')) add('shower');
+  if (has('TUB') || has('BATHTUB')) add('tub', 'shower');
+  if (has('VANITY') || has('SINK') || has('LAV')) add('sink', 'vanity');
+  return t;
+}
+function assetsForFixture(name) {
+  const tags = fixtureTags(name);
+  return ASSET_LIST.filter(a => !a.tags || !a.tags.length || a.tags.some(x => tags.has(x)));
+}
+function faKey() { return 'plan2vr-v2-fixassets:' + DXF; }
+function loadFA() { try { perFixtureAssets = JSON.parse(localStorage.getItem(faKey())) || {}; } catch (e) { perFixtureAssets = {}; } }
+function saveFA() { try { localStorage.setItem(faKey(), JSON.stringify(perFixtureAssets)); } catch (e) {} }
 
 function build() {
   if (root) scene.remove(root);
@@ -406,7 +459,9 @@ function build() {
     }
   }
 
-  // 6. FURNITURE — labelled rects → GLB from the asset catalog (fallback box)
+  // 6. FURNITURE — registered fixtures → GLB (per-fixture override or catalog default);
+  //    footprint colliders present only while this layer is shown (toggle off = gone, no ghost collision)
+  fixtures = []; fixtureColliders = [];
   if (on.furniture) {
     const rects = byLayer(ENTS, 'FURN').filter(e => e.type === 'LWPOLYLINE');
     const labels = byLayer(ENTS, 'FURN').filter(e => e.type === 'TEXT');
@@ -417,23 +472,18 @@ function build() {
       const lab = labels.reduce((b, t) => {
         const dx = t.pts[0][0] - cx, dy = t.pts[0][1] - cy; const dd = dx * dx + dy * dy;
         return (!b || dd < b.dd) ? { name: t.text.toLowerCase(), dd } : b; }, null);
-      const base = gradeAt(regions, cx, cy) * IN2M;
-      const grp = new THREE.Group(); grp.position.set(wx(cx), base, wz(cy)); root.add(grp);
       const name = lab ? lab.name : '';
-      gltf.load(`./assets/${name}.glb`, g => {
-        const model = g.scene;
-        let bb = new THREE.Box3().setFromObject(model); const sz = bb.getSize(new THREE.Vector3());
-        const s = Math.min(w / (sz.x || 1), d / (sz.z || 1));
-        model.scale.setScalar(s > 0 ? s : 1);
-        bb = new THREE.Box3().setFromObject(model); const c = bb.getCenter(new THREE.Vector3());
-        model.position.set(-c.x, -bb.min.y, -c.z);
-        model.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
-        grp.add(model);
-      }, undefined, () => {                                // fallback: labelled box
-        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d),
-          new THREE.MeshStandardMaterial({ color: 0x6a7a55, roughness: 0.9 }));
-        m.position.y = 0.2; m.castShadow = true; grp.add(m);
-      });
+      const key = `${Math.round(cx)},${Math.round(cy)}`;
+      const base = gradeAt(regions, cx, cy) * IN2M;
+      const grp = new THREE.Group(); grp.position.set(wx(cx), base, wz(cy));
+      grp.userData.fixtureKey = key; grp.userData.fixtureName = name; root.add(grp);
+      fixtures.push({ key, name, w, d, cx, cy, group: grp });
+      const ov = perFixtureAssets[key];                  // override wins; else catalog default by name
+      const id = ov === '__none__' ? null : ov ? ov : (name ? `assets/${name}.glb` : null);
+      loadFixtureModel(grp, id, w, d);
+      const hx = w / 2, hz = d / 2, X = wx(cx), Z = wz(cy);      // footprint edges as colliders
+      const cor = [[X - hx, Z - hz], [X + hx, Z - hz], [X + hx, Z + hz], [X - hx, Z + hz]];
+      for (let i = 0; i < 4; i++) { const a = cor[i], b = cor[(i + 1) % 4]; fixtureColliders.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], hw: 0.03 }); }
     }
   }
   window.__V2_READY = true;
@@ -484,7 +534,7 @@ function loadPlan(src) {
   fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return isJSON ? r.json() : r.text(); }).then(data => {
     if (tok !== loadTok) return;
     ENTS = isJSON ? entsFromJSON(data) : parseDXF(data);
-    DXF = src; build(); framePlan(isJSON ? ENTS._spawn : null);
+    DXF = src; loadFA(); build(); framePlan(isJSON ? ENTS._spawn : null);
     errEl.style.display = 'none';
   }).catch(e => {
     if (tok !== loadTok) return;
@@ -506,7 +556,7 @@ canvas.addEventListener('click', (e) => {
   if (mode === 'walk') {
     if (document.pointerLockElement === canvas) toggleDoor((nearestDoor(walker.x, walker.z, 2.0) || {}).key);
     else canvas.requestPointerLock();
-  } else if (moved < 6) doorAtScreen(e.clientX, e.clientY);   // orbit: click a door leaf to swing it
+  } else if (moved < 6 && !doorAtScreen(e.clientX, e.clientY)) fixtureAtScreen(e.clientX, e.clientY);  // orbit: click door or fixture
 });
 addEventListener('mousemove', e => {
   if (document.pointerLockElement !== canvas) return;
@@ -521,7 +571,7 @@ function groundAt(x, z) {
 }
 function collide(x, z) {                     // push the walker out of wall segments
   const R = 0.22;
-  const segs = colliders.concat(doors.filter(d => d.target === 0).map(d => d.seg));  // closed doors block
+  const segs = colliders.concat(fixtureColliders, doors.filter(d => d.target === 0).map(d => d.seg));  // walls + shown furniture + closed doors
   for (const s of segs) {
     const dx = s.bx - s.ax, dz = s.bz - s.az, L2 = dx * dx + dz * dz || 1;
     let t = ((x - s.ax) * dx + (z - s.az) * dz) / L2; t = Math.max(0, Math.min(1, t));
@@ -557,6 +607,47 @@ function doorAtScreen(clientX, clientY) {
 function nearestDoor(x, z, maxD) {
   let best = null, bd = maxD * maxD;
   for (const d of doors) { const dd = (d.cx - x) ** 2 + (d.cz - z) ** 2; if (dd < bd) { bd = dd; best = d; } }
+  return best;
+}
+// ---- fixtures: asset swap (2D menu, works outside VR) + pick ----
+function commitFixture(key, id) {
+  if (id === '_cancel' || id == null) return;
+  if (id === '_default') delete perFixtureAssets[key];
+  else if (id === '_schematic') perFixtureAssets[key] = '__none__';
+  else perFixtureAssets[key] = id;
+  saveFA();
+  if (renderer.xr.isPresenting) pendingRebuild = true; else build();   // defer rebuild in XR
+}
+const fmenu = document.createElement('div');
+fmenu.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#181c24;' +
+  'color:#dfe6f2;padding:12px 14px;border-radius:10px;z-index:40;display:none;grid-template-columns:1fr 1fr;' +
+  'gap:6px;font:13px system-ui;min-width:300px;border:1px solid #2f3850';
+document.body.appendChild(fmenu);
+function openFixtureMenu(key, name) {
+  const cur = perFixtureAssets[key];
+  const curId = cur === undefined ? '_default' : cur === '__none__' ? '_schematic' : cur;
+  const btn = (val, label, span) => `<button data-a="${val}" style="${span ? 'grid-column:1/-1;' : ''}padding:6px;` +
+    `border-radius:6px;border:1px solid #39435a;color:inherit;cursor:pointer;background:${val === curId ? '#2b6cb0' : '#232936'}">${label}</button>`;
+  const cands = assetsForFixture(name);
+  fmenu.innerHTML = `<b style="grid-column:1/-1">${name || 'fixture'} — model</b>` +
+    (cands.length ? cands.map(a => btn(a.id, a.label)).join('') : `<span style="grid-column:1/-1;color:#9aa4b8">no models tagged for this fixture</span>`) +
+    btn('_schematic', 'schematic (box)') + btn('_default', 'use default', true) + btn('_cancel', 'cancel', true);
+  fmenu.style.display = 'grid';
+  for (const b of fmenu.querySelectorAll('button')) b.onclick = () => { fmenu.style.display = 'none'; commitFixture(key, b.dataset.a); };
+}
+function fixtureAtScreen(clientX, clientY) {
+  if (!fixtures.length) return false;
+  const r = canvas.getBoundingClientRect();
+  doorRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera);
+  for (const h of doorRay.intersectObjects(fixtures.map(f => f.group), true)) {
+    let n = h.object; while (n && !n.userData.fixtureKey) n = n.parent;
+    if (n && n.userData.fixtureKey) { openFixtureMenu(n.userData.fixtureKey, n.userData.fixtureName); return true; }
+  }
+  return false;
+}
+function nearestFixture(x, z, maxD) {
+  let best = null, bd = maxD * maxD;
+  for (const f of fixtures) { const dd = (wx(f.cx) - x) ** 2 + (wz(f.cy) - z) ** 2; if (dd < bd) { bd = dd; best = f; } }
   return best;
 }
 function walkTick(dt) {
@@ -595,8 +686,9 @@ modeBtn.onclick = () => {
   }
 };
 addEventListener('keydown', e => {
-  if (e.code === 'Escape' && mode === 'walk') modeBtn.click();
+  if (e.code === 'Escape') { if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click(); }
   if (e.code === 'KeyE' && mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.0); if (d) toggleDoor(d.key); }
+  if (e.code === 'KeyQ' && mode === 'walk') { const f = nearestFixture(walker.x, walker.z, 2.4); if (f) { if (document.exitPointerLock) document.exitPointerLock(); openFixtureMenu(f.key, f.name); } }
 });
 
 // ---------------------------------------------------------------- WebXR (VR)
@@ -633,6 +725,54 @@ function vrPointDoor(ctrl) {
   }
   return null;
 }
+function vrPointFixture(ctrl) {
+  ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+  vrRay.set(_o, _d);
+  for (const h of vrRay.intersectObjects(fixtures.map(f => f.group), true)) {
+    let n = h.object; while (n && !n.userData.fixtureKey) n = n.parent;
+    if (n && n.userData.fixtureKey) return { key: n.userData.fixtureKey, name: n.userData.fixtureName };
+  }
+  return null;
+}
+// in-VR asset wheel: hold the trigger on a fixture to open, point + trigger to pick
+const fixtureWheel = { group: null, items: [], key: null, prevTrig: false, open: false };
+const fixtureHold = { key: null, name: null, t: 0 };
+function wheelCard(item) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d');
+  x.fillStyle = '#161b26'; x.fillRect(0, 0, 256, 128); x.strokeStyle = '#4a86c8'; x.lineWidth = 6; x.strokeRect(3, 3, 250, 122);
+  x.fillStyle = '#e8eefb'; x.font = 'bold 30px system-ui'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(item.label, 128, 64, 236);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.12),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), toneMapped: false, transparent: true }));
+  m.userData.wheelId = item.id; return m;
+}
+function fixtureItems(name) {
+  return [...assetsForFixture(name), { id: '_schematic', label: 'schematic' }, { id: '_default', label: 'default' }, { id: '_cancel', label: 'cancel' }];
+}
+function openFixtureWheel(key, items) {
+  closeFixtureWheel();
+  const g = new THREE.Group();
+  camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+  camera.getWorldPosition(_head);
+  g.position.copy(_head).addScaledVector(_fwd, 1.1); g.position.y = _head.y - 0.05; g.lookAt(_head);
+  const n = items.length, R = n > 6 ? 0.5 : 0.34;
+  items.forEach((it, i) => {
+    const m = wheelCard(it); const a = Math.PI / 2 - (i / n) * Math.PI * 2;
+    m.position.set(Math.cos(a) * R, Math.sin(a) * R * 0.9, 0); g.add(m); fixtureWheel.items.push(m);
+  });
+  scene.add(g); fixtureWheel.group = g; fixtureWheel.key = key; fixtureWheel.open = true;
+}
+function closeFixtureWheel() {
+  if (fixtureWheel.group) scene.remove(fixtureWheel.group);
+  fixtureWheel.group = null; fixtureWheel.items = []; fixtureWheel.open = false;
+}
+function fixtureWheelPick(ctrl) {
+  ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+  vrRay.set(_o, _d);
+  const hit = vrRay.intersectObjects(fixtureWheel.items, false)[0];
+  for (const m of fixtureWheel.items) m.scale.setScalar(hit && m === hit.object ? 1.18 : 1);
+  return hit ? hit.object.userData.wheelId : null;
+}
 function rotatePlayerVR(head, angle) {                 // snap-turn about the head, not the rig origin
   dolly.position.sub(head).applyAxisAngle(Y_AXIS, angle).add(head);
   dolly.rotation.y += angle;
@@ -660,9 +800,25 @@ function vrTick(dt) {
       if (Math.abs(sx) > 0.7 && vrSnapReady) { rotatePlayerVR(_head, sx > 0 ? -Math.PI / 4 : Math.PI / 4); vrSnapReady = false; }
       else if (Math.abs(sx) < 0.3) vrSnapReady = true;
     }
-    const trig = !!(gp.buttons[0] && gp.buttons[0].value > 0.6);   // trigger: toggle a door you point at
-    if (trig && !prevTrig[src.handedness]) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
-    prevTrig[src.handedness] = trig;
+    const trig = !!(gp.buttons[0] && gp.buttons[0].value > 0.6);
+    if (src.handedness === 'right') {                  // right = tool hand: fixture wheel, else door
+      if (fixtureWheel.open) {
+        const id = fixtureWheelPick(ctrl);
+        if (trig && !fixtureWheel.prevTrig) { const k = fixtureWheel.key; closeFixtureWheel(); commitFixture(k, id); }
+        fixtureWheel.prevTrig = trig;
+      } else if (trig) {
+        const f = vrPointFixture(ctrl);
+        if (f) {
+          if (fixtureHold.key !== f.key) { fixtureHold.key = f.key; fixtureHold.name = f.name; fixtureHold.t = 0; }
+          fixtureHold.t += dt;
+          if (fixtureHold.t >= 0.4) { openFixtureWheel(f.key, fixtureItems(f.name)); fixtureWheel.prevTrig = true; fixtureHold.key = null; }
+        } else if (!prevTrig.right) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
+      } else { fixtureHold.key = null; fixtureHold.t = 0; }
+      prevTrig.right = trig;
+    } else {                                            // left = door toggle
+      if (trig && !prevTrig.left) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
+      prevTrig.left = trig;
+    }
   }
   camera.getWorldPosition(_head);                      // follow the floor / step up + down
   dolly.position.y = groundAt(_head.x, _head.z);
@@ -703,11 +859,14 @@ renderer.xr.addEventListener('sessionend', () => {
 let prevT = 0;
 renderer.setAnimationLoop((t) => {
   const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
+  if (pendingRebuild) { pendingRebuild = false; build(); }   // deferred fixture swap from XR
   if (renderer.xr.isPresenting) vrTick(dt);
   else if (mode === 'walk') walkTick(dt);
   doorTick(dt);
   renderer.render(scene, camera);
 });
 window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
-  doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor };
+  doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
+  fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
+  fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu };
 </script>
