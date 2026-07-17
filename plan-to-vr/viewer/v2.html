@@ -144,7 +144,7 @@ const wz = y => -y * IN2M;
 
 // ---------------------------------------------------------------- three setup
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -753,7 +753,7 @@ const vrRay = new THREE.Raycaster(); vrRay.far = 5;
 const _o = new THREE.Vector3(), _q = new THREE.Quaternion(), _d = new THREE.Vector3();
 function vrPointDoor(ctrl) {
   ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
-  vrRay.set(_o, _d);
+  vrRay.set(_o, _d); vrRay.far = 5;
   for (const h of vrRay.intersectObjects(doors.map(d => d.leaf), false)) {
     let n = h.object; while (n && !n.userData.doorKey) n = n.parent;
     if (n && n.userData.doorKey) return n.userData.doorKey;
@@ -762,7 +762,7 @@ function vrPointDoor(ctrl) {
 }
 function vrPointFixture(ctrl) {
   ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
-  vrRay.set(_o, _d);
+  vrRay.set(_o, _d); vrRay.far = 5;
   for (const h of vrRay.intersectObjects(fixtures.map(f => f.group), true)) {
     let n = h.object; while (n && !n.userData.fixtureKey) n = n.parent;
     if (n && n.userData.fixtureKey) return { key: n.userData.fixtureKey, name: n.userData.fixtureName };
@@ -808,6 +808,33 @@ function fixtureWheelPick(ctrl) {
   for (const m of fixtureWheel.items) m.scale.setScalar(hit && m === hit.object ? 1.18 : 1);
   return hit ? hit.object.userData.wheelId : null;
 }
+// laser-pointer drawing: hold the right GRIP to ink persistent strokes onto surfaces
+const draw = { active: false, pts: [], line: null };
+function drawSample(ctrl) {
+  ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+  vrRay.set(_o, _d); vrRay.far = 8;
+  const hit = vrRay.intersectObject(root, true)[0]; if (!hit) return;
+  const v = hit.point.clone().addScaledVector(_d, -0.012);
+  const last = draw.pts[draw.pts.length - 1];
+  if (last && v.distanceTo(last) < 0.008) return;
+  if (last && v.distanceTo(last) > 1.4) { drawFinish(); draw.active = true; }   // slid onto a far surface: break
+  draw.pts.push(v);
+  if (!draw.line) {
+    const g = new THREE.BufferGeometry();
+    const a = new THREE.BufferAttribute(new Float32Array(512 * 3), 3); a.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('position', a); g.setDrawRange(0, 0);
+    draw.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xff3d6e, depthTest: false }));
+    draw.line.frustumCulled = false; draw.line.renderOrder = 997; scene.add(draw.line);
+  }
+  let attr = draw.line.geometry.getAttribute('position');
+  if (draw.pts.length > attr.count) {
+    const b = new THREE.BufferAttribute(new Float32Array(attr.count * 6), 3); b.setUsage(THREE.DynamicDrawUsage);
+    b.array.set(attr.array); draw.line.geometry.setAttribute('position', b); attr = b;
+  }
+  attr.setXYZ(draw.pts.length - 1, v.x, v.y, v.z); attr.needsUpdate = true;
+  draw.line.geometry.setDrawRange(0, draw.pts.length);
+}
+function drawFinish() { draw.active = false; draw.line = null; draw.pts = []; }
 function rotatePlayerVR(head, angle) {                 // snap-turn about the head, not the rig origin
   dolly.position.sub(head).applyAxisAngle(Y_AXIS, angle).add(head);
   dolly.rotation.y += angle;
@@ -849,6 +876,8 @@ function vrTick(dt) {
           if (fixtureHold.t >= 0.4) { openFixtureWheel(f.key, fixtureItems(f.name)); fixtureWheel.prevTrig = true; fixtureHold.key = null; }
         } else if (!prevTrig.right) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
       } else { fixtureHold.key = null; fixtureHold.t = 0; }
+      const grip = !!(gp.buttons[1] && gp.buttons[1].value > 0.6);   // right grip = ink a laser stroke
+      if (grip && !fixtureWheel.open) { draw.active = true; drawSample(ctrl); } else if (draw.active) drawFinish();
       prevTrig.right = trig;
     } else {                                            // left = door toggle
       if (trig && !prevTrig.left) { const k = vrPointDoor(ctrl); if (k) toggleDoor(k); }
@@ -890,6 +919,64 @@ renderer.xr.addEventListener('sessionend', () => {
     } catch (e) { b.textContent = '🥽 VR failed'; session = null; }
   };
 })();
+
+// ---------------------------------------------------------------- GitHub issue button
+// Connect with #feedback=TOKEN@owner/repo[@branch] in the URL; then ⚑ files an issue
+// with a screenshot + where you're standing (matches v1's flag button).
+function feedbackCfg() { try { return JSON.parse(localStorage.getItem('plan2vr-feedback')); } catch (e) { return null; } }
+(function initFeedback() {
+  const m = location.hash.match(/feedback=([^@#&]+)@([\w.-]+)\/([\w.-]+?)(?:@([\w./-]+))?(?:[#&]|$)/);
+  if (!m) return;
+  localStorage.setItem('plan2vr-feedback', JSON.stringify({ token: m[1], owner: m[2], repo: m[3], branch: m[4] || 'main' }));
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+async function ghPut(path, bytes, msg) {
+  const c = feedbackCfg(); if (!c) return false;
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const r = await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`, {
+    method: 'PUT', headers: { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json' },
+    body: JSON.stringify({ message: msg, content: btoa(s), branch: c.branch }) });
+  return r.ok;
+}
+async function ghIssue(title, body) {
+  const c = feedbackCfg(); if (!c) return null;
+  const r = await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/issues`, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json' },
+    body: JSON.stringify({ title, body }) });
+  if (!r.ok) return null; try { return (await r.json()).number || true; } catch (e) { return true; }
+}
+let issueBusy = false;
+async function fileIssue(text) {
+  const c = feedbackCfg();
+  if (!c) { alert('Connect a repo first — open the viewer with #feedback=TOKEN@owner/repo in the URL.'); return null; }
+  if (issueBusy) return null; issueBusy = true;
+  try {
+    renderer.render(scene, camera);
+    const jpeg = renderer.domElement.toDataURL('image/jpeg', 0.85);
+    const bin = atob(jpeg.split(',')[1]), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const cam = new THREE.Vector3(); camera.getWorldPosition(cam);
+    const px = +(cam.x / IN2M).toFixed(1), py = +(-cam.z / IN2M).toFixed(1);
+    const planName = (DXF.split('/').pop() || 'plan').replace(/\.(json|dxf)$/, '');
+    const tag = new Date().toISOString().replace(/[:.]/g, '-');
+    const okShot = await ghPut(`vr-notes/issues/shot-${tag}.jpg`, bytes, `v2 issue screenshot ${tag}`);
+    const num = await ghIssue(`[v2 issue] ${planName} @ (${px}, ${py})`,
+      `**Plan:** \`${planName}\` · standing at (${px}, ${py}) plan-inches\n\n` +
+      (text ? text + '\n\n' : '') +
+      (okShot ? `![view](https://raw.githubusercontent.com/${c.owner}/${c.repo}/${c.branch}/vr-notes/issues/shot-${tag}.jpg)\n` : '') +
+      `\n_Filed from the plan-to-vr v2 walkthrough._`);
+    alert(num ? `Issue ${typeof num === 'number' ? '#' + num + ' ' : ''}filed.` : 'Issue failed — check the connection.');
+    return num;
+  } catch (e) { alert('Issue failed: ' + e.message); return null; }
+  finally { issueBusy = false; }
+}
+const issueBtn = document.createElement('button');
+issueBtn.textContent = '⚑ issue';
+issueBtn.title = 'file a GitHub issue from right here';
+issueBtn.style.cssText = 'position:fixed;top:12px;right:110px;z-index:10;background:#7a2b3a;color:#fff;' +
+  'border:none;border-radius:9px;padding:9px 13px;font:14px system-ui;cursor:pointer';
+document.body.appendChild(issueBtn);
+issueBtn.onclick = () => { const t = prompt('Describe the issue (optional):') || ''; fileIssue(t); };
 
 let prevT = 0;
 renderer.setAnimationLoop((t) => {
