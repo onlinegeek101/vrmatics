@@ -1,7 +1,17 @@
 {
  "_source": "DXF migration GT",
  "_note": "stair up/down + direction now come from the architect's Down/Up-to-Attic text on 1.2RMNAMES, detected in dxf_stairs (issue #30). No manual stair entries needed.",
- "stairs": [],
+ "stairs": [
+  {
+   "near": [
+    -106,
+    -208
+   ],
+   "drop": true,
+   "tol": 30,
+   "_note": "VR#70: owner removed the up-to-attic stairs -- 'not positioned like that in real life and we don't need them'. Reverses the #58 quarter-turn shaping."
+  }
+ ],
  "openings": [
   {
    "near": [
@@ -20,16 +30,7 @@
    "_note": "VR #52 follow-up 2: owner wants NO header at all over the hallway - full-height opening (head = wall height renders no soffit; the New structural beam stays a plan annotation only)."
   }
  ],
- "up_turns": [
-  {
-   "near": [
-    -106,
-    -208
-   ],
-   "turn": "right",
-   "_note": "VR#58: L2 up-to-attic is a quarter-turn -- up, landing, then up to the right"
-  }
- ],
+ "up_turns": [],
  "furnishings": [
   {
    "name": "FURN-SHOWER",
