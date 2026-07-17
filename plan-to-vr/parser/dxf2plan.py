@@ -539,7 +539,7 @@ def main():
             plan["openings"].remove(best)
             print(f"fix: opening near ({nx},{ny}) removed")
             continue
-        for k in ("type", "width", "sill", "head"):
+        for k in ("type", "width", "sill", "head", "position"):
             if k in oc:
                 best[k] = oc[k]
         if oc.get("shut"):

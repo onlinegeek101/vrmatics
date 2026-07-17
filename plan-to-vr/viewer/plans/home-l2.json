@@ -650,20 +650,8 @@
   },
   {
    "wall_index": 17,
-   "position": 0.3511,
-   "width": 27.97,
-   "type": "door",
-   "sill": 0.0,
-   "head": 80.0,
-   "hinge": -1,
-   "swing": 1,
-   "leaf": 27.0,
-   "hinge_at": 21.9
-  },
-  {
-   "wall_index": 17,
-   "position": 0.693,
-   "width": 28.03,
+   "position": 0.52,
+   "width": 56,
    "type": "door",
    "sill": 0.0,
    "head": 80.0,

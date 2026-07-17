@@ -28,6 +28,23 @@
    ],
    "head": 96,
    "_note": "VR #52 follow-up 2: owner wants NO header at all over the hallway - full-height opening (head = wall height renders no soffit; the New structural beam stays a plan annotation only)."
+  },
+  {
+   "near": [
+    32,
+    189
+   ],
+   "remove": true,
+   "_note": "VR#69: remove the second of the two doors; the survivor becomes one flush double door."
+  },
+  {
+   "near": [
+    32,
+    155
+   ],
+   "position": 0.52,
+   "width": 56,
+   "_note": "VR#69: merge the two doors into a single 56in opening centered at y=172. >=48in renders as a double door (two leaves meeting, no center post). Owner: 'this post doesn't need to be there, doors should be flush'."
   }
  ],
  "up_turns": [],
