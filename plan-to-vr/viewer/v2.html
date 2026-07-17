@@ -29,7 +29,7 @@
   <div class="sub">DXF layers built into 3D, in order. Toggle a layer to add/remove its stage.</div>
   <div id="layers"></div>
 </div>
-<div id="hint">drag to orbit · scroll to zoom · the pipeline builds top-down: grade → walls → openings → stairs → materials → furniture</div>
+<div id="hint">orbit: drag / scroll · <b>🚶 walk</b>: click to enter, <b>WASD</b> move, mouse look, <b>Shift</b> run, <b>Esc</b> exit · toggle any DXF layer on the left</div>
 <div id="err"></div>
 
 <script async src="./vendor/es-module-shims.js"></script>
@@ -183,22 +183,26 @@ const on = { grade: true, walls: true, openings: true, stairs: true, materials: 
 
 let ENTS = null, root = null;
 const gltf = new GLTFLoader();
+const floors = [];        // meshes the walker stands on (grade slabs + steps)
+const colliders = [];     // 2D wall segments {ax,az,bx,bz,hw} for walk collision
 
 function build() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
+  floors.length = 0; colliders.length = 0;
   const M = mats(on.materials);
   const regions = byLayer(ENTS, 'TOPO').map(e => ({ pts: e.pts, elev: e.elev }));
 
   // 1. TOPOGRAPHY — a floor slab per region at its elevation
   if (on.grade) for (const r of regions) {
-    const shape = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), wz(y))));
+    // shape.y = -wz so that rotateX(-90) (world.z = -shape.y) lands it at wz(y)
+    const shape = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), -wz(y))));
     const g = new THREE.ExtrudeGeometry(shape, { depth: 0.1, bevelEnabled: false });
     g.rotateX(-Math.PI / 2);                       // lie flat in xz
     const key = String(Math.round(r.elev));
     const mesh = new THREE.Mesh(g, (M.grade[key] || M.grade['0']));
-    mesh.position.y = r.elev * IN2M;
-    mesh.receiveShadow = true; root.add(mesh);
+    mesh.position.y = r.elev * IN2M - 0.1;         // top surface sits at the grade elevation
+    mesh.receiveShadow = true; root.add(mesh); floors.push(mesh);
   }
 
   // wall base sits on the grade beneath its midpoint
@@ -228,51 +232,59 @@ function build() {
       o._t = t; return perp < 5 * IN2M && t > 0 && t < len;
     }).sort((a, b) => a._t - b._t) : [];
 
-    if (!mine.length) { root.add(boxBetween(ax, az, bx, bz, WALL_TH, base, top, M.wall)); continue; }
-    // solid sub-walls between openings, header over each opening, sill wall under windows
+    const hw = WALL_TH / 2 * IN2M;
+    const solid = (x1_, z1_, x2_, z2_, y0, y1) => {           // wall + collider
+      root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH, y0, y1, M.wall));
+      colliders.push({ ax: x1_, az: z1_, bx: x2_, bz: z2_, hw });
+    };
+    if (!mine.length) { solid(ax, az, bx, bz, base, top); continue; }
+    // solid sub-walls between openings, header over each, apron under windows
     let cut = 0;
     const P = (t) => [ax + ux * t, az + uz * t];
     for (const o of mine) {
       const half = (o.len / 2) * IN2M;
       const s = o._t - half, e = o._t + half;
-      if (s > cut) { const [x, z] = P(cut), [x2_, z2_] = P(s); root.add(boxBetween(x, z, x2_, z2_, WALL_TH, base, top, M.wall)); }
-      const [ox, oz] = P(o._t), [sx, sz] = P(s), [ex, ez] = P(e);
+      if (s > cut) { const [x, z] = P(cut), [x2_, z2_] = P(s); solid(x, z, x2_, z2_, base, top); }
+      const [sx, sz] = P(s), [ex, ez] = P(e);
       const headY = base + HEAD * IN2M;
-      if (headY < top) root.add(boxBetween(sx, sz, ex, ez, WALL_TH, headY, top, M.wall));     // header
+      if (headY < top) root.add(boxBetween(sx, sz, ex, ez, WALL_TH, headY, top, M.wall));     // header (walk under)
       if (o.kind === 'window') {
         const sillY = base + SILL * IN2M;
         root.add(boxBetween(sx, sz, ex, ez, WALL_TH, base, sillY, M.wall));                    // apron
+        colliders.push({ ax: sx, az: sz, bx: ex, bz: ez, hw });
         root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.4, sillY, headY, M.glass));            // glazing
       } else if (o.kind === 'door') {
-        const leaf = boxBetween(sx, sz, ex, ez, WALL_TH * 0.5, base, headY, M.leaf);           // door leaf
-        root.add(leaf);
+        root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.5, base, headY, M.leaf));              // leaf (pass through)
       }
       cut = e;
     }
-    if (cut < len) { const [x, z] = P(cut); root.add(boxBetween(x, z, bx, bz, WALL_TH, base, top, M.wall)); }
+    if (cut < len) { const [x, z] = P(cut); solid(x, z, bx, bz, base, top); }
   }
 
-  // 4. STAIRS + landing — footprint rect + UP text = ascent direction
+  // 4. STAIRS + landing — footprint rect; rise = the grade drop between its two
+  //    ends (garage -24 to main 0), so it always lands the two floors together.
   if (on.stairs) {
     const foot = byLayer(ENTS, 'STAIR').find(e => e.type === 'LWPOLYLINE');
-    const up = byLayer(ENTS, 'STAIR').find(e => e.type === 'TEXT');
     if (foot) {
       const xs = foot.pts.map(p => p[0]), ys = foot.pts.map(p => p[1]);
       const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-      const base = gradeAt(regions, (x0 + x1) / 2, (y0 + y1) / 2) * IN2M;
-      const alongY = (y1 - y0) >= (x1 - x0);            // run direction
-      const runLen = (alongY ? (y1 - y0) : (x1 - x0));
-      const width = (alongY ? (x1 - x0) : (y1 - y0));
-      const asc = up ? ((alongY ? up.pts[0][1] > (y0 + y1) / 2 : up.pts[0][0] > (x0 + x1) / 2) ? 1 : -1) : 1;
-      const N = 12, riseTot = 108, run = runLen / N;
+      const alongY = (y1 - y0) >= (x1 - x0);
+      const runLen = alongY ? (y1 - y0) : (x1 - x0), width = alongY ? (x1 - x0) : (y1 - y0);
+      const eA = alongY ? [(x0 + x1) / 2, y0] : [x0, (y0 + y1) / 2];
+      const eB = alongY ? [(x0 + x1) / 2, y1] : [x1, (y0 + y1) / 2];
+      const gA = gradeAt(regions, ...eA), gB = gradeAt(regions, ...eB);
+      const low = Math.min(gA, gB), high = Math.max(gA, gB);
+      const dir = alongY ? (gA <= gB ? 1 : -1) : (gA <= gB ? 1 : -1);   // march low -> high
+      const spanLo = alongY ? (dir > 0 ? y0 : y1) : (dir > 0 ? x0 : x1);
+      const N = Math.max(2, Math.round((high - low) / 8)), step = runLen / N;
       for (let i = 0; i < N; i++) {
-        const t0 = (asc > 0 ? y0 : y1) + asc * run * i;
-        const cx = alongY ? (x0 + x1) / 2 : (asc > 0 ? x0 : x1) + asc * run * i;
-        const cy = alongY ? t0 : (y0 + y1) / 2;
-        const g = new THREE.BoxGeometry((alongY ? width : run) * IN2M, (riseTot / N) * (i + 1) * IN2M, (alongY ? run : width) * IN2M);
+        const cc = spanLo + dir * step * (i + 0.5);
+        const cx = alongY ? (x0 + x1) / 2 : cc, cy = alongY ? cc : (y0 + y1) / 2;
+        const topY = (low + (high - low) * (i + 1) / N) * IN2M;   // top of this tread
+        const g = new THREE.BoxGeometry((alongY ? width : step) * IN2M, topY - low * IN2M, (alongY ? step : width) * IN2M);
         const m = new THREE.Mesh(g, M.stair);
-        m.position.set(wx(cx), base + (riseTot / N) * (i + 1) / 2 * IN2M, wz(cy));
-        m.castShadow = m.receiveShadow = true; root.add(m);
+        m.position.set(wx(cx), (low * IN2M + topY) / 2, wz(cy));
+        m.castShadow = m.receiveShadow = true; root.add(m); floors.push(m);
       }
     }
   }
@@ -335,6 +347,77 @@ fetch(DXF).then(r => r.text()).then(txt => {
   document.getElementById('err').textContent = 'Could not load ' + DXF + ' — ' + e.message;
 });
 
-renderer.setAnimationLoop(() => renderer.render(scene, camera));
-window.__V2 = { rebuild: build, on };
+// ---------------------------------------------------------------- walk mode
+let mode = 'orbit';
+const walker = { x: wx(410), z: wz(120), yaw: 3.2, pitch: 0, y: 1.6 };  // spawn in the great room
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; });
+addEventListener('keyup', e => { keys[e.code] = false; });
+canvas.addEventListener('click', () => { if (mode === 'walk') canvas.requestPointerLock(); });
+addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== canvas) return;
+  walker.yaw -= e.movementX * 0.0025;
+  walker.pitch = Math.max(-1.3, Math.min(1.3, walker.pitch - e.movementY * 0.0025));
+});
+const down = new THREE.Raycaster();
+function groundAt(x, z) {
+  down.set(new THREE.Vector3(x, 8, z), new THREE.Vector3(0, -1, 0));
+  const hit = down.intersectObjects(floors, false)[0];
+  return hit ? hit.point.y : 0;
+}
+function collide(x, z) {                     // push the walker out of wall segments
+  const R = 0.22;
+  for (const s of colliders) {
+    const dx = s.bx - s.ax, dz = s.bz - s.az, L2 = dx * dx + dz * dz || 1;
+    let t = ((x - s.ax) * dx + (z - s.az) * dz) / L2; t = Math.max(0, Math.min(1, t));
+    const px = s.ax + dx * t, pz = s.az + dz * t;
+    const ox = x - px, oz = z - pz, d = Math.hypot(ox, oz), min = s.hw + R;
+    if (d < min && d > 1e-4) { x = px + ox / d * min; z = pz + oz / d * min; }
+  }
+  return [x, z];
+}
+function walkTick(dt) {
+  const sp = (keys.ShiftLeft ? 4.2 : 2.3) * dt;
+  const fx = Math.sin(walker.yaw), fz = Math.cos(walker.yaw);       // forward
+  const rx = Math.cos(walker.yaw), rz = -Math.sin(walker.yaw);      // right
+  let mx = 0, mz = 0;
+  if (keys.KeyW) { mx += fx; mz += fz; }
+  if (keys.KeyS) { mx -= fx; mz -= fz; }
+  if (keys.KeyD) { mx += rx; mz += rz; }
+  if (keys.KeyA) { mx -= rx; mz -= rz; }
+  const ml = Math.hypot(mx, mz);
+  if (ml > 0) {
+    let [nx, nz] = collide(walker.x + mx / ml * sp, walker.z + mz / ml * sp);
+    walker.x = nx; walker.z = nz;
+  }
+  const g = groundAt(walker.x, walker.z);
+  walker.y += (g + 1.62 - walker.y) * Math.min(1, dt * 12);         // ease onto floor / steps
+  camera.position.set(walker.x, walker.y, walker.z);
+  const cp = Math.cos(walker.pitch);
+  camera.lookAt(walker.x + fx * cp, walker.y + Math.sin(walker.pitch), walker.z + fz * cp);
+}
+
+const modeBtn = document.createElement('button');
+modeBtn.textContent = '🚶 walk';
+modeBtn.style.cssText = 'position:fixed;top:12px;right:12px;z-index:10;background:#2b6cb0;' +
+  'color:#fff;border:none;border-radius:9px;padding:9px 15px;font:14px system-ui;cursor:pointer';
+document.body.appendChild(modeBtn);
+modeBtn.onclick = () => {
+  if (mode === 'orbit') {
+    mode = 'walk'; modeBtn.textContent = '🎥 orbit'; modeBtn.style.background = '#5a6474';
+    walker.y = groundAt(walker.x, walker.z) + 1.62; canvas.requestPointerLock();
+  } else {
+    mode = 'orbit'; modeBtn.textContent = '🚶 walk'; modeBtn.style.background = '#2b6cb0';
+    if (document.exitPointerLock) document.exitPointerLock(); place();
+  }
+};
+addEventListener('keydown', e => { if (e.code === 'Escape' && mode === 'walk') modeBtn.click(); });
+
+let prevT = 0;
+renderer.setAnimationLoop((t) => {
+  const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
+  if (mode === 'walk') walkTick(dt);
+  renderer.render(scene, camera);
+});
+window.__V2 = { rebuild: build, on, walker, groundAt, colliders };
 </script>
