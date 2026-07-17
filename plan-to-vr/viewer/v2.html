@@ -282,6 +282,7 @@ const texCache = {};
 const gltf = new GLTFLoader();
 const floors = [];        // meshes the walker stands on (grade slabs + steps)
 const colliders = [];     // 2D wall segments {ax,az,bx,bz,hw} for walk collision
+let planOpenings = [];    // {key, planA:[wx,wz], planB} world segments, for VR calibration
 let doors = [];           // hinged door leaves {key,pivot,closedRot,angle,target,open,seg}
 const doorState = {};     // key -> open? persisted across rebuilds/layer toggles
 const DOOR_OPEN = -Math.PI / 2;   // swing angle when open
@@ -323,7 +324,7 @@ function saveFA() { try { localStorage.setItem(faKey(), JSON.stringify(perFixtur
 function build() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
-  floors.length = 0; colliders.length = 0; doors = [];
+  floors.length = 0; colliders.length = 0; doors = []; planOpenings = [];
   const M = mats(on.materials);
   const regions = byLayer(ENTS, 'TOPO').map(e => ({ pts: e.pts, elev: e.elev }));
 
@@ -381,6 +382,7 @@ function build() {
       const s = o._t - half, e = o._t + half;
       if (s > cut) { const [x, z] = P(cut), [x2_, z2_] = P(s); solid(x, z, x2_, z2_, base, top); }
       const [sx, sz] = P(s), [ex, ez] = P(e);
+      planOpenings.push({ key: `${Math.round(o.cx)},${Math.round(o.cy)}`, planA: [sx, sz], planB: [ex, ez] });
       const headY = base + HEAD * IN2M;
       if (headY < top) root.add(boxBetween(sx, sz, ex, ez, WALL_TH, headY, top, M.wall));     // header (walk under)
       if (o.kind === 'window') {
@@ -839,6 +841,91 @@ function rotatePlayerVR(head, angle) {                 // snap-turn about the he
   dolly.position.sub(head).applyAxisAngle(Y_AXIS, angle).add(head);
   dolly.rotation.y += angle;
 }
+// ---- multi-anchor calibration: trace real door/window edges to align the model to your room ----
+const calib = { mode: false, stage: 'off', target: null, bPrev: false, anchors: [], tracing: false, samples: [] };
+function anchorKeyLS() { return 'plan2vr-v2-anchors:' + DXF; }
+function saveAnchors() { try { localStorage.setItem(anchorKeyLS(), JSON.stringify(calib.anchors)); } catch (e) {} }
+function loadAnchors() { try { calib.anchors = JSON.parse(localStorage.getItem(anchorKeyLS())) || []; } catch (e) { calib.anchors = []; } }
+function nearestOpening(x, z, maxD) {
+  let best = null, bd = maxD * maxD;
+  for (const o of planOpenings) { const mx = (o.planA[0] + o.planB[0]) / 2, mz = (o.planA[1] + o.planB[1]) / 2;
+    const dd = (mx - x) ** 2 + (mz - z) ** 2; if (dd < bd) { bd = dd; best = o; } }
+  return best;
+}
+function fitTraceSegment(s) {                           // 2D PCA → the edge you slid along
+  const n = s.length; let mx = 0, mz = 0, my = 0; for (const p of s) { mx += p.x; mz += p.z; my += p.y; } mx /= n; mz /= n; my /= n;
+  let sxx = 0, sxz = 0, szz = 0; for (const p of s) { const dx = p.x - mx, dz = p.z - mz; sxx += dx * dx; sxz += dx * dz; szz += dz * dz; }
+  const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz), ux = Math.cos(ang), uz = Math.sin(ang);
+  const ts = s.map(p => (p.x - mx) * ux + (p.z - mz) * uz).sort((a, b) => a - b);
+  const lo = ts[Math.floor(0.02 * (n - 1))], hi = ts[Math.ceil(0.98 * (n - 1))];
+  return { a: [mx + ux * lo, mz + uz * lo], b: [mx + ux * hi, mz + uz * hi], y: my, len: hi - lo };
+}
+function solveAlignment(anchors) {                      // rigid real→plan (Kabsch), endpoint-order robust
+  if (!anchors.length) return null;
+  const fitPairs = pairs => {
+    let pcx = 0, pcz = 0, qcx = 0, qcz = 0; for (const [p, q] of pairs) { pcx += p[0]; pcz += p[1]; qcx += q[0]; qcz += q[1]; }
+    const n = pairs.length; pcx /= n; pcz /= n; qcx /= n; qcz /= n;
+    let a = 0, b = 0, pp = 0;
+    for (const [p, q] of pairs) { const px = p[0] - pcx, pz = p[1] - pcz, qx = q[0] - qcx, qz = q[1] - qcz; a += px * qx + pz * qz; b += px * qz - pz * qx; pp += px * px + pz * pz; }
+    const phi = Math.atan2(b, a), c = Math.cos(phi), s = Math.sin(phi);
+    const T = { phi, tx: qcx - (c * pcx - s * pcz), tz: qcz - (s * pcx + c * pcz), scale: pp > 0 ? Math.sqrt(a * a + b * b) / pp : 1 };
+    let resid = 0; for (const [p, q] of pairs) { const rx = c * p[0] - s * p[1] + T.tx - q[0], rz = s * p[0] + c * p[1] + T.tz - q[1]; resid += rx * rx + rz * rz; }
+    T.resid = Math.sqrt(resid / n); return T;
+  };
+  const apply = (T, p) => { const c = Math.cos(T.phi), s = Math.sin(T.phi); return [c * p[0] - s * p[1] + T.tx, s * p[0] + c * p[1] + T.tz]; };
+  const ordered = (an, flip) => flip ? [[an.realA, an.planB], [an.realB, an.planA]] : [[an.realA, an.planA], [an.realB, an.planB]];
+  let best = null;
+  for (const seed of [false, true]) {
+    let T = fitPairs(ordered(anchors[0], seed));
+    for (let it = 0; it < 2; it++) {
+      const pairs = [];
+      for (const an of anchors) {
+        let bf = false, bd = Infinity;
+        for (const f of [false, true]) { let d = 0; for (const [p, q] of ordered(an, f)) { const w = apply(T, p); d += (w[0] - q[0]) ** 2 + (w[1] - q[1]) ** 2; } if (d < bd) { bd = d; bf = f; } }
+        pairs.push(...ordered(an, bf));
+      }
+      T = fitPairs(pairs);
+    }
+    if (!best || T.resid < best.resid) best = T;
+  }
+  return { theta: -best.phi, tx: best.tx, tz: best.tz, scale: best.scale, residIn: best.resid / IN2M };
+}
+function applyAlignment() {
+  const T = solveAlignment(calib.anchors); if (!T) return null;
+  dolly.position.set(T.tx, 0, T.tz); dolly.rotation.set(0, T.theta, 0); return T;
+}
+function finishTrace() {
+  calib.tracing = false; const s = calib.samples; calib.samples = [];
+  if (s.length < 12) return;
+  const seg = fitTraceSegment(s); if (seg.len < 0.25) return;
+  const op = calib.target || nearestOpening((seg.a[0] + seg.b[0]) / 2, (seg.a[1] + seg.b[1]) / 2, 2.5);
+  if (!op) return;
+  const an = { key: op.key, planA: op.planA, planB: op.planB, realA: seg.a, realB: seg.b, headReal: [camera.position.x, camera.position.z] };
+  calib.anchors = calib.anchors.filter(x => x.key !== an.key); calib.anchors.push(an);
+  saveAnchors(); applyAlignment();
+  calib.stage = 'off'; calib.mode = false;
+}
+function handleCalib(gp, ctrl) {                        // right B (buttons[5]) hold = select, release = trace
+  const bNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
+  if (bNow && !calib.bPrev) { calib.stage = 'select'; calib.mode = true; calib.samples = []; }
+  if (!bNow && calib.bPrev) {
+    if (calib.stage === 'select' && calib.target) calib.stage = 'trace';
+    else { calib.stage = 'off'; calib.mode = false; }
+  }
+  calib.bPrev = bNow;
+  if (!calib.mode) return;
+  if (calib.stage === 'select') {
+    ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+    vrRay.set(_o, _d); vrRay.far = 8; const hit = vrRay.intersectObject(root, true)[0];
+    const px = hit ? hit.point.x : _o.x + _d.x * 2.2, pz = hit ? hit.point.z : _o.z + _d.z * 2.2;
+    calib.target = nearestOpening(px, pz, 1.6);
+  } else if (calib.stage === 'trace') {
+    const trig = gp.buttons[0] && gp.buttons[0].value > 0.6;
+    if (trig) { calib.tracing = true; const p = ctrl.position; const last = calib.samples[calib.samples.length - 1];
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y, p.z - last.z) > 0.004) calib.samples.push({ x: p.x, y: p.y, z: p.z }); }
+    else if (calib.tracing) finishTrace();
+  }
+}
 const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE.Vector3();
 function vrTick(dt) {
   const session = renderer.xr.getSession(); if (!session) return;
@@ -848,6 +935,8 @@ function vrTick(dt) {
     const ax = gp.axes;
     const sx = ax.length >= 4 ? ax[2] : ax[0], sy = ax.length >= 4 ? ax[3] : ax[1];
     const ctrl = src.handedness === 'left' ? ctrlL : ctrlR;
+    if (src.handedness === 'right') handleCalib(gp, ctrl);   // right B: room calibration
+    if (calib.mode) continue;                          // calibration pauses locomotion + normal actions
     if (src.handedness === 'left') {                   // smooth head-relative walking
       const dx = Math.abs(sx) > 0.15 ? sx : 0, dy = Math.abs(sy) > 0.15 ? sy : 0;
       if (dx || dy) {
@@ -892,6 +981,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   dolly.position.set(walker.x, groundAt(walker.x, walker.z), walker.z);
   dolly.rotation.set(0, walker.yaw, 0);
   document.getElementById('panel').style.display = 'none';
+  loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment
 });
 renderer.xr.addEventListener('sessionend', () => {
   scene.add(camera); document.getElementById('panel').style.display = '';
@@ -970,6 +1060,47 @@ async function fileIssue(text) {
   } catch (e) { alert('Issue failed: ' + e.message); return null; }
   finally { issueBusy = false; }
 }
+// ---------------------------------------------------------------- session notes
+// Record the view + mic to a webm you can keep. (In VR the page canvas is what
+// captureStream sees; audio always records.)
+const noteRec = { active: false, rec: null, chunks: [], stream: null };
+async function startNote() {
+  if (noteRec.active) return;
+  let audio = null;
+  try { audio = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) {}
+  const mt = ['video/webm;codecs=vp8,opus', 'video/webm'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  if (!mt) { alert('Recording is not supported in this browser.'); return; }
+  const cs = canvas.captureStream(30);
+  noteRec.stream = new MediaStream([...cs.getVideoTracks(), ...(audio ? audio.getAudioTracks() : [])]);
+  noteRec.chunks = [];
+  try { noteRec.rec = new MediaRecorder(noteRec.stream, { mimeType: mt, videoBitsPerSecond: 2500000 }); }
+  catch (e) { alert('Recorder failed: ' + e.message); return; }
+  noteRec.rec.ondataavailable = e => { if (e.data.size) noteRec.chunks.push(e.data); };
+  noteRec.rec.start(1000); noteRec.active = true;
+  noteBtn.textContent = '⏹ stop'; noteBtn.style.background = '#b03030';
+}
+function stopNote() {
+  if (!noteRec.active) return; noteRec.active = false;
+  noteBtn.textContent = '⏺ note'; noteBtn.style.background = '#3a6a3a';
+  noteRec.rec.onstop = () => {
+    const blob = new Blob(noteRec.chunks, { type: noteRec.rec.mimeType });
+    const url = URL.createObjectURL(blob);
+    const planName = (DXF.split('/').pop() || 'plan').replace(/\.(json|dxf)$/, '');
+    const a = document.createElement('a'); a.href = url;
+    a.download = `note-${planName}-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+    if (noteRec.stream) noteRec.stream.getTracks().forEach(t => t.stop());
+  };
+  noteRec.rec.stop();
+}
+const noteBtn = document.createElement('button');
+noteBtn.textContent = '⏺ note';
+noteBtn.title = 'record a view + voice note (saves a webm)';
+noteBtn.style.cssText = 'position:fixed;top:12px;right:210px;z-index:10;background:#3a6a3a;color:#fff;' +
+  'border:none;border-radius:9px;padding:9px 13px;font:14px system-ui;cursor:pointer';
+document.body.appendChild(noteBtn);
+noteBtn.onclick = () => noteRec.active ? stopNote() : startNote();
+
 const issueBtn = document.createElement('button');
 issueBtn.textContent = '⚑ issue';
 issueBtn.title = 'file a GitHub issue from right here';
@@ -990,5 +1121,6 @@ renderer.setAnimationLoop((t) => {
 window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
-  fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu };
+  fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
+  planOpenings: () => planOpenings, solveAlignment, feedbackCfg };
 </script>
