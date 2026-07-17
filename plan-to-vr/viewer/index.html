@@ -2302,6 +2302,7 @@ function buildPlan(plan) {
       ax: pos.x - u[0] * ex, az: pos.z - u[1] * ex,
       bx: pos.x + u[0] * ex, bz: pos.z + u[1] * ex,
       hw, top: 1.0,
+      stub: !!g.userData.stub,   // rides the furnish toggle -> no collision when hidden
     });
   }
   group.add(fixtureGroup);
@@ -4228,7 +4229,8 @@ function computeArc(controller) {
 function arcBlocked(p) {
   const lists = [collisionSegs];
   if (doorLeaves.length) lists.push(doorSegs());
-  if (fixtureGroup && fixtureGroup.visible) lists.push(fixtureSegs);
+  const fixSegs = fixtureCollide();
+  if (fixSegs && fixSegs.length) lists.push(fixSegs);
   for (const list of lists) {
     for (const s of list) {
       if (p.y >= s.top) continue;
@@ -4981,14 +4983,22 @@ function doorSegs() {
     };
   });
 }
+// fixtures collide only while they're actually shown: the F key hides them
+// all (fixtureGroup.visible); the furnish toggle hides just the furnishings
+// (layerState.stubs), so a hidden furnishing must not keep an invisible wall.
+function fixtureCollide() {
+  if (!fixtureGroup || !fixtureGroup.visible) return null;
+  return layerState.stubs ? fixtureSegs : fixtureSegs.filter(s => !s.stub);
+}
 function resolveCollision() {
-  const fixOn = fixtureGroup && fixtureGroup.visible && fixtureSegs.length;
+  const fixSegs = fixtureCollide();
+  const fixOn = fixSegs && fixSegs.length;
   if (!collisionSegs.length && !fixOn && !doorLeaves.length) return;
   camera.getWorldPosition(_cpos);
   for (let iter = 0; iter < 2; iter++) {
     pushOut(collisionSegs);
     if (doorLeaves.length) pushOut(doorSegs());
-    if (fixOn) pushOut(fixtureSegs);
+    if (fixOn) pushOut(fixSegs);
   }
 }
 
@@ -5056,10 +5066,11 @@ function applyTerrain(dt) {
   dolly.position.y = groundY + heightOffset;
 }
 window.PLAN2VR_PHYS = {
-  groundHeightAt, applyTerrain, dolly, camera, teleportTo,
+  groundHeightAt, applyTerrain, dolly, camera, teleportTo, fixtureCollide,
   steps: () => stairSteps, segs: () => collisionSegs,
   state: () => ({ groundY, heightOffset, fallV, steps: stairSteps.length,
-                  segs: collisionSegs.length, fix: fixtureSegs.length }),
+                  segs: collisionSegs.length, fix: fixtureSegs.length,
+                  fixCollide: (fixtureCollide() || []).length }),
 };
 
 // ---------------------------------------------------------------- loop
