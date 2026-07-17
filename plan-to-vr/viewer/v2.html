@@ -274,9 +274,11 @@ const STAGES = [
   { id: 'materials', name: 'materials / styling', color: '#c8a24a', step: '5' },
   { id: 'furniture', name: 'furniture', color: '#4aa24a', step: '6' },
 ];
-const on = { grade: true, walls: true, openings: true, stairs: true, materials: true, furniture: true };
+const on = { grade: true, walls: true, openings: true, stairs: true, materials: true, furniture: true, sheet: false };
 
 let ENTS = null, root = null;
+let underlaySpec = null;        // {file,x0,y1,in_per_px} of the current plan's source sheet
+const texCache = {};
 const gltf = new GLTFLoader();
 const floors = [];        // meshes the walker stands on (grade slabs + steps)
 const colliders = [];     // 2D wall segments {ax,az,bx,bz,hw} for walk collision
@@ -486,6 +488,20 @@ function build() {
       for (let i = 0; i < 4; i++) { const a = cor[i], b = cor[(i + 1) % 4]; fixtureColliders.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], hw: 0.03 }); }
     }
   }
+  // SOURCE SHEET underlay — the DXF/plan raster laid flat under the model, to check against
+  if (on.sheet && underlaySpec) {
+    const u = underlaySpec, url = 'plans/' + u.file;
+    const addPlane = tex => {
+      const wpx = tex.image.width, hpx = tex.image.height;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(wpx * u.in_per_px * IN2M, hpx * u.in_per_px * IN2M),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false }));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(wx(u.x0 + wpx * u.in_per_px / 2), 0.05, wz(u.y1 - hpx * u.in_per_px / 2));
+      mesh.renderOrder = 1; root.add(mesh);
+    };
+    if (texCache[url]) addPlane(texCache[url]);
+    else new THREE.TextureLoader().load(url, tex => { tex.colorSpace = THREE.SRGBColorSpace; texCache[url] = tex; if (on.sheet) addPlane(tex); });
+  }
   window.__V2_READY = true;
 }
 
@@ -500,6 +516,23 @@ for (const st of STAGES) {
   el.onclick = () => { on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
     el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; build(); };
   layersEl.appendChild(el);
+}
+// source-sheet underlay: a separate toggle (only lit when the plan ships a sheet)
+const sheetEl = document.createElement('div');
+sheetEl.className = 'layer off';
+sheetEl.innerHTML = `<span class="step">▦</span><span class="sw" style="background:#7fd0ff"></span>
+  <span class="nm">source sheet</span><span class="st">○</span>`;
+sheetEl.onclick = () => {
+  if (!underlaySpec) return;
+  on.sheet = !on.sheet; sheetEl.classList.toggle('off', !on.sheet);
+  sheetEl.querySelector('.st').textContent = on.sheet ? '●' : '○'; build();
+};
+layersEl.appendChild(sheetEl);
+function refreshSheetToggle() {
+  on.sheet = false; sheetEl.classList.add('off');
+  sheetEl.querySelector('.st').textContent = '○';
+  sheetEl.style.opacity = underlaySpec ? '' : '0.3';
+  sheetEl.title = underlaySpec ? 'source sheet underlay' : 'no source sheet for this plan';
 }
 
 // ---------------------------------------------------------------- plan library + loader
@@ -534,6 +567,8 @@ function loadPlan(src) {
   fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return isJSON ? r.json() : r.text(); }).then(data => {
     if (tok !== loadTok) return;
     ENTS = isJSON ? entsFromJSON(data) : parseDXF(data);
+    underlaySpec = (isJSON && data.underlay && data.underlay.file) ? data.underlay : null;
+    refreshSheetToggle();
     DXF = src; loadFA(); build(); framePlan(isJSON ? ENTS._spawn : null);
     errEl.style.display = 'none';
   }).catch(e => {
