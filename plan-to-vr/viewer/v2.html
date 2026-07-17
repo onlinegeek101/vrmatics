@@ -5,9 +5,10 @@
   :root { color-scheme: dark; }
   html,body { margin:0; height:100%; background:#1a1e26; color:#dfe6f2;
     font:14px system-ui,sans-serif; overflow:hidden; }
-  #c { position:fixed; inset:0; display:block; }
-  #panel { position:fixed; top:12px; left:12px; z-index:10; width:250px;
-    background:rgba(20,24,34,.9); border:1px solid #2f3850; border-radius:12px; padding:12px 14px; }
+  #c { position:fixed; inset:0; display:block; touch-action:none; }
+  #panel { position:fixed; top:12px; left:12px; z-index:10; width:250px; max-width:64vw; max-height:82vh; overflow:auto;
+    background:rgba(20,24,34,.9); border:1px solid #2f3850; border-radius:12px; padding:12px 14px;
+    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
   #panel h1 { font-size:15px; margin:0 0 2px; }
   #panel .sub { color:#8b95ac; font-size:11px; margin-bottom:10px; }
   .layer { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:8px;
@@ -19,9 +20,20 @@
   .layer.off { opacity:.45; }
   .layer.off .nm { text-decoration:line-through; }
   .step { color:#5f6b85; font:10px ui-monospace,monospace; width:14px; text-align:right; }
-  #hint { position:fixed; bottom:10px; left:12px; z-index:10; color:#6b7488;
-    font:11px ui-monospace,monospace; }
+  #hud { position:fixed; top:10px; right:10px; z-index:20; display:flex; flex-wrap:wrap; gap:8px;
+    justify-content:flex-end; max-width:56vw; }
+  .hud-btn { color:#fff; border:none; border-radius:9px; padding:9px 13px; font:14px system-ui; cursor:pointer;
+    white-space:nowrap; touch-action:manipulation; }
+  .hud-btn.on { outline:2px solid #eaf3ff; }
+  #hint { position:fixed; bottom:10px; left:12px; right:12px; z-index:10; color:#6b7488;
+    font:11px ui-monospace,monospace; pointer-events:none; }
   #err { position:fixed; inset:0; display:none; place-items:center; color:#ff9a9a; padding:30px; text-align:center; }
+  @media (max-width:560px) {
+    #panel { width:200px; padding:10px 11px; font-size:12px; }
+    #panel .sub { display:none; }
+    .layer { padding:8px; }
+    #hint { font-size:10px; }
+  }
 </style>
 <canvas id="c"></canvas>
 <div id="panel">
@@ -31,7 +43,8 @@
     border:1px solid #2f3850;border-radius:7px;padding:6px 8px;font:13px system-ui;cursor:pointer"></select>
   <div id="layers"></div>
 </div>
-<div id="hint">orbit: drag / scroll, <b>click a door</b> to open, <b>click furniture</b> to swap its model · <b>🚶 walk</b>: click enter, <b>WASD</b> move, <b>E</b> door, <b>Q</b> swap furniture, <b>Esc</b> exit · toggle any DXF layer left</div>
+<div id="hud"></div>
+<div id="hint">orbit: drag / pinch, <b>tap a door</b> to open, <b>tap furniture</b> to swap · <b>🚶 walk</b>: <b>WASD</b> or left-thumb joystick, right-drag / <b>📱</b> look, <b>E</b> door, <b>Q</b> furniture · toggle layers left</div>
 <div id="err"></div>
 
 <script async src="./vendor/es-module-shims.js"></script>
@@ -184,7 +197,7 @@ function place() {
   camera.lookAt(target);
 }
 let drag = null, moved = 0;
-canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; moved = 0; });
+canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return; drag = { x: e.clientX, y: e.clientY }; moved = 0; });
 addEventListener('pointerup', () => drag = null);
 addEventListener('pointermove', e => {
   if (!drag) return;
@@ -587,9 +600,11 @@ loadPlan(PLANS[0].src);
 let mode = 'orbit';
 const walker = { x: wx(410), z: wz(120), yaw: 3.2, pitch: 0, y: 1.6 };  // spawn in the great room
 const keys = {};
+const joy = { f: 0, s: 0 };            // on-screen joystick (touch): forward, strafe in [-1,1]
 addEventListener('keydown', e => { keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('click', (e) => {
+  if (IS_TOUCH) return;                        // touch is handled by the touch manager below
   if (mode === 'walk') {
     if (document.pointerLockElement === canvas) toggleDoor((nearestDoor(walker.x, walker.z, 2.0) || {}).key);
     else canvas.requestPointerLock();
@@ -687,40 +702,139 @@ function nearestFixture(x, z, maxD) {
   for (const f of fixtures) { const dd = (wx(f.cx) - x) ** 2 + (wz(f.cy) - z) ** 2; if (dd < bd) { bd = dd; best = f; } }
   return best;
 }
+const _wf = new THREE.Vector3();
 function walkTick(dt) {
-  const sp = (keys.ShiftLeft ? 4.2 : 2.3) * dt;
-  const fx = Math.sin(walker.yaw), fz = Math.cos(walker.yaw);       // forward
-  const rx = Math.cos(walker.yaw), rz = -Math.sin(walker.yaw);      // right
-  let mx = 0, mz = 0;
-  if (keys.KeyW) { mx += fx; mz += fz; }
-  if (keys.KeyS) { mx -= fx; mz -= fz; }
-  if (keys.KeyD) { mx += rx; mz += rz; }
-  if (keys.KeyA) { mx -= rx; mz -= rz; }
-  const ml = Math.hypot(mx, mz);
-  if (ml > 0) {
-    let [nx, nz] = collide(walker.x + mx / ml * sp, walker.z + mz / ml * sp);
-    walker.x = nx; walker.z = nz;
+  const useGyro = gyro.enabled && gyro.seen;
+  let fx, fz;
+  if (useGyro) {                                                    // orientation from the phone
+    gyroYawQ.setFromAxisAngle(gyroYUp, gyro.yawOffset);
+    camera.quaternion.copy(gyroYawQ).multiply(gyro.quat);
+    _wf.set(0, 0, -1).applyQuaternion(camera.quaternion); _wf.y = 0;
+    if (_wf.lengthSq() < 1e-6) _wf.set(Math.sin(walker.yaw), 0, Math.cos(walker.yaw));
+    _wf.normalize(); fx = _wf.x; fz = _wf.z;
+  } else {
+    fx = Math.sin(walker.yaw); fz = Math.cos(walker.yaw);           // forward from yaw
   }
+  const rx = fz, rz = -fx;                                          // right = forward rotated -90°
+  let mf = 0, ms = 0;
+  if (keys.KeyW) mf += 1; if (keys.KeyS) mf -= 1;
+  if (keys.KeyD) ms += 1; if (keys.KeyA) ms -= 1;
+  mf += joy.f; ms += joy.s;                                         // on-screen joystick
+  const sp = (keys.ShiftLeft ? 4.2 : 2.3) * dt;
+  let mx = mf * fx + ms * rx, mz = mf * fz + ms * rz;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 0) { const c = collide(walker.x + mx / ml * sp, walker.z + mz / ml * sp); walker.x = c[0]; walker.z = c[1]; }
   const g = groundAt(walker.x, walker.z);
   walker.y += (g + 1.62 - walker.y) * Math.min(1, dt * 12);         // ease onto floor / steps
   camera.position.set(walker.x, walker.y, walker.z);
-  const cp = Math.cos(walker.pitch);
-  camera.lookAt(walker.x + fx * cp, walker.y + Math.sin(walker.pitch), walker.z + fz * cp);
+  if (!useGyro) {
+    const cp = Math.cos(walker.pitch);
+    camera.lookAt(walker.x + fx * cp, walker.y + Math.sin(walker.pitch), walker.z + fz * cp);
+  }
 }
 
+// ---------------------------------------------------------------- touch controls
+// orbit: 1-finger drag rotates, 2-finger pinch zooms, tap opens a door / swaps furniture.
+// walk: left half = move joystick, right half = look (or twist heading when 📱 look is on), tap = door.
+const tState = {};        // touch id -> {kind,ox,oy,cx,cy,moved}
+let pinchPrev = 0;
+const touchArr = () => Object.values(tState);
+function touchDist() { const a = touchArr(); return a.length < 2 ? 0 : Math.hypot(a[0].cx - a[1].cx, a[0].cy - a[1].cy); }
+canvas.addEventListener('touchstart', e => {
+  for (const t of e.changedTouches) {
+    const kind = mode === 'walk' ? (t.clientX < innerWidth / 2 ? 'move' : 'look') : 'orbit';
+    tState[t.identifier] = { kind, ox: t.clientX, oy: t.clientY, cx: t.clientX, cy: t.clientY, moved: 0 };
+  }
+  if (mode === 'orbit' && touchArr().length >= 2) pinchPrev = touchDist();
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    const o = tState[t.identifier]; if (!o) continue;
+    o.moved += Math.abs(t.clientX - o.cx) + Math.abs(t.clientY - o.cy);
+    if (o.kind === 'move') {
+      joy.s = Math.max(-1, Math.min(1, (t.clientX - o.ox) / 55));
+      joy.f = Math.max(-1, Math.min(1, -(t.clientY - o.oy) / 55));
+    } else if (o.kind === 'look') {
+      const dx = t.clientX - o.cx, dy = t.clientY - o.cy;
+      if (gyro.enabled && gyro.seen) gyro.yawOffset -= dx * 0.005;
+      else { walker.yaw -= dx * 0.005; walker.pitch = Math.max(-1.3, Math.min(1.3, walker.pitch - dy * 0.005)); }
+    } else if (touchArr().length >= 2) {              // orbit pinch-zoom
+      o.cx = t.clientX; o.cy = t.clientY;
+      const d = touchDist();
+      if (pinchPrev && d) { dist = Math.max(4, Math.min(40, dist * (pinchPrev / d))); place(); }
+      pinchPrev = d; continue;
+    } else {                                          // orbit 1-finger rotate
+      az -= (t.clientX - o.cx) * 0.006;
+      pol = Math.max(0.15, Math.min(1.45, pol - (t.clientY - o.cy) * 0.005)); place();
+    }
+    o.cx = t.clientX; o.cy = t.clientY;
+  }
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    const o = tState[t.identifier]; if (!o) continue;
+    if (o.moved < 10) {                               // a tap
+      if (mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.2); if (d) toggleDoor(d.key); }
+      else if (!doorAtScreen(o.cx, o.cy)) fixtureAtScreen(o.cx, o.cy);
+    }
+    if (o.kind === 'move') { joy.f = 0; joy.s = 0; }
+    delete tState[t.identifier];
+  }
+  pinchPrev = 0;
+}
+canvas.addEventListener('touchend', endTouch);
+canvas.addEventListener('touchcancel', endTouch);
+
+const hud = document.getElementById('hud');
+const IS_TOUCH = matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window;
 const modeBtn = document.createElement('button');
-modeBtn.textContent = '🚶 walk';
-modeBtn.style.cssText = 'position:fixed;top:12px;right:12px;z-index:10;background:#2b6cb0;' +
-  'color:#fff;border:none;border-radius:9px;padding:9px 15px;font:14px system-ui;cursor:pointer';
-document.body.appendChild(modeBtn);
+modeBtn.textContent = '🚶 walk'; modeBtn.className = 'hud-btn'; modeBtn.style.background = '#2b6cb0';
+hud.appendChild(modeBtn);
 modeBtn.onclick = () => {
   if (mode === 'orbit') {
     mode = 'walk'; modeBtn.textContent = '🎥 orbit'; modeBtn.style.background = '#5a6474';
-    walker.y = groundAt(walker.x, walker.z) + 1.62; canvas.requestPointerLock();
+    walker.y = groundAt(walker.x, walker.z) + 1.62;
+    if (!IS_TOUCH) canvas.requestPointerLock();      // desktop: mouse-look; touch uses drag/gyro
   } else {
     mode = 'orbit'; modeBtn.textContent = '🚶 walk'; modeBtn.style.background = '#2b6cb0';
     if (document.exitPointerLock) document.exitPointerLock(); place();
   }
+};
+
+// gyro "look" toggle — the phone's orientation drives the view (magic window)
+const gyro = { enabled: false, seen: false, yawOffset: 0, quat: new THREE.Quaternion() };
+const gyroYUp = new THREE.Vector3(0, 1, 0), gyroYawQ = new THREE.Quaternion();
+{
+  const zee = new THREE.Vector3(0, 0, 1), euler = new THREE.Euler(), q0 = new THREE.Quaternion();
+  const qX = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), D2R = Math.PI / 180;
+  addEventListener('deviceorientation', e => {
+    if (e.alpha === null || e.beta === null || !gyro.enabled) return;
+    const orient = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * D2R;
+    euler.set(e.beta * D2R, e.alpha * D2R, -e.gamma * D2R, 'YXZ');
+    gyro.quat.setFromEuler(euler);
+    gyro.quat.multiply(qX);
+    gyro.quat.multiply(q0.setFromAxisAngle(zee, -orient));
+    gyro.seen = true;
+  });
+}
+const gyroBtn = document.createElement('button');
+gyroBtn.textContent = '📱 look'; gyroBtn.className = 'hud-btn'; gyroBtn.style.background = '#3f4a63';
+gyroBtn.title = 'move your phone to look around';
+hud.appendChild(gyroBtn);
+gyroBtn.onclick = () => {
+  if (gyro.enabled) {                                   // turn off; look reverts to drag (stay in walk)
+    gyro.enabled = false; gyro.seen = false; gyroBtn.classList.remove('on'); gyroBtn.style.background = '#3f4a63';
+    return;
+  }
+  const go = () => {
+    gyro.enabled = true; gyroBtn.classList.add('on'); gyroBtn.style.background = '#2b6cb0';
+    if (mode === 'orbit') modeBtn.click();              // gyro look implies first-person
+  };
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function')
+    DeviceOrientationEvent.requestPermission().then(s => { if (s === 'granted') go(); else alert('Motion access was denied.'); }).catch(() => {});
+  else go();
 };
 addEventListener('keydown', e => {
   if (e.code === 'Escape') { if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click(); }
@@ -1094,19 +1208,15 @@ function stopNote() {
   noteRec.rec.stop();
 }
 const noteBtn = document.createElement('button');
-noteBtn.textContent = '⏺ note';
+noteBtn.textContent = '⏺ note'; noteBtn.className = 'hud-btn'; noteBtn.style.background = '#3a6a3a';
 noteBtn.title = 'record a view + voice note (saves a webm)';
-noteBtn.style.cssText = 'position:fixed;top:12px;right:210px;z-index:10;background:#3a6a3a;color:#fff;' +
-  'border:none;border-radius:9px;padding:9px 13px;font:14px system-ui;cursor:pointer';
-document.body.appendChild(noteBtn);
+hud.appendChild(noteBtn);
 noteBtn.onclick = () => noteRec.active ? stopNote() : startNote();
 
 const issueBtn = document.createElement('button');
-issueBtn.textContent = '⚑ issue';
+issueBtn.textContent = '⚑ issue'; issueBtn.className = 'hud-btn'; issueBtn.style.background = '#7a2b3a';
 issueBtn.title = 'file a GitHub issue from right here';
-issueBtn.style.cssText = 'position:fixed;top:12px;right:110px;z-index:10;background:#7a2b3a;color:#fff;' +
-  'border:none;border-radius:9px;padding:9px 13px;font:14px system-ui;cursor:pointer';
-document.body.appendChild(issueBtn);
+hud.appendChild(issueBtn);
 issueBtn.onclick = () => { const t = prompt('Describe the issue (optional):') || ''; fileIssue(t); };
 
 let prevT = 0;
@@ -1122,5 +1232,6 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
   fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
-  planOpenings: () => planOpenings, solveAlignment, feedbackCfg };
+  planOpenings: () => planOpenings, solveAlignment, feedbackCfg,
+  gyro, joy, camera, mode: () => mode };
 </script>
