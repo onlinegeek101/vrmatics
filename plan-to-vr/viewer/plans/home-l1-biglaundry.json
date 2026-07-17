@@ -4652,8 +4652,8 @@
   {
    "name": "FURN-TOILET",
    "center": [
-    -170,
-    39
+    -167,
+    38
    ],
    "size": [
     28,
@@ -7177,8 +7177,8 @@
   {
    "name": "FURN-VANITY",
    "center": [
-    -174,
-    -14
+    -171,
+    -6
    ],
    "size": [
     22,
@@ -7566,7 +7566,7 @@
    "name": "FURN-SHOWER",
    "center": [
     -103,
-    -14
+    10
    ],
    "size": [
     31,
