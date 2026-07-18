@@ -109,9 +109,10 @@ function parseDXF(text) {
     else if (code === '11') cur._x2 = parseFloat(val);
     else if (code === '21') cur.pts.push([cur._x2, parseFloat(val)]);
   }
-  for (const e of ents) {                            // tessellate arcs/circles to polylines
+  for (const e of ents) {                            // tessellate arcs/circles to polylines (keep centre/radius)
     if (e.type === 'ARC' && e.pts.length && e.h) {
       const [cx, cy] = e.pts[0], r = e.h;
+      e.cx = cx; e.cy = cy; e.r = r;
       let a0 = (e.a0 || 0) * Math.PI / 180, a1 = (e.a1 == null ? 360 : e.a1) * Math.PI / 180;
       if (a1 <= a0) a1 += 2 * Math.PI;
       const n = Math.max(4, Math.ceil((a1 - a0) / (Math.PI / 24))), p = [];
@@ -119,6 +120,7 @@ function parseDXF(text) {
       e.pts = p;
     } else if (e.type === 'CIRCLE' && e.pts.length && e.h) {
       const [cx, cy] = e.pts[0], r = e.h, n = 40, p = [];
+      e.cx = cx; e.cy = cy; e.r = r;
       for (let k = 0; k <= n; k++) { const a = 2 * Math.PI * k / n; p.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
       e.pts = p;
     }
@@ -304,7 +306,8 @@ function autoCat(name) {                             // assign a DXF layer to a 
   if (/WALL/.test(n)) return 'walls';
   if (/DRWDW|DOOR|WIN|GLAZ|OPEN/.test(n)) return 'openings';
   if (/STAIR|STEP|TREAD|RAIL/.test(n)) return 'stairs';
-  if (/COLUMN|COLLINE|BEAM|STRUCT|GRID|POST/.test(n)) return 'structure';
+  if (/COLLINE|GRIDLINE|CENTERLINE|CENTRELINE/.test(n)) return 'hidden';   // reference grid, not walls
+  if (/COLUMN|BEAM|STRUCT|POST|PIER/.test(n)) return 'structure';
   if (/FURN|FIXT|APPL|CASE|CAB/.test(n)) return 'furniture';
   if (/SLAB|FLOOR|TOPO/.test(n)) return 'floor';
   if (/RMNAME|NAME|NOTE|DIM|TEXT|LEAD|DEMO|FILL|HATCH/.test(n)) return 'hidden';
@@ -605,16 +608,88 @@ function build2DRaw() {
   }
   window.__V2_READY = true;
 }
-// raw 3D: each layer renders per its assigned category — walls extrude, structure posts,
-// openings/linework draw flat, hidden skips. "Walls in the DXF render as walls."
+// pair the DXF's double wall-lines into single centrelines with a measured thickness
+function mergeDoubleWalls(segs) {
+  const info = segs.map(([a, b]) => { const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    return { a, b, ux: dx / len, uy: dy / len, len, ang: Math.atan2(dy, dx) }; }).filter(s => s.len > 1);
+  const used = new Array(info.length).fill(false), out = [];
+  for (let i = 0; i < info.length; i++) {
+    if (used[i]) continue;
+    const A = info[i]; let best = -1, bestPerp = 1e9;
+    for (let j = i + 1; j < info.length; j++) {
+      if (used[j]) continue;
+      const B = info[j];
+      let da = Math.abs(A.ang - B.ang) % Math.PI; da = Math.min(da, Math.PI - da);
+      if (da > 0.09) continue;                         // ~5° → parallel
+      const perp = Math.abs((B.a[0] - A.a[0]) * -A.uy + (B.a[1] - A.a[1]) * A.ux);
+      if (perp < 1.5 || perp > 14) continue;           // 1.5–14" apart → a wall's two faces
+      const t1 = (B.a[0] - A.a[0]) * A.ux + (B.a[1] - A.a[1]) * A.uy;
+      const t2 = (B.b[0] - A.a[0]) * A.ux + (B.b[1] - A.a[1]) * A.uy;
+      const overlap = Math.min(Math.max(t1, t2), A.len) - Math.max(Math.min(t1, t2), 0);
+      if (overlap < A.len * 0.35) continue;
+      if (perp < bestPerp) { bestPerp = perp; best = j; }
+    }
+    if (best >= 0) {
+      const B = info[best]; used[i] = used[best] = true;
+      const rev = A.ux * B.ux + A.uy * B.uy < 0;
+      const ba = rev ? B.b : B.a, bb = rev ? B.a : B.b;
+      out.push({ a: [(A.a[0] + ba[0]) / 2, (A.a[1] + ba[1]) / 2], b: [(A.b[0] + bb[0]) / 2, (A.b[1] + bb[1]) / 2], thick: Math.max(3, bestPerp) });
+    } else { used[i] = true; out.push({ a: A.a, b: A.b, thick: WALL_TH }); }   // unpaired → default thickness
+  }
+  return out;
+}
+// find the gaps in collinear wall runs — those are the openings
+function detectOpenings(walls) {
+  const lines = {};
+  for (const w of walls) {
+    const dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+    let ang = Math.atan2(uy, ux); if (ang < 0) ang += Math.PI;
+    const off = w.a[0] * -uy + w.a[1] * ux;            // perpendicular offset of the line
+    const key = Math.round(ang * 57.2958 / 2) + ':' + Math.round(off / 5);
+    (lines[key] = lines[key] || []).push(w);
+  }
+  const gaps = [];
+  for (const key in lines) {
+    const grp = lines[key]; if (grp.length < 2) continue;
+    const dx = grp[0].b[0] - grp[0].a[0], dy = grp[0].b[1] - grp[0].a[1], len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len, ref = grp[0].a;
+    const spans = grp.map(w => { const t1 = (w.a[0] - ref[0]) * ux + (w.a[1] - ref[1]) * uy, t2 = (w.b[0] - ref[0]) * ux + (w.b[1] - ref[1]) * uy;
+      return { lo: Math.min(t1, t2), hi: Math.max(t1, t2), thick: w.thick }; }).sort((p, q) => p.lo - q.lo);
+    for (let i = 0; i + 1 < spans.length; i++) {
+      const gap = spans[i + 1].lo - spans[i].hi;
+      if (gap > 8 && gap < 130) gaps.push({ width: gap, ux, uy, thick: spans[i].thick,
+        a: [ref[0] + ux * spans[i].hi, ref[1] + uy * spans[i].hi], b: [ref[0] + ux * spans[i + 1].lo, ref[1] + uy * spans[i + 1].lo],
+        mid: [ref[0] + ux * (spans[i].hi + gap / 2), ref[1] + uy * (spans[i].hi + gap / 2)] });
+    }
+  }
+  return gaps;
+}
+function classifyOpening(o, arcs, glaze) {
+  for (const arc of arcs) {                            // door swing arc near the gap → door
+    const d = Math.hypot(arc.cx - o.mid[0], arc.cy - o.mid[1]);
+    if (d < o.width * 1.1 && arc.r > o.width * 0.55 && arc.r < o.width * 1.7) return 'door';
+  }
+  const nx = -o.uy, ny = o.ux;
+  for (const [a, b] of glaze) {                        // line running along the wall inside the gap → window glazing
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    if (Math.abs((mx - o.mid[0]) * o.ux + (my - o.mid[1]) * o.uy) > o.width / 2) continue;
+    if (Math.abs((mx - o.mid[0]) * nx + (my - o.mid[1]) * ny) > o.thick + 2) continue;
+    const sdx = b[0] - a[0], sdy = b[1] - a[1], slen = Math.hypot(sdx, sdy) || 1;
+    if (Math.abs((sdx / slen) * o.ux + (sdy / slen) * o.uy) > 0.85 && slen > o.width * 0.4) return 'window';
+  }
+  return 'opening';                                    // cased opening (pass-through)
+}
+// raw 3D: layers render per assigned category; walls merge to solid walls with detected openings
 function buildRaw() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
   floors.length = 0; colliders.length = 0; doors = []; fixtures = []; fixtureColliders = []; planOpenings = [];
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.92 });
   const structMat = new THREE.MeshStandardMaterial({ color: 0x9a86c8, roughness: 0.7 });
-  const catSegs = {};                                // category -> [ [ [x,y],[x,y] ], ... ]
-  const flat = [];                                   // { color, segs } drawn as floor linework
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, transparent: true, opacity: 0.35 });
+  let wallSegs = [], structSegs = [], openArcs = [], glazeSegs = [], openOn = false;
+  const flat = [];
   for (const L of rawLayers) {
     if (!L.on) continue;
     const cat = layerCat[L.name] || 'linework';
@@ -622,36 +697,61 @@ function buildRaw() {
     const segs = [];
     for (const e of byLayer(ENTS, L.name)) {
       if (e.type === 'HATCH' || e.type === 'WIPEOUT' || e.type === 'SOLID' || e.type === 'SECTION') continue;
+      if (cat === 'openings' && (e.type === 'ARC' || e.type === 'CIRCLE') && e.r) openArcs.push({ cx: e.cx, cy: e.cy, r: e.r });
       const p = e.pts; if (!p || p.length < 2) continue;
       for (let i = 0; i + 1 < p.length; i++) segs.push([p[i], p[i + 1]]);
     }
-    (catSegs[cat] = catSegs[cat] || []).push(...segs);
-    if (cat === 'openings' || cat === 'linework' || cat === 'stairs' || cat === 'furniture') flat.push({ color: L.color, segs });
+    if (cat === 'walls') wallSegs.push(...segs);
+    else if (cat === 'structure') structSegs.push(...segs);
+    else if (cat === 'openings') { openOn = true; glazeSegs.push(...segs); }
+    else flat.push({ color: L.color, segs });          // stairs / furniture / linework
   }
-  // floor slab: bounding rect of the wall segments, so there is something to stand on
-  const wsegs = catSegs.walls || [];
+  const merged = mergeDoubleWalls(wallSegs);
+  // floor slab under the merged walls
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
-  for (const [a, b] of wsegs) for (const q of [a, b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
+  for (const w of merged) for (const q of [w.a, w.b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
   if (minx < maxx) {
     const fm = new THREE.Mesh(new THREE.PlaneGeometry((maxx - minx) * IN2M, (maxy - miny) * IN2M),
       new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85 }));
     fm.rotation.x = -Math.PI / 2; fm.position.set(wx((minx + maxx) / 2), 0, wz((miny + maxy) / 2)); fm.receiveShadow = true;
     root.add(fm); floors.push(fm);
   }
-  // walls: extrude each line segment to full height + collider
-  for (const [a, b] of (catSegs.walls || [])) {
-    const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
+  // solid walls from the merged centrelines (gaps stay open for the doorways)
+  for (const w of merged) {
+    const ax = wx(w.a[0]), az = wz(w.a[1]), bx = wx(w.b[0]), bz = wz(w.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(boxBetween(ax, az, bx, bz, WALL_TH, 0, WALL_H * IN2M, wallMat));
-    colliders.push({ ax, az, bx, bz, hw: WALL_TH / 2 * IN2M });
+    root.add(boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, wallMat));
+    colliders.push({ ax, az, bx, bz, hw: w.thick / 2 * IN2M });
   }
-  // structure: slimmer full-height posts/beams (columns, beam grid)
-  for (const [a, b] of (catSegs.structure || [])) {
+  // openings: header over each gap; door swing / window glazing / cased per classification
+  if (openOn) for (const o of detectOpenings(merged)) {
+    const kind = classifyOpening(o, openArcs, glazeSegs);
+    const ax = wx(o.a[0]), az = wz(o.a[1]), bx = wx(o.b[0]), bz = wz(o.b[1]);
+    const th = o.thick, headY = HEAD * IN2M, top = WALL_H * IN2M;
+    if (headY < top) root.add(boxBetween(ax, az, bx, bz, th, headY, top, wallMat));   // header
+    if (kind === 'window') {
+      const sillY = SILL * IN2M;
+      root.add(boxBetween(ax, az, bx, bz, th, 0, sillY, wallMat));                     // apron
+      colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
+      root.add(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, glassMat));          // glazing
+    } else if (kind === 'door') {
+      const dl = Math.hypot(bx - ax, bz - az), closedRot = -Math.atan2(bz - az, bx - ax);
+      const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`, isOpen = !!doorState[key];
+      const pivot = new THREE.Group(); pivot.position.set(ax, 0, az);
+      pivot.rotation.y = closedRot + (isOpen ? DOOR_OPEN : 0); pivot.userData.doorKey = key;
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, headY, WALL_TH * 0.5 * IN2M), leafMat);
+      leaf.position.set(dl / 2, headY / 2, 0); leaf.castShadow = true;
+      pivot.add(leaf); root.add(pivot);
+      doors.push({ key, pivot, closedRot, angle: isOpen ? DOOR_OPEN : 0, target: isOpen ? DOOR_OPEN : 0,
+        open: isOpen, leaf, cx: (ax + bx) / 2, cz: (az + bz) / 2, seg: { ax, az, bx, bz, hw: th / 2 * IN2M } });
+    }
+  }
+  // structure posts + flat reference linework
+  for (const [a, b] of structSegs) {
     const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
     root.add(boxBetween(ax, az, bx, bz, 3, 0, WALL_H * IN2M, structMat));
   }
-  // openings / stairs / furniture / linework: draw flat on the floor as reference
   for (const { color, segs } of flat) {
     const pts = [];
     for (const [a, b] of segs) pts.push(new THREE.Vector3(wx(a[0]), 0.02, wz(a[1])), new THREE.Vector3(wx(b[0]), 0.02, wz(b[1])));
