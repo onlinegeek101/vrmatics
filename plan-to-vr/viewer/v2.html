@@ -804,61 +804,83 @@ function distToSeg(px, py, a, b) {
   return Math.hypot(a[0] + dx * t - px, a[1] + dy * t - py);
 }
 function pickWall(clientX, clientY) {                   // the wall under the pointer — grab anywhere on its face
-  let idx = null, hitPlan = null;
+  let idx = null, hitPlan = null, hitWorld = null;
   const r = canvas.getBoundingClientRect();            // raycast the wall meshes (works high on a wall, not just its base)
   const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, view2D ? oCam : camera);
   const hits = ray.intersectObjects(wallMeshes, false);
-  if (hits.length) { idx = hits[0].object.userData.wallIndex; hitPlan = [hits[0].point.x / IN2M, -hits[0].point.z / IN2M]; }
+  if (hits.length) { const h = hits[0]; idx = h.object.userData.wallIndex;
+    hitPlan = [h.point.x / IN2M, -h.point.z / IN2M]; hitWorld = { x: h.point.x, y: h.point.y, z: h.point.z }; }
   else {                                               // fallback: nearest wall to the ground point under the pointer
     const p = planFromClient(clientX, clientY);
     if (p) { let bd = 1e9; for (let i = 0; i < mergedWalls.length; i++) { const w = mergedWalls[i], d = distToSeg(p[0], p[1], w.a, w.b);
-      if (d < w.thick / 2 + PICK_TOL && d < bd) { bd = d; idx = i; } } hitPlan = p; }
+      if (d < w.thick / 2 + PICK_TOL && d < bd) { bd = d; idx = i; } } hitPlan = p; hitWorld = { x: p[0] * IN2M, y: 0, z: -p[1] * IN2M }; }
   }
   if (idx == null || !mergedWalls[idx]) return null;
   const w = mergedWalls[idx], dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
-  return { i: idx, u: [dx / L, dy / L], n: [-dy / L, dx / L], a: w.a.slice(), b: w.b.slice(), thick: w.thick, hitPlan };
+  return { i: idx, u: [dx / L, dy / L], n: [-dy / L, dx / L], a: w.a.slice(), b: w.b.slice(), thick: w.thick, hitPlan, hitWorld };
 }
-function snapMove(dw, m) {                              // snap the moving wall's faces to nearby parallel faces
-  const u = dw.u, n = dw.n, half = dw.thick / 2, L = Math.hypot(dw.b[0] - dw.a[0], dw.b[1] - dw.a[1]) || 1;
-  const marks = [m - half, m, m + half];               // moving wall: near face / centre / far face (signed on n from a)
-  let bestM = m, bd = FACE_SNAP;
+const MIN_TH = 1;                                       // inches — a face can't be pushed past its opposite face
+function snapFace(a, n, u, L, srcI, q) {                // snap one face's signed offset (from centre a, along n) to a parallel face
+  let best = q, bd = FACE_SNAP;
   for (let j = 0; j < mergedWalls.length; j++) {
-    if (j === dw.i) continue;
+    if (j === srcI) continue;
     const w2 = mergedWalls[j], d2x = w2.b[0] - w2.a[0], d2y = w2.b[1] - w2.a[1], L2 = Math.hypot(d2x, d2y) || 1;
     if (Math.abs((d2x / L2) * u[0] + (d2y / L2) * u[1]) < 0.985) continue;             // not parallel
-    const tA = (w2.a[0] - dw.a[0]) * u[0] + (w2.a[1] - dw.a[1]) * u[1];
-    const tB = (w2.b[0] - dw.a[0]) * u[0] + (w2.b[1] - dw.a[1]) * u[1];
+    const tA = (w2.a[0] - a[0]) * u[0] + (w2.a[1] - a[1]) * u[1];
+    const tB = (w2.b[0] - a[0]) * u[0] + (w2.b[1] - a[1]) * u[1];
     if (Math.min(tA, tB) > L + FACE_SNAP || Math.max(tA, tB) < -FACE_SNAP) continue;   // no length overlap
-    const s2 = (w2.a[0] - dw.a[0]) * n[0] + (w2.a[1] - dw.a[1]) * n[1], h2 = w2.thick / 2;
-    for (const tf of [s2 - h2, s2, s2 + h2]) for (const mk of marks) {                 // land a face on a target line
-      const nm = m + (tf - mk);
-      if (Math.abs(nm - m) < bd) { bd = Math.abs(nm - m); bestM = nm; }
-    }
+    const c2 = (w2.a[0] - a[0]) * n[0] + (w2.a[1] - a[1]) * n[1], h2 = w2.thick / 2;
+    for (const tgt of [c2 - h2, c2 + h2, c2]) if (Math.abs(tgt - q) < bd) { bd = Math.abs(tgt - q); best = tgt; }
   }
-  return { m: bestM, snapped: bestM !== m };
+  return { q: best, snapped: best !== q };
 }
-function beginWallDrag(clientX, clientY) {              // grab the wall under the pointer
+function rayAxisS(clientX, clientY, G, N) {             // signed distance along axis (G + s·N) nearest the pointer ray
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, view2D ? oCam : camera);
+  const O = ray.ray.origin, Dr = ray.ray.direction;
+  const rx = G.x - O.x, ry = G.y - O.y, rz = G.z - O.z;
+  const b = N.x * Dr.x + N.y * Dr.y + N.z * Dr.z;      // a = N·N = 1 (unit)
+  const c = Dr.x * Dr.x + Dr.y * Dr.y + Dr.z * Dr.z;
+  const d = N.x * rx + N.y * ry + N.z * rz, e = Dr.x * rx + Dr.y * ry + Dr.z * rz;
+  const denom = c - b * b; if (Math.abs(denom) < 1e-9) return 0;
+  return (b * e - c * d) / denom;                       // metres along N
+}
+function beginWallDrag(clientX, clientY) {              // grab ONE face of the wall under the pointer
   const pk = pickWall(clientX, clientY); if (!pk) return false;
-  const p = planFromClient(clientX, clientY) || pk.hitPlan;   // ground reference for the drag delta
-  wallDrag = { ...pk, startP: p, m: 0, snapped: false, curA: pk.a.slice(), curB: pk.b.slice() };
+  const hp = pk.hitPlan;
+  const qHit = (hp[0] - pk.a[0]) * pk.n[0] + (hp[1] - pk.a[1]) * pk.n[1];   // which face? sign of offset from centre
+  const side = qHit >= 0 ? 1 : -1;
+  wallDrag = { i: pk.i, u: pk.u, n: pk.n, a: pk.a, b: pk.b, thick: pk.thick,
+    side, qFixed: -side * pk.thick / 2, snapped: false,
+    gWorld: pk.hitWorld || { x: hp[0] * IN2M, y: 0, z: -hp[1] * IN2M },   // real 3D grab point + face-normal axis (view-independent push)
+    nWorld: { x: pk.n[0], y: 0, z: -pk.n[1] },
+    curA: pk.a.slice(), curB: pk.b.slice(), curThick: pk.thick };
   hoverWall = null; refreshEditViz(); return true;
 }
-function updateWallDrag(clientX, clientY) {             // slide it perpendicular; snap to parallel faces
-  if (!wallDrag) return;
-  const p = planFromClient(clientX, clientY); if (!p) return;
-  const raw = (p[0] - wallDrag.startP[0]) * wallDrag.n[0] + (p[1] - wallDrag.startP[1]) * wallDrag.n[1];
-  const sn = snapMove(wallDrag, raw);
-  wallDrag.m = sn.m; wallDrag.snapped = sn.snapped;
-  wallDrag.curA = [wallDrag.a[0] + wallDrag.n[0] * sn.m, wallDrag.a[1] + wallDrag.n[1] * sn.m];
-  wallDrag.curB = [wallDrag.b[0] + wallDrag.n[0] * sn.m, wallDrag.b[1] + wallDrag.n[1] * sn.m];
+function updateWallDrag(clientX, clientY) {             // push/pull the grabbed face along its normal; snap to parallel faces
+  const dw = wallDrag; if (!dw) return;
+  const m = rayAxisS(clientX, clientY, dw.gWorld, dw.nWorld) / IN2M;   // face displacement along the wall normal (inches)
+  if (!isFinite(m)) return;
+  let qMoved = dw.side * dw.thick / 2 + m;
+  if (dw.side * (qMoved - dw.qFixed) < MIN_TH) qMoved = dw.qFixed + dw.side * MIN_TH;   // don't cross the fixed face
+  const sn = snapFace(dw.a, dw.n, dw.u, Math.hypot(dw.b[0] - dw.a[0], dw.b[1] - dw.a[1]) || 1, dw.i, qMoved);
+  qMoved = sn.q; dw.snapped = sn.snapped;
+  if (dw.side * (qMoved - dw.qFixed) < MIN_TH) qMoved = dw.qFixed + dw.side * MIN_TH;   // re-clamp after snapping
+  dw.curThick = Math.abs(qMoved - dw.qFixed);
+  const qc = (qMoved + dw.qFixed) / 2;                  // new centre = midpoint of the fixed + moved faces
+  dw.curA = [dw.a[0] + dw.n[0] * qc, dw.a[1] + dw.n[1] * qc];
+  dw.curB = [dw.b[0] + dw.n[0] * qc, dw.b[1] + dw.n[1] * qc];
   refreshEditViz();
 }
 function endWallDrag() {
   if (!wallDrag) return;
   const w = wallDrag; wallDrag = null;
-  if (Math.abs(w.m) >= 1 && isFinite(w.curA[0] + w.curA[1] + w.curB[0] + w.curB[1])) {
-    edits.push({ kind: 'move', o: [w.a[0], w.a[1], w.b[0], w.b[1]], n: [w.curA[0], w.curA[1], w.curB[0], w.curB[1]] });
+  const moved = Math.abs(w.curThick - w.thick) + Math.hypot(w.curA[0] - w.a[0], w.curA[1] - w.a[1]);
+  if (moved >= 1 && w.curThick >= MIN_TH && isFinite(w.curA[0] + w.curA[1] + w.curB[0] + w.curB[1])) {
+    edits.push({ kind: 'move', o: [w.a[0], w.a[1], w.b[0], w.b[1]],
+      n: [w.curA[0], w.curA[1], w.curB[0], w.curB[1]], th: w.curThick });
     saveEdits(); buildRaw();
   }
   refreshEditViz(); updateEditBar();
@@ -871,7 +893,7 @@ function ghostBox(a, b, thick, color, op) {
 function refreshEditViz() {
   editMarkers.clear();
   if (!editMode) return;
-  if (wallDrag) ghostBox(wallDrag.curA, wallDrag.curB, wallDrag.thick, wallDrag.snapped ? 0x53ff9a : 0x53d0ff, 0.5);
+  if (wallDrag) ghostBox(wallDrag.curA, wallDrag.curB, wallDrag.curThick, wallDrag.snapped ? 0x53ff9a : 0x53d0ff, 0.5);
   else if (hoverWall != null && mergedWalls[hoverWall]) {   // hover: the wall you'd grab
     const w = mergedWalls[hoverWall]; ghostBox(w.a, w.b, w.thick + 2, 0xffd24a, 0.22);
   }
@@ -892,7 +914,7 @@ function applyMoveEdits(merged) {                       // relocate the walls th
     if (ed.kind !== 'move') continue;
     let bi = -1, bd = 24;
     for (let i = 0; i < merged.length; i++) { const d = wallMatchDist(merged[i], ed.o); if (d < bd) { bd = d; bi = i; } }
-    if (bi >= 0) merged[bi] = { a: [ed.n[0], ed.n[1]], b: [ed.n[2], ed.n[3]], thick: merged[bi].thick };
+    if (bi >= 0) merged[bi] = { a: [ed.n[0], ed.n[1]], b: [ed.n[2], ed.n[3]], thick: (ed.th != null ? ed.th : merged[bi].thick) };
   }
 }
 function undoEdit() {
@@ -1868,7 +1890,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapMove,
+  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
   toggleWallEdit, editHover, beginWallDrag, updateWallDrag, endWallDrag };
