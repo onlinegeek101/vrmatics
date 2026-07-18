@@ -21,6 +21,8 @@
   .layer.off .nm { text-decoration:line-through; }
   .step { color:#5f6b85; font:10px ui-monospace,monospace; width:14px; text-align:right; }
   .layer .chev { color:#7f8aa3; cursor:pointer; padding:0 5px; user-select:none; font-size:11px; }
+  .layer .catsel { background:#232b3d; color:#c3ccdd; border:1px solid #2f3850; border-radius:5px;
+    font:10px system-ui; padding:2px 3px; max-width:82px; cursor:pointer; }
   .subwrap { display:none; margin:0 0 3px 0; }
   .subwrap.open { display:block; }
   .subrow { display:flex; align-items:center; gap:8px; padding:5px 8px 5px 28px; border-radius:7px;
@@ -295,6 +297,19 @@ const subOn = { openings: { door: true, window: true, opening: true },
 let ENTS = null, root = null;
 let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
 let rawMode = false, rawLayers = [];                // render the DXF's own layers verbatim (no pipeline)
+let layerCat = {};                                  // raw layer name -> render category (auto by name, overridable)
+const RAW_CATS = ['walls', 'openings', 'stairs', 'structure', 'furniture', 'floor', 'linework', 'hidden'];
+function autoCat(name) {                             // assign a DXF layer to a category by its name
+  const n = (name || '').toUpperCase();
+  if (/WALL/.test(n)) return 'walls';
+  if (/DRWDW|DOOR|WIN|GLAZ|OPEN/.test(n)) return 'openings';
+  if (/STAIR|STEP|TREAD|RAIL/.test(n)) return 'stairs';
+  if (/COLUMN|COLLINE|BEAM|STRUCT|GRID|POST/.test(n)) return 'structure';
+  if (/FURN|FIXT|APPL|CASE|CAB/.test(n)) return 'furniture';
+  if (/SLAB|FLOOR|TOPO/.test(n)) return 'floor';
+  if (/RMNAME|NAME|NOTE|DIM|TEXT|LEAD|DEMO|FILL|HATCH/.test(n)) return 'hidden';
+  return 'linework';
+}
 const RAW_COLORS = {
   '1.1WALL': '#e9e3d6', '1.2WALLS': '#e9e3d6', '1.1DRWDWS': '#d64550', '1.2DRWDWS': '#d64550',
   '1.1COLUMNS': '#b07bff', '1.1COLLINE': '#8a6bff', '1.1RMNAMES': '#5aa9d6', '1.1NOTES': '#8b95ac',
@@ -590,6 +605,61 @@ function build2DRaw() {
   }
   window.__V2_READY = true;
 }
+// raw 3D: each layer renders per its assigned category — walls extrude, structure posts,
+// openings/linework draw flat, hidden skips. "Walls in the DXF render as walls."
+function buildRaw() {
+  if (root) scene.remove(root);
+  root = new THREE.Group(); scene.add(root);
+  floors.length = 0; colliders.length = 0; doors = []; fixtures = []; fixtureColliders = []; planOpenings = [];
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.92 });
+  const structMat = new THREE.MeshStandardMaterial({ color: 0x9a86c8, roughness: 0.7 });
+  const catSegs = {};                                // category -> [ [ [x,y],[x,y] ], ... ]
+  const flat = [];                                   // { color, segs } drawn as floor linework
+  for (const L of rawLayers) {
+    if (!L.on) continue;
+    const cat = layerCat[L.name] || 'linework';
+    if (cat === 'hidden') continue;
+    const segs = [];
+    for (const e of byLayer(ENTS, L.name)) {
+      if (e.type === 'HATCH' || e.type === 'WIPEOUT' || e.type === 'SOLID' || e.type === 'SECTION') continue;
+      const p = e.pts; if (!p || p.length < 2) continue;
+      for (let i = 0; i + 1 < p.length; i++) segs.push([p[i], p[i + 1]]);
+    }
+    (catSegs[cat] = catSegs[cat] || []).push(...segs);
+    if (cat === 'openings' || cat === 'linework' || cat === 'stairs' || cat === 'furniture') flat.push({ color: L.color, segs });
+  }
+  // floor slab: bounding rect of the wall segments, so there is something to stand on
+  const wsegs = catSegs.walls || [];
+  let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+  for (const [a, b] of wsegs) for (const q of [a, b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
+  if (minx < maxx) {
+    const fm = new THREE.Mesh(new THREE.PlaneGeometry((maxx - minx) * IN2M, (maxy - miny) * IN2M),
+      new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85 }));
+    fm.rotation.x = -Math.PI / 2; fm.position.set(wx((minx + maxx) / 2), 0, wz((miny + maxy) / 2)); fm.receiveShadow = true;
+    root.add(fm); floors.push(fm);
+  }
+  // walls: extrude each line segment to full height + collider
+  for (const [a, b] of (catSegs.walls || [])) {
+    const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
+    if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
+    root.add(boxBetween(ax, az, bx, bz, WALL_TH, 0, WALL_H * IN2M, wallMat));
+    colliders.push({ ax, az, bx, bz, hw: WALL_TH / 2 * IN2M });
+  }
+  // structure: slimmer full-height posts/beams (columns, beam grid)
+  for (const [a, b] of (catSegs.structure || [])) {
+    const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
+    if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
+    root.add(boxBetween(ax, az, bx, bz, 3, 0, WALL_H * IN2M, structMat));
+  }
+  // openings / stairs / furniture / linework: draw flat on the floor as reference
+  for (const { color, segs } of flat) {
+    const pts = [];
+    for (const [a, b] of segs) pts.push(new THREE.Vector3(wx(a[0]), 0.02, wz(a[1])), new THREE.Vector3(wx(b[0]), 0.02, wz(b[1])));
+    if (pts.length) root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: new THREE.Color(color).getHex() })));
+  }
+  window.__V2_READY = true;
+}
 function fit2DCam() {
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
   let src = rawMode ? byLayer(ENTS, '1.1WALL').concat(byLayer(ENTS, '1.2WALLS')).flatMap(e => e.pts || []) : byLayer(ENTS, 'WALL').flatMap(w => w.pts);
@@ -614,7 +684,7 @@ function apply2DVisibility() {
 }
 
 // ---------------------------------------------------------------- layer UI
-const rebuild = () => rawMode ? build2DRaw() : (view2D ? build2D() : build());  // rebuild the active view
+const rebuild = () => rawMode ? (view2D ? build2DRaw() : buildRaw()) : (view2D ? build2D() : build());  // rebuild the active view
 // long-press explainer: which raw DXF layer(s) feed a category
 const layerInfo = document.createElement('div');
 layerInfo.style.cssText = 'position:fixed;z-index:50;max-width:240px;background:#0e131d;color:#dfe6f2;' +
@@ -687,15 +757,19 @@ function renderPipelinePanel() {                     // the 6 build stages + sub
   refreshSheetToggle();
 }
 
-function renderRawPanel() {                          // the DXF's own layers, as-is
+function renderRawPanel() {                          // the DXF's own layers → assign each to a category
   for (const L of rawLayers) {
     const el = document.createElement('div');
     el.className = 'layer' + (L.on ? '' : ' off');
-    el.innerHTML = `<span class="step"></span><span class="sw" style="background:${L.color}"></span>
-      <span class="nm">${L.name}</span><span class="st">${L.on ? '●' : '○'}</span>`;
-    el.title = `${srcLayerCounts[L.name] || 0} entities`;
+    const opts = RAW_CATS.map(c => `<option value="${c}"${layerCat[L.name] === c ? ' selected' : ''}>${c}</option>`).join('');
+    el.innerHTML = `<span class="sw" style="background:${L.color}"></span>
+      <span class="nm" title="${srcLayerCounts[L.name] || 0} entities">${L.name}</span>
+      <select class="catsel" title="render category">${opts}</select><span class="st">${L.on ? '●' : '○'}</span>`;
     el.onclick = () => { L.on = !L.on; el.classList.toggle('off', !L.on);
-      el.querySelector('.st').textContent = L.on ? '●' : '○'; build2DRaw(); };
+      el.querySelector('.st').textContent = L.on ? '●' : '○'; rebuild(); };
+    const sel = el.querySelector('.catsel');
+    sel.onclick = ev => ev.stopPropagation();
+    sel.onchange = ev => { ev.stopPropagation(); layerCat[L.name] = sel.value; rebuild(); };
     layersEl.appendChild(el);
   }
 }
@@ -725,14 +799,14 @@ const PLANS = [
 ];
 function framePlan(spawn) {                     // fit orbit to the plan + set walk spawn
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
-  for (const w of byLayer(ENTS, 'WALL')) for (const [x, y] of w.pts) {
-    const X = wx(x), Z = wz(y);
-    minx = Math.min(minx, X); maxx = Math.max(maxx, X); minz = Math.min(minz, Z); maxz = Math.max(maxz, Z);
-  }
+  const src = rawMode ? byLayer(ENTS, '1.1WALL').concat(byLayer(ENTS, '1.2WALLS')).flatMap(e => e.pts || []) : byLayer(ENTS, 'WALL').flatMap(w => w.pts);
+  for (const [x, y] of src) { const X = wx(x), Z = wz(y);
+    minx = Math.min(minx, X); maxx = Math.max(maxx, X); minz = Math.min(minz, Z); maxz = Math.max(maxz, Z); }
   if (minx > maxx) { minx = -5; maxx = 5; minz = -5; maxz = 5; }
   const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2, span = Math.max(maxx - minx, maxz - minz);
   target.set(cx, 1.2, cz); dist = Math.max(6, span * 1.15);
   if (spawn) { walker.x = wx(spawn.px); walker.z = wz(spawn.py); walker.yaw = spawn.yaw; }
+  else if (rawMode) { walker.x = cx; walker.z = cz; walker.yaw = 0; }       // raw: spawn at plan centre
   else { walker.x = wx(410); walker.z = wz(120); walker.yaw = 3.2; }        // sample house: great room
   walker.y = groundAt(walker.x, walker.z) + 1.62;
   place();
@@ -748,17 +822,17 @@ function loadPlan(src) {
     srcKind = 'dxf';
     srcLayerCounts = {}; for (const e of ENTS) srcLayerCounts[e.layer] = (srcLayerCounts[e.layer] || 0) + 1;
     DXF = src;
-    if (planDef.raw) {                                 // render the DXF's own layers verbatim (2D)
-      rawMode = true; view2D = true; underlaySpec = null;
+    if (planDef.raw) {                                 // render the DXF's own layers by category (3D)
+      rawMode = true; view2D = false; underlaySpec = null;
       const order = ['1.1WALL', '1.2WALLS', '1.1DRWDWS', '1.2DRWDWS', '1.1COLUMNS', '1.1COLLINE', '1.1FURN', '1.1FILL', '1.1DEMO', '1.1NOTES', '1.1RMNAMES'];
       const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
       const names = Object.keys(srcLayerCounts).filter(n => n && n !== '0').sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
       let ci = 0;
-      const dimmed = ['1.1DEMO', '1.1FILL', '1.1NOTES'];   // annotation/demo layers off by default (toggle on)
-      rawLayers = names.map(name => ({ name, on: !dimmed.includes(name), color: RAW_COLORS[name] || RAW_CYCLE[ci++ % RAW_CYCLE.length] }));
-      renderLayerPanel();
-      build2DRaw(); fit2DCam(); apply2DVisibility();
-      if (typeof twoDBtn !== 'undefined') twoDBtn.style.display = 'none';
+      layerCat = {}; for (const n of names) layerCat[n] = autoCat(n);
+      rawLayers = names.map(name => ({ name, on: true, color: RAW_COLORS[name] || RAW_CYCLE[ci++ % RAW_CYCLE.length] }));
+      renderLayerPanel(); loadFA();
+      buildRaw(); apply2DVisibility(); framePlan(null);
+      if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
     } else {
       const wasRaw = rawMode; rawMode = false;
       if (wasRaw) view2D = false;                       // leaving raw returns to the 3D pipeline
@@ -1036,9 +1110,10 @@ twoDBtn.onclick = () => {
   twoDBtn.textContent = view2D ? '⬛ 3D' : '▦ 2D';
   if (view2D) {
     if (mode === 'walk') modeBtn.click();               // leave first-person
-    build2D(); fit2DCam(); apply2DVisibility();
+    (rawMode ? build2DRaw() : build2D()); fit2DCam(); apply2DVisibility();
   } else {
     if (flatRoot) { scene.remove(flatRoot); flatRoot = null; }
+    if (rawMode) buildRaw();
     apply2DVisibility(); place();
   }
 };
@@ -1441,5 +1516,6 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   planOpenings: () => planOpenings, solveAlignment, feedbackCfg,
   gyro, joy, camera, mode: () => mode,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
-  srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS };
+  srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
+  rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers };
 </script>
