@@ -778,7 +778,9 @@ function planFromClient(clientX, clientY) {           // screen point → plan i
   const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, view2D ? oCam : camera);
   const hit = new THREE.Vector3();
   if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return null;
-  return [hit.x / IN2M, -hit.z / IN2M];
+  const px = hit.x / IN2M, py = -hit.z / IN2M;
+  if (!isFinite(px) || !isFinite(py) || Math.abs(px) > 1e5 || Math.abs(py) > 1e5) return null;  // grazing ray guard
+  return [px, py];
 }
 function snapPoint(px, py) {                           // nearest point on any wall face within SNAP_R
   let best = [px, py], bd = SNAP_R * SNAP_R, snapped = false;
@@ -797,16 +799,18 @@ function refreshEditViz() {
   if (!editMode) return;
   if (editAnchor && editPreview) {                    // extruding: translucent ghost of the wall to be
     const c = editPreview.snapped ? 0x53ff9a : 0x53d0ff, a = editAnchor, b = editPreview.pt;
-    if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len > 1 && len < 5000) {
       const ghost = boxBetween(wx(a[0]), wz(a[1]), wx(b[0]), wz(b[1]), WALL_TH, 0, WALL_H * IN2M,
         new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.45, depthTest: false }));
-      ghost.renderOrder = 999; editMarkers.add(ghost);
+      ghost.castShadow = ghost.receiveShadow = false; ghost.renderOrder = 999; editMarkers.add(ghost);
     }
     dot(a, 0xffd24a); dot(b, c);
   } else if (editPreview) dot(editPreview.pt, editPreview.snapped ? 0x53ff9a : 0x8b95ac);  // hover: where the start will land
 }
 function commitWall(a, b) {
-  if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2) return;
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!(len >= 2 && len < 5000) || !isFinite(a[0] + a[1] + b[0] + b[1])) return;   // reject bad/huge walls
   edits.push({ a: a.slice(), b: b.slice() }); saveEdits();
   ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [a.slice(), b.slice()], text: '', h: 0, _edit: true });
   buildRaw(); updateEditBar();
@@ -863,7 +867,8 @@ function updateEditBar() {                             // activated by long-pres
 }
 function toggleWallEdit() {
   editMode = !editMode; editAnchor = null; editPreview = null;
-  refreshEditViz(); renderLayerPanel();               // re-render so the ✎ badge + toolbar reflect state
+  for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode);  // update in place
+  refreshEditViz(); updateEditBar();
 }
 function fit2DCam() {
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
@@ -1041,7 +1046,10 @@ function loadPlan(src) {
     DXF = src;
     if (planDef.raw) {                                 // render the DXF's own layers by category (3D)
       rawMode = true; view2D = false; underlaySpec = null;
-      rawText = txt; edits = loadEdits(); editMode = false; editAnchor = null; editPreview = null;
+      rawText = txt; editMode = false; editAnchor = null; editPreview = null;
+      edits = loadEdits().filter(e => e && e.a && e.b && isFinite(e.a[0] + e.a[1] + e.b[0] + e.b[1]) &&
+        Math.abs(e.a[0]) < 1e5 && Math.abs(e.a[1]) < 1e5 && Math.abs(e.b[0]) < 1e5 && Math.abs(e.b[1]) < 1e5);  // drop any bad persisted walls
+      if (edits.length !== (loadEdits() || []).length) saveEdits();
       for (const ed of edits) ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [ed.a.slice(), ed.b.slice()], text: '', h: 0, _edit: true });
       const order = ['1.1WALL', '1.2WALLS', '1.1DRWDWS', '1.2DRWDWS', '1.1COLUMNS', '1.1COLLINE', '1.1FURN', '1.1FILL', '1.1DEMO', '1.1NOTES', '1.1RMNAMES'];
       const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
@@ -1750,6 +1758,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, snapPoint,
-  setEdit: v => { editMode = v; editAnchor = null; editPreview = null; refreshEditViz(); renderLayerPanel(); },
+  setEdit: v => { editMode = v; editAnchor = null; editPreview = null;
+    for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
   toggleWallEdit, editClick, editHover };
 </script>
