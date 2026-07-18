@@ -23,6 +23,8 @@
   .layer .chev { color:#7f8aa3; cursor:pointer; padding:0 5px; user-select:none; font-size:11px; }
   .layer .catsel { background:#232b3d; color:#c3ccdd; border:1px solid #2f3850; border-radius:5px;
     font:10px system-ui; padding:2px 3px; max-width:82px; cursor:pointer; }
+  .layer .wedit { color:#5f6b85; font-size:13px; padding:0 3px; user-select:none; }
+  .layer .wedit.on { color:#53d0ff; }
   .subwrap { display:none; margin:0 0 3px 0; }
   .subwrap.open { display:block; }
   .subrow { display:flex; align-items:center; gap:8px; padding:5px 8px 5px 28px; border-radius:7px;
@@ -843,19 +845,25 @@ function exportDXF() {
   a.download = (DXF.split('/').pop() || 'plan').replace('.dxf', '') + '-edited.dxf'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
-function updateEditBar() {
+function updateEditBar() {                             // activated by long-pressing the walls category
   const bar = document.getElementById('rawedit'); if (!bar) return;
-  const btn = (a, label, on) => `<button data-a="${a}" style="padding:5px 8px;border-radius:6px;border:1px solid #39435a;` +
-    `background:${on ? '#2b6cb0' : '#232936'};color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
-  bar.innerHTML = btn('edit', editMode ? (editAnchor ? '✎ click to finish' : '✎ click a wall…') : '✎ extrude wall', editMode) +
-    btn('undo', 'undo') + btn('export', `⬇ DXF (${edits.length})`);
+  const btn = (a, label) => `<button data-a="${a}" style="padding:5px 8px;border-radius:6px;border:1px solid #39435a;` +
+    `background:#232936;color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
+  let html = '';
+  if (editMode) html += `<div style="width:100%;font:11px system-ui;color:#8fd0ff;margin-bottom:2px">` +
+    `✎ ${editAnchor ? 'click to finish (snaps to walls)' : 'click a wall to start'} · Esc to stop</div>`;
+  const bits = [];
+  if (editMode) bits.push(btn('undo', 'undo'));
+  if (edits.length) bits.push(btn('export', `⬇ DXF (${edits.length})`));
+  bar.innerHTML = html + bits.join(' ');
   for (const b of bar.querySelectorAll('button')) b.onclick = () => {
-    const a = b.dataset.a;
-    if (a === 'edit') { editMode = !editMode; editAnchor = null; editPreview = null; refreshEditViz(); }
-    else if (a === 'undo') undoEdit();
-    else if (a === 'export') exportDXF();
+    if (b.dataset.a === 'undo') undoEdit(); else if (b.dataset.a === 'export') exportDXF();
     updateEditBar();
   };
+}
+function toggleWallEdit() {
+  editMode = !editMode; editAnchor = null; editPreview = null;
+  refreshEditViz(); renderLayerPanel();               // re-render so the ✎ badge + toolbar reflect state
 }
 function fit2DCam() {
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
@@ -956,14 +964,21 @@ function renderPipelinePanel() {                     // the 6 build stages + sub
 
 function renderRawPanel() {                          // the DXF's own layers → assign each to a category
   for (const L of rawLayers) {
+    const isWalls = layerCat[L.name] === 'walls';
     const el = document.createElement('div');
     el.className = 'layer' + (L.on ? '' : ' off');
     const opts = RAW_CATS.map(c => `<option value="${c}"${layerCat[L.name] === c ? ' selected' : ''}>${c}</option>`).join('');
     el.innerHTML = `<span class="sw" style="background:${L.color}"></span>
-      <span class="nm" title="${srcLayerCounts[L.name] || 0} entities">${L.name}</span>
-      <select class="catsel" title="render category">${opts}</select><span class="st">${L.on ? '●' : '○'}</span>`;
-    el.onclick = () => { L.on = !L.on; el.classList.toggle('off', !L.on);
-      el.querySelector('.st').textContent = L.on ? '●' : '○'; rebuild(); };
+      <span class="nm" title="${srcLayerCounts[L.name] || 0} entities">${L.name}</span>` +
+      (isWalls ? `<span class="wedit${editMode ? ' on' : ''}" title="long-press to connect/extrude walls">✎</span>` : '') +
+      `<select class="catsel" title="render category">${opts}</select><span class="st">${L.on ? '●' : '○'}</span>`;
+    let lpTimer = null, lpFired = false;
+    el.addEventListener('pointerdown', () => { lpFired = false; lpTimer = setTimeout(() => {
+      lpFired = true; if (layerCat[L.name] === 'walls') toggleWallEdit(); }, 500); });
+    const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+    el.addEventListener('pointerup', cancelLP); el.addEventListener('pointermove', cancelLP); el.addEventListener('pointerleave', cancelLP);
+    el.onclick = () => { if (lpFired) { lpFired = false; return; }
+      L.on = !L.on; el.classList.toggle('off', !L.on); el.querySelector('.st').textContent = L.on ? '●' : '○'; rebuild(); };
     const sel = el.querySelector('.catsel');
     sel.onclick = ev => ev.stopPropagation();
     sel.onchange = ev => { ev.stopPropagation(); layerCat[L.name] = sel.value; rebuild(); };
@@ -1332,7 +1347,7 @@ twoDBtn.onclick = () => {
 };
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
-    if (editMode && editAnchor) { editAnchor = null; editPreview = null; refreshEditViz(); updateEditBar(); return; }  // cancel extrusion
+    if (editMode) { if (editAnchor) { editAnchor = null; editPreview = null; refreshEditViz(); updateEditBar(); } else toggleWallEdit(); return; }
     if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click();
   }
   if (e.code === 'KeyE' && mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.0); if (d) toggleDoor(d.key); }
@@ -1735,6 +1750,6 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, snapPoint,
-  setEdit: v => { editMode = v; editAnchor = null; editPreview = null; refreshEditViz(); updateEditBar(); },
-  editClick, editHover };
+  setEdit: v => { editMode = v; editAnchor = null; editPreview = null; refreshEditViz(); renderLayerPanel(); },
+  toggleWallEdit, editClick, editHover };
 </script>
