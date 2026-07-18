@@ -400,9 +400,23 @@ function build() {
       if (headY < top) root.add(boxBetween(sx, sz, ex, ez, WALL_TH, headY, top, M.wall));     // header (walk under)
       if (o.kind === 'window') {
         const sillY = base + SILL * IN2M;
-        root.add(boxBetween(sx, sz, ex, ez, WALL_TH, base, sillY, M.wall));                    // apron
+        root.add(boxBetween(sx, sz, ex, ez, WALL_TH, base, sillY, M.wall));                    // apron (wall under)
         colliders.push({ ax: sx, az: sz, bx: ex, bz: ez, hw });
-        root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.4, sillY, headY, M.glass));            // glazing
+        if (M.styled) {                                     // a trimmed, divided-lite window
+          const FT = 2 * IN2M, ct = WALL_TH + 1, gp = WALL_TH * 0.4, si = s + FT, ei = e - FT;
+          const glassLo = sillY + FT, glassHi = headY - FT;
+          root.add(boxBetween(sx, sz, ex, ez, ct, sillY, sillY + FT, M.trim));                  // sill board
+          root.add(boxBetween(sx, sz, ex, ez, ct, headY - FT, headY, M.trim));                  // head board
+          root.add(boxBetween(...P(s), ...P(si), ct, sillY, headY, M.trim));                    // left jamb
+          root.add(boxBetween(...P(ei), ...P(e), ct, sillY, headY, M.trim));                    // right jamb
+          root.add(boxBetween(sx, sz, ex, ez, WALL_TH + 5, sillY - IN2M, sillY + IN2M, M.trim)); // stool shelf
+          root.add(boxBetween(...P(si), ...P(ei), gp, glassLo, glassHi, M.glass));              // glass pane
+          const ym = (glassLo + glassHi) / 2, cM = (s + e) / 2, mt = 0.8 * IN2M;                // grille muntins
+          root.add(boxBetween(...P(si), ...P(ei), gp * 1.1, ym - mt / 2, ym + mt / 2, M.trim)); // horizontal
+          root.add(boxBetween(...P(cM - mt / 2), ...P(cM + mt / 2), gp * 1.1, glassLo, glassHi, M.trim)); // vertical
+        } else {
+          root.add(boxBetween(sx, sz, ex, ez, WALL_TH * 0.4, sillY, headY, M.glass));           // plain glazing
+        }
       } else if (o.kind === 'door') {
         const dl = e - s, midY = (base + headY) / 2;                                            // hinged leaf
         const closedRot = -Math.atan2(ez - sz, ex - sx);
@@ -423,7 +437,7 @@ function build() {
           open: isOpen, leaf, cx: (sx + ex) / 2, cz: (sz + ez) / 2,
           seg: { ax: sx, az: sz, bx: ex, bz: ez, hw } });
       }
-      if (M.styled && o.kind !== 'opening') {               // proud casing frame (jambs + head)
+      if (M.styled && o.kind === 'door') {                  // door casing: floor→head jambs + head
         const jw = 3 * IN2M, ct = WALL_TH + 2, headC = headY + 3 * IN2M;
         root.add(boxBetween(...P(s), ...P(Math.min(e, s + jw)), ct, base, headC, M.trim));
         root.add(boxBetween(...P(Math.max(s, e - jw)), ...P(e), ct, base, headC, M.trim));
