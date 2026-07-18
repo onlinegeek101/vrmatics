@@ -109,60 +109,6 @@ function parseDXF(text) {
 }
 const byLayer = (ents, lay) => ents.filter(e => e.layer === lay);
 
-// ---------------------------------------------------------------- plan JSON adapter
-// The committed plans/*.json (v1's processed schema, PII-free) are rendered by
-// synthesizing the same DXF-style entities parseDXF() would emit, so build()
-// consumes them unchanged: footprint→TOPO slab, walls→WALL lines,
-// openings→OPENING rects (color by type), fixtures→FURN rect + label, stairs→STAIR.
-function fixtureAssetName(name) {
-  const n = (name || '').toUpperCase();
-  const has = s => n.includes(s);
-  if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) return 'sofa';
-  if (has('BED')) return 'bed';
-  if (has('COFFEE') || has('TABLE') || has('DESK') || has('DINING')) return 'table';
-  if (has('CHAIR') || has('RECLIN')) return 'chair';
-  if (has('FRIDGE') || has('REFRIG')) return 'fridge';
-  if (has('RANGE') || has('STOVE') || has('OVEN') || has('COOK')) return 'range';
-  if (has('DISHWASH')) return 'dishwasher';
-  if (has('WASHER')) return 'washer';
-  if (has('DRYER')) return 'dryer';
-  if (has('TOILET') || has('WC')) return 'toilet';
-  if (has('SHOWER')) return 'shower';
-  if (has('TUB') || has('BATHTUB')) return 'tub';
-  if (has('VANITY') || has('SINK') || has('LAV')) return 'vanity';
-  return '';                                    // unknown → labelled fallback box
-}
-function entsFromJSON(j) {
-  const E = [];
-  const push = o => E.push(Object.assign({ type: '', layer: '0', color: 256, elev: 0, pts: [], text: '', h: 0 }, o));
-  if (j.footprint && j.footprint.length >= 3)
-    push({ type: 'LWPOLYLINE', layer: 'TOPO', elev: 0, pts: j.footprint.map(p => [p[0], p[1]]) });
-  for (const w of j.walls || [])
-    push({ type: 'LINE', layer: 'WALL', pts: [[w.start[0], w.start[1]], [w.end[0], w.end[1]]] });
-  for (const o of j.openings || []) {
-    const w = (j.walls || [])[o.wall_index]; if (!w) continue;
-    const ax = w.start[0], ay = w.start[1], bx = w.end[0], by = w.end[1];
-    const t = o.position, cx = ax + (bx - ax) * t, cy = ay + (by - ay) * t;
-    const L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L, half = o.width / 2;
-    const color = o.type === 'door' ? 1 : o.type === 'window' ? 5 : 2;
-    push({ type: 'LWPOLYLINE', layer: 'OPENING', color, pts: [[cx - ux * half, cy - uy * half], [cx + ux * half, cy + uy * half]] });
-  }
-  for (const s of j.stairs || [])
-    if (s.polygon) push({ type: 'LWPOLYLINE', layer: 'STAIR', pts: s.polygon.map(p => [p[0], p[1]]) });
-  for (const f of j.fixtures || []) {
-    const [cx, cy] = f.center, [w, d] = f.size;
-    push({ type: 'LWPOLYLINE', layer: 'FURN', pts: [[cx - w / 2, cy - d / 2], [cx + w / 2, cy - d / 2], [cx + w / 2, cy + d / 2], [cx - w / 2, cy + d / 2]] });
-    push({ type: 'TEXT', layer: 'FURN', text: fixtureAssetName(f.name), pts: [[cx, cy]] });
-  }
-  E._spawn = (() => {                            // primary camera → walker spawn
-    const c = (j.cameras || []).find(c => c.is_primary) || (j.cameras || [])[0];
-    if (!c) return null;
-    const rot = c.rotation || 0;
-    return { px: c.position[0], py: c.position[1], yaw: Math.abs(rot) > 6.5 ? rot * Math.PI / 180 : rot };
-  })();
-  return E;
-}
-
 // plan inches -> world metres. plan +y is north; map to -z so north is -z.
 const wx = x => x * IN2M;
 const wz = y => -y * IN2M;
@@ -703,14 +649,12 @@ function refreshSheetToggle() {
 
 // ---------------------------------------------------------------- plan library + loader
 const PLANS = [
-  { name: 'Sample House (DXF)',    src: './sample-house.dxf' },
-  { name: 'Home — Floor 1',        src: './plans/home-l1.json' },
-  { name: 'Home — Floor 2',        src: './plans/home-l2.json' },
-  { name: 'Home — Reno Big Laundry', src: './plans/home-l1-biglaundry.json' },
-  { name: 'Duplex — Level 1',      src: './plans/duplex-l1.json' },
-  { name: 'Duplex — Level 2',      src: './plans/duplex-l2.json' },
-  { name: 'CECO',                  src: './plans/ceco.json' },
-  { name: 'ZInD 000',              src: './plans/zind-000.json' },
+  { name: 'Sample House',       src: './sample-house.dxf' },
+  { name: 'Reno 1 — Floor 1',   src: './plans/home-l1.dxf',
+    spawn: { px: -17.9, py: -258.3, yaw: 0.24 },
+    underlay: { file: 'home-l1.png', x0: -780.55, y1: 268.9, in_per_px: 0.48 } },
+  { name: 'Reno — Big Laundry', src: './plans/home-l1-biglaundry.dxf',
+    spawn: { px: 0.1, py: -254.8, yaw: 0.18 } },
 ];
 function framePlan(spawn) {                     // fit orbit to the plan + set walk spawn
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
@@ -728,18 +672,19 @@ function framePlan(spawn) {                     // fit orbit to the plan + set w
 }
 let loadTok = 0;
 function loadPlan(src) {
-  const tok = ++loadTok, isJSON = /\.json(\?|$)/.test(src);
+  const tok = ++loadTok;
   const errEl = document.getElementById('err');
-  fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return isJSON ? r.json() : r.text(); }).then(data => {
+  fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); }).then(txt => {
     if (tok !== loadTok) return;
-    ENTS = isJSON ? entsFromJSON(data) : parseDXF(data);
-    srcKind = isJSON ? 'json' : 'dxf';
+    const planDef = PLANS.find(p => p.src === src) || {};
+    ENTS = parseDXF(txt);
+    srcKind = 'dxf';
     srcLayerCounts = {}; for (const e of ENTS) srcLayerCounts[e.layer] = (srcLayerCounts[e.layer] || 0) + 1;
-    underlaySpec = (isJSON && data.underlay && data.underlay.file) ? data.underlay : null;
+    underlaySpec = planDef.underlay || null;
     refreshSheetToggle();
     DXF = src; loadFA(); build();
     if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
-    else framePlan(isJSON ? ENTS._spawn : null);
+    else framePlan(planDef.spawn || null);
     errEl.style.display = 'none';
   }).catch(e => {
     if (tok !== loadTok) return;
