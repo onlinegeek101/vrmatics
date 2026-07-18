@@ -310,7 +310,7 @@ let layerCat = {};                                  // raw layer name -> render 
 // ALONG the wall's own axis, and the free end infers/snaps to the first wall it
 // meets (a T-junction crossing, or a facing endpoint across a collinear gap).
 // Revisions persist per plan + export to a new DXF.
-let editMode = false, mergedWalls = [], edits = [], rawText = '';
+let editMode = false, mergedWalls = [], wallMeshes = [], edits = [], rawText = '';
 let wallDrag = null, hoverWall = null;               // active face push/pull + hover highlight
 const PICK_TOL = 16, FACE_SNAP = 12;                 // inches — grab reach onto a wall face; parallel-face snap
 const editMarkers = new THREE.Group(); editMarkers.renderOrder = 999;
@@ -736,10 +736,14 @@ function buildRaw() {
     root.add(fm); floors.push(fm);
   }
   // solid walls from the merged centrelines (gaps stay open for the doorways)
-  for (const w of merged) {
+  wallMeshes = [];
+  for (let wi = 0; wi < merged.length; wi++) {
+    const w = merged[wi];
     const ax = wx(w.a[0]), az = wz(w.a[1]), bx = wx(w.b[0]), bz = wz(w.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, wallMat));
+    const m = boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, wallMat);
+    m.userData.wallIndex = wi;                          // so a tap anywhere on the face grabs this wall
+    root.add(m); wallMeshes.push(m);
     colliders.push({ ax, az, bx, bz, hw: w.thick / 2 * IN2M });
   }
   // openings: header over each gap; door swing / window glazing / cased per classification
@@ -799,15 +803,21 @@ function distToSeg(px, py, a, b) {
   let t = ((px - a[0]) * dx + (py - a[1]) * dy) / L2; t = Math.max(0, Math.min(1, t));
   return Math.hypot(a[0] + dx * t - px, a[1] + dy * t - py);
 }
-function pickWall(px, py) {                             // the wall under a plan point — grab anywhere on its face
-  let best = null, bd = 1e9;
-  for (let i = 0; i < mergedWalls.length; i++) {
-    const w = mergedWalls[i], d = distToSeg(px, py, w.a, w.b);
-    if (d < w.thick / 2 + PICK_TOL && d < bd) { bd = d; best = i; }
+function pickWall(clientX, clientY) {                   // the wall under the pointer — grab anywhere on its face
+  let idx = null, hitPlan = null;
+  const r = canvas.getBoundingClientRect();            // raycast the wall meshes (works high on a wall, not just its base)
+  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, view2D ? oCam : camera);
+  const hits = ray.intersectObjects(wallMeshes, false);
+  if (hits.length) { idx = hits[0].object.userData.wallIndex; hitPlan = [hits[0].point.x / IN2M, -hits[0].point.z / IN2M]; }
+  else {                                               // fallback: nearest wall to the ground point under the pointer
+    const p = planFromClient(clientX, clientY);
+    if (p) { let bd = 1e9; for (let i = 0; i < mergedWalls.length; i++) { const w = mergedWalls[i], d = distToSeg(p[0], p[1], w.a, w.b);
+      if (d < w.thick / 2 + PICK_TOL && d < bd) { bd = d; idx = i; } } hitPlan = p; }
   }
-  if (best == null) return null;
-  const w = mergedWalls[best], dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
-  return { i: best, u: [dx / L, dy / L], n: [-dy / L, dx / L], a: w.a.slice(), b: w.b.slice(), thick: w.thick };
+  if (idx == null || !mergedWalls[idx]) return null;
+  const w = mergedWalls[idx], dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
+  return { i: idx, u: [dx / L, dy / L], n: [-dy / L, dx / L], a: w.a.slice(), b: w.b.slice(), thick: w.thick, hitPlan };
 }
 function snapMove(dw, m) {                              // snap the moving wall's faces to nearby parallel faces
   const u = dw.u, n = dw.n, half = dw.thick / 2, L = Math.hypot(dw.b[0] - dw.a[0], dw.b[1] - dw.a[1]) || 1;
@@ -829,8 +839,8 @@ function snapMove(dw, m) {                              // snap the moving wall'
   return { m: bestM, snapped: bestM !== m };
 }
 function beginWallDrag(clientX, clientY) {              // grab the wall under the pointer
-  const p = planFromClient(clientX, clientY); if (!p) return false;
-  const pk = pickWall(p[0], p[1]); if (!pk) return false;
+  const pk = pickWall(clientX, clientY); if (!pk) return false;
+  const p = planFromClient(clientX, clientY) || pk.hitPlan;   // ground reference for the drag delta
   wallDrag = { ...pk, startP: p, m: 0, snapped: false, curA: pk.a.slice(), curB: pk.b.slice() };
   hoverWall = null; refreshEditViz(); return true;
 }
@@ -868,8 +878,7 @@ function refreshEditViz() {
 }
 function editHover(clientX, clientY) {                 // desktop: highlight the wall under the cursor
   if (!editMode || wallDrag) return;
-  const p = planFromClient(clientX, clientY);
-  const pk = p ? pickWall(p[0], p[1]) : null;
+  const pk = pickWall(clientX, clientY);
   hoverWall = pk ? pk.i : null; refreshEditViz();
 }
 function wallMatchDist(w, o) {                          // how well a merged wall matches a stored move's origin
