@@ -300,6 +300,12 @@ let ENTS = null, root = null;
 let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
 let rawMode = false, rawLayers = [];                // render the DXF's own layers verbatim (no pipeline)
 let layerCat = {};                                  // raw layer name -> render category (auto by name, overridable)
+// in-viewer wall editing: connect wall ends; revisions persist per plan + export to a new DXF
+let editMode = false, editPicks = [], wallEndpoints = [], edits = [], rawText = '';
+const editMarkers = new THREE.Group(); editMarkers.renderOrder = 999;
+function editKey() { return 'plan2vr-v2-edits:' + DXF; }
+function loadEdits() { try { return JSON.parse(localStorage.getItem(editKey())) || []; } catch (e) { return []; } }
+function saveEdits() { try { localStorage.setItem(editKey(), JSON.stringify(edits)); } catch (e) {} }
 const RAW_CATS = ['walls', 'openings', 'stairs', 'structure', 'furniture', 'floor', 'linework', 'hidden'];
 function autoCat(name) {                             // assign a DXF layer to a category by its name
   const n = (name || '').toUpperCase();
@@ -707,6 +713,7 @@ function buildRaw() {
     else flat.push({ color: L.color, segs });          // stairs / furniture / linework
   }
   const merged = mergeDoubleWalls(wallSegs);
+  wallEndpoints = merged.flatMap(w => [w.a, w.b]);    // snap targets for the wall-connect editor
   // floor slab under the merged walls
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
   for (const w of merged) for (const q of [w.a, w.b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
@@ -759,6 +766,74 @@ function buildRaw() {
       new THREE.LineBasicMaterial({ color: new THREE.Color(color).getHex() })));
   }
   window.__V2_READY = true;
+}
+// ---- wall-connect editor: click two wall ends to bridge them; revisions persist + export ----
+function planFromClient(clientX, clientY) {           // screen point → plan inches on the floor plane
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, view2D ? oCam : camera);
+  const hit = new THREE.Vector3();
+  if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return null;
+  return [hit.x / IN2M, -hit.z / IN2M];
+}
+function snapEnd(px, py) {                             // snap to the nearest wall endpoint (30")
+  let best = null, bd = 30 * 30;
+  for (const ep of wallEndpoints) { const dd = (ep[0] - px) ** 2 + (ep[1] - py) ** 2; if (dd < bd) { bd = dd; best = ep; } }
+  return best ? best.slice() : [px, py];
+}
+function refreshMarkers() {
+  editMarkers.clear();
+  for (const p of editPicks) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), new THREE.MeshBasicMaterial({ color: 0x53d0ff, depthTest: false }));
+    m.position.set(wx(p[0]), 0.06, wz(p[1])); m.renderOrder = 999; editMarkers.add(m);
+  }
+}
+function editPick(clientX, clientY) {
+  const p = planFromClient(clientX, clientY); if (!p) return;
+  editPicks.push(snapEnd(p[0], p[1]));
+  if (editPicks.length === 2) {
+    const [a, b] = editPicks; editPicks = [];
+    edits.push({ a, b }); saveEdits();
+    ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [a.slice(), b.slice()], text: '', h: 0, _edit: true });
+    buildRaw(); updateEditBar();
+  }
+  refreshMarkers();
+}
+function undoEdit() {
+  if (!edits.length) return;
+  edits.pop(); saveEdits();
+  for (let i = ENTS.length - 1; i >= 0; i--) if (ENTS[i]._edit) { ENTS.splice(i, 1); break; }
+  editPicks = []; refreshMarkers(); buildRaw(); updateEditBar();
+}
+function buildExportText() {                           // original DXF + the edit walls, on 1.1WALL
+  const lines = rawText.split(/\r\n|\n/);
+  const ei = lines.indexOf('ENTITIES'); let endi = -1;
+  for (let i = Math.max(0, ei); i < lines.length - 1; i++) if (lines[i] === '0' && lines[i + 1] === 'ENDSEC') { endi = i; break; }
+  if (endi < 0) endi = lines.length;
+  const block = [];
+  for (const e of edits) block.push('0', 'LINE', '8', '1.1WALL', '10', e.a[0], '20', e.a[1], '11', e.b[0], '21', e.b[1]);
+  lines.splice(endi, 0, ...block.map(String));
+  return lines.join('\n');
+}
+function exportDXF() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buildExportText()], { type: 'application/dxf' }));
+  a.download = (DXF.split('/').pop() || 'plan').replace('.dxf', '') + '-edited.dxf'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function updateEditBar() {
+  const bar = document.getElementById('rawedit'); if (!bar) return;
+  const btn = (a, label, on) => `<button data-a="${a}" style="padding:5px 8px;border-radius:6px;border:1px solid #39435a;` +
+    `background:${on ? '#2b6cb0' : '#232936'};color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
+  bar.innerHTML = btn('edit', editMode ? '✎ tap two wall ends…' : '✎ connect walls', editMode) +
+    btn('undo', 'undo') + btn('export', `⬇ DXF (${edits.length})`);
+  for (const b of bar.querySelectorAll('button')) b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === 'edit') { editMode = !editMode; editPicks = []; refreshMarkers(); }
+    else if (a === 'undo') undoEdit();
+    else if (a === 'export') exportDXF();
+    updateEditBar();
+  };
 }
 function fit2DCam() {
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
@@ -872,6 +947,11 @@ function renderRawPanel() {                          // the DXF's own layers →
     sel.onchange = ev => { ev.stopPropagation(); layerCat[L.name] = sel.value; rebuild(); };
     layersEl.appendChild(el);
   }
+  const bar = document.createElement('div');           // wall-connect edit toolbar
+  bar.id = 'rawedit';
+  bar.style.cssText = 'margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+  layersEl.appendChild(bar);
+  updateEditBar();
 }
 
 function renderLayerPanel() {
@@ -924,6 +1004,8 @@ function loadPlan(src) {
     DXF = src;
     if (planDef.raw) {                                 // render the DXF's own layers by category (3D)
       rawMode = true; view2D = false; underlaySpec = null;
+      rawText = txt; edits = loadEdits(); editMode = false; editPicks = [];
+      for (const ed of edits) ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [ed.a.slice(), ed.b.slice()], text: '', h: 0, _edit: true });
       const order = ['1.1WALL', '1.2WALLS', '1.1DRWDWS', '1.2DRWDWS', '1.1COLUMNS', '1.1COLLINE', '1.1FURN', '1.1FILL', '1.1DEMO', '1.1NOTES', '1.1RMNAMES'];
       const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
       const names = Object.keys(srcLayerCounts).filter(n => n && n !== '0').sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
@@ -931,10 +1013,12 @@ function loadPlan(src) {
       layerCat = {}; for (const n of names) layerCat[n] = autoCat(n);
       rawLayers = names.map(name => ({ name, on: true, color: RAW_COLORS[name] || RAW_CYCLE[ci++ % RAW_CYCLE.length] }));
       renderLayerPanel(); loadFA();
+      if (!scene.getObjectById(editMarkers.id)) scene.add(editMarkers);
       buildRaw(); apply2DVisibility(); framePlan(null);
       if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
     } else {
       const wasRaw = rawMode; rawMode = false;
+      editMode = false; editPicks = []; editMarkers.clear();
       if (wasRaw) view2D = false;                       // leaving raw returns to the 3D pipeline
       underlaySpec = planDef.underlay || null;
       renderLayerPanel();
@@ -963,6 +1047,7 @@ addEventListener('keydown', e => { keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('click', (e) => {
   if (IS_TOUCH) return;                        // touch is handled by the touch manager below
+  if (editMode && mode === 'orbit') { if (moved < 6) editPick(e.clientX, e.clientY); return; }  // wall-connect
   if (mode === 'walk') {
     if (document.pointerLockElement === canvas) toggleDoor((nearestDoor(walker.x, walker.z, 2.0) || {}).key);
     else canvas.requestPointerLock();
@@ -1137,9 +1222,12 @@ canvas.addEventListener('touchmove', e => {
 function endTouch(e) {
   for (const t of e.changedTouches) {
     const o = tState[t.identifier]; if (!o) continue;
-    if (o.moved < 10 && !view2D) {                    // a tap (no selection in flat 2D)
-      if (mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.2); if (d) toggleDoor(d.key); }
-      else if (!doorAtScreen(o.cx, o.cy)) fixtureAtScreen(o.cx, o.cy);
+    if (o.moved < 10) {                               // a tap
+      if (editMode && mode === 'orbit') editPick(o.cx, o.cy);   // wall-connect
+      else if (!view2D) {
+        if (mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.2); if (d) toggleDoor(d.key); }
+        else if (!doorAtScreen(o.cx, o.cy)) fixtureAtScreen(o.cx, o.cy);
+      }
     }
     if (o.kind === 'move') { joy.f = 0; joy.s = 0; }
     delete tState[t.identifier];
@@ -1617,5 +1705,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   gyro, joy, camera, mode: () => mode,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
-  rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers };
+  rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
+  edits: () => edits, wallEndpoints: () => wallEndpoints, buildExportText,
+  addConnection: (a, b) => { edits.push({ a, b }); saveEdits(); ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [a, b], text: '', h: 0, _edit: true }); buildRaw(); } };
 </script>
