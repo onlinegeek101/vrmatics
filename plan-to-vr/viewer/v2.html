@@ -100,10 +100,26 @@ function parseDXF(text) {
     else if (code === '38') cur.elev = parseFloat(val);
     else if (code === '1') cur.text = val;
     else if (code === '40') cur.h = parseFloat(val);
+    else if (code === '50') cur.a0 = parseFloat(val);
+    else if (code === '51') cur.a1 = parseFloat(val);
     else if (code === '10') cur._x = parseFloat(val);
     else if (code === '20') cur.pts.push([cur._x, parseFloat(val)]);
     else if (code === '11') cur._x2 = parseFloat(val);
     else if (code === '21') cur.pts.push([cur._x2, parseFloat(val)]);
+  }
+  for (const e of ents) {                            // tessellate arcs/circles to polylines
+    if (e.type === 'ARC' && e.pts.length && e.h) {
+      const [cx, cy] = e.pts[0], r = e.h;
+      let a0 = (e.a0 || 0) * Math.PI / 180, a1 = (e.a1 == null ? 360 : e.a1) * Math.PI / 180;
+      if (a1 <= a0) a1 += 2 * Math.PI;
+      const n = Math.max(4, Math.ceil((a1 - a0) / (Math.PI / 24))), p = [];
+      for (let k = 0; k <= n; k++) { const a = a0 + (a1 - a0) * k / n; p.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+      e.pts = p;
+    } else if (e.type === 'CIRCLE' && e.pts.length && e.h) {
+      const [cx, cy] = e.pts[0], r = e.h, n = 40, p = [];
+      for (let k = 0; k <= n; k++) { const a = 2 * Math.PI * k / n; p.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+      e.pts = p;
+    }
   }
   return ents;
 }
@@ -278,6 +294,13 @@ const subOn = { openings: { door: true, window: true, opening: true },
 
 let ENTS = null, root = null;
 let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
+let rawMode = false, rawLayers = [];                // render the DXF's own layers verbatim (no pipeline)
+const RAW_COLORS = {
+  '1.1WALL': '#e9e3d6', '1.2WALLS': '#e9e3d6', '1.1DRWDWS': '#d64550', '1.2DRWDWS': '#d64550',
+  '1.1COLUMNS': '#b07bff', '1.1COLLINE': '#8a6bff', '1.1RMNAMES': '#5aa9d6', '1.1NOTES': '#8b95ac',
+  '1.1FURN': '#4aa24a', '1.1DEMO': '#c07a4a', '1.1FILL': '#c8a24a',
+};
+const RAW_CYCLE = ['#d69a45', '#45d6a0', '#d645a0', '#a0d645', '#4590d6', '#d6c245'];
 let underlaySpec = null;        // {file,x0,y1,in_per_px} of the current plan's source sheet
 const texCache = {};
 const gltf = new GLTFLoader();
@@ -550,9 +573,28 @@ function build2D() {
   if (on.furniture) { const s = []; for (const e of byLayer(ENTS, 'FURN')) if (e.type === 'LWPOLYLINE') poly(e.pts, s, true); addLines(s, col.furniture); }
   window.__V2_READY = true;
 }
+// raw: draw every entity of each (visible) DXF layer as its own linework, verbatim
+function build2DRaw() {
+  if (flatRoot) scene.remove(flatRoot);
+  flatRoot = new THREE.Group(); scene.add(flatRoot);
+  for (const L of rawLayers) {
+    if (!L.on) continue;
+    const pts = [];
+    for (const e of byLayer(ENTS, L.name)) {
+      if (e.type === 'HATCH' || e.type === 'WIPEOUT' || e.type === 'SOLID' || e.type === 'SECTION') continue;  // fills/masks, not linework
+      const p = e.pts; if (!p || p.length < 2) continue;
+      for (let i = 0; i + 1 < p.length; i++) pts.push(new THREE.Vector3(wx(p[i][0]), 0, wz(p[i][1])), new THREE.Vector3(wx(p[i + 1][0]), 0, wz(p[i + 1][1])));
+    }
+    if (pts.length) { const g = new THREE.BufferGeometry().setFromPoints(pts);
+      flatRoot.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: new THREE.Color(L.color).getHex() }))); }
+  }
+  window.__V2_READY = true;
+}
 function fit2DCam() {
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
-  for (const w of byLayer(ENTS, 'WALL')) for (const [x, y] of w.pts) { const X = wx(x), Z = wz(y);
+  let src = rawMode ? byLayer(ENTS, '1.1WALL').concat(byLayer(ENTS, '1.2WALLS')).flatMap(e => e.pts || []) : byLayer(ENTS, 'WALL').flatMap(w => w.pts);
+  if (!src.length) src = ENTS.flatMap(e => e.pts || []);   // fallback: everything
+  for (const [x, y] of src) { const X = wx(x), Z = wz(y);
     minx = Math.min(minx, X); maxx = Math.max(maxx, X); minz = Math.min(minz, Z); maxz = Math.max(maxz, Z); }
   if (minx > maxx) { minx = -5; maxx = 5; minz = -5; maxz = 5; }
   const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2;
@@ -572,7 +614,7 @@ function apply2DVisibility() {
 }
 
 // ---------------------------------------------------------------- layer UI
-const rebuild = () => view2D ? build2D() : build();      // toggles rebuild whichever view is active
+const rebuild = () => rawMode ? build2DRaw() : (view2D ? build2D() : build());  // rebuild the active view
 // long-press explainer: which raw DXF layer(s) feed a category
 const layerInfo = document.createElement('div');
 layerInfo.style.cssText = 'position:fixed;z-index:50;max-width:240px;background:#0e131d;color:#dfe6f2;' +
@@ -591,56 +633,79 @@ function showLayerInfo(st, x, y) {
 }
 addEventListener('pointerdown', e => { if (!layerInfo.contains(e.target)) layerInfo.style.display = 'none'; }, true);
 const layersEl = document.getElementById('layers');
-for (const st of STAGES) {
-  const subs = SUBCATS[st.id];
-  const el = document.createElement('div');
-  el.className = 'layer';
-  el.innerHTML = `<span class="step">${st.step}</span>
-    <span class="sw" style="background:${st.color}"></span>
-    <span class="nm">${st.name}</span>` + (subs ? `<span class="chev" title="show sub-types">▸</span>` : '') + `<span class="st">●</span>`;
-  let lpTimer = null, lpFired = false;
-  const startLP = e => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true;
-    const r = el.getBoundingClientRect(); showLayerInfo(st, r.right + 6, r.top); }, 500); };
-  const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
-  el.addEventListener('pointerdown', startLP);
-  el.addEventListener('pointerup', cancelLP);
-  el.addEventListener('pointermove', cancelLP);
-  el.addEventListener('pointerleave', cancelLP);
-  el.onclick = () => {
-    if (lpFired) { lpFired = false; return; }             // long-press already handled it
-    on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
-    el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; rebuild();
-  };
-  layersEl.appendChild(el);
-  if (subs) {                                             // expandable sub-category toggles
-    const wrap = document.createElement('div'); wrap.className = 'subwrap';
-    for (const sc of subs) {
-      const sr = document.createElement('div'); sr.className = 'subrow';
-      sr.innerHTML = `<span class="sw" style="background:${sc.color}"></span><span class="nm">${sc.name}</span><span class="st">●</span>`;
-      sr.onclick = ev => { ev.stopPropagation();
-        subOn[st.id][sc.id] = !subOn[st.id][sc.id];
-        sr.classList.toggle('off', !subOn[st.id][sc.id]);
-        sr.querySelector('.st').textContent = subOn[st.id][sc.id] ? '●' : '○'; rebuild(); };
-      wrap.appendChild(sr);
+let sheetEl = null;
+
+function renderPipelinePanel() {                     // the 6 build stages + sub-categories
+  for (const st of STAGES) {
+    const subs = SUBCATS[st.id];
+    const el = document.createElement('div');
+    el.className = 'layer' + (on[st.id] ? '' : ' off');
+    el.innerHTML = `<span class="step">${st.step}</span>
+      <span class="sw" style="background:${st.color}"></span>
+      <span class="nm">${st.name}</span>` + (subs ? `<span class="chev" title="show sub-types">▸</span>` : '') + `<span class="st">${on[st.id] ? '●' : '○'}</span>`;
+    let lpTimer = null, lpFired = false;
+    const startLP = e => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true;
+      const r = el.getBoundingClientRect(); showLayerInfo(st, r.right + 6, r.top); }, 500); };
+    const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+    el.addEventListener('pointerdown', startLP);
+    el.addEventListener('pointerup', cancelLP);
+    el.addEventListener('pointermove', cancelLP);
+    el.addEventListener('pointerleave', cancelLP);
+    el.onclick = () => {
+      if (lpFired) { lpFired = false; return; }
+      on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
+      el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; rebuild();
+    };
+    layersEl.appendChild(el);
+    if (subs) {
+      const wrap = document.createElement('div'); wrap.className = 'subwrap';
+      for (const sc of subs) {
+        const sr = document.createElement('div'); sr.className = 'subrow' + (subOn[st.id][sc.id] ? '' : ' off');
+        sr.innerHTML = `<span class="sw" style="background:${sc.color}"></span><span class="nm">${sc.name}</span><span class="st">${subOn[st.id][sc.id] ? '●' : '○'}</span>`;
+        sr.onclick = ev => { ev.stopPropagation();
+          subOn[st.id][sc.id] = !subOn[st.id][sc.id];
+          sr.classList.toggle('off', !subOn[st.id][sc.id]);
+          sr.querySelector('.st').textContent = subOn[st.id][sc.id] ? '●' : '○'; rebuild(); };
+        wrap.appendChild(sr);
+      }
+      layersEl.appendChild(wrap);
+      const chev = el.querySelector('.chev');
+      chev.onclick = ev => { ev.stopPropagation(); wrap.classList.toggle('open');
+        chev.textContent = wrap.classList.contains('open') ? '▾' : '▸'; };
     }
-    layersEl.appendChild(wrap);
-    const chev = el.querySelector('.chev');
-    chev.onclick = ev => { ev.stopPropagation(); wrap.classList.toggle('open');
-      chev.textContent = wrap.classList.contains('open') ? '▾' : '▸'; };
+  }
+  sheetEl = document.createElement('div');
+  sheetEl.className = 'layer off';
+  sheetEl.innerHTML = `<span class="step">▦</span><span class="sw" style="background:#7fd0ff"></span>
+    <span class="nm">source sheet</span><span class="st">○</span>`;
+  sheetEl.onclick = () => {
+    if (!underlaySpec) return;
+    on.sheet = !on.sheet; sheetEl.classList.toggle('off', !on.sheet);
+    sheetEl.querySelector('.st').textContent = on.sheet ? '●' : '○'; rebuild();
+  };
+  layersEl.appendChild(sheetEl);
+  refreshSheetToggle();
+}
+
+function renderRawPanel() {                          // the DXF's own layers, as-is
+  for (const L of rawLayers) {
+    const el = document.createElement('div');
+    el.className = 'layer' + (L.on ? '' : ' off');
+    el.innerHTML = `<span class="step"></span><span class="sw" style="background:${L.color}"></span>
+      <span class="nm">${L.name}</span><span class="st">${L.on ? '●' : '○'}</span>`;
+    el.title = `${srcLayerCounts[L.name] || 0} entities`;
+    el.onclick = () => { L.on = !L.on; el.classList.toggle('off', !L.on);
+      el.querySelector('.st').textContent = L.on ? '●' : '○'; build2DRaw(); };
+    layersEl.appendChild(el);
   }
 }
-// source-sheet underlay: a separate toggle (only lit when the plan ships a sheet)
-const sheetEl = document.createElement('div');
-sheetEl.className = 'layer off';
-sheetEl.innerHTML = `<span class="step">▦</span><span class="sw" style="background:#7fd0ff"></span>
-  <span class="nm">source sheet</span><span class="st">○</span>`;
-sheetEl.onclick = () => {
-  if (!underlaySpec) return;
-  on.sheet = !on.sheet; sheetEl.classList.toggle('off', !on.sheet);
-  sheetEl.querySelector('.st').textContent = on.sheet ? '●' : '○'; rebuild();
-};
-layersEl.appendChild(sheetEl);
+
+function renderLayerPanel() {
+  layersEl.innerHTML = ''; sheetEl = null;
+  if (rawMode) renderRawPanel(); else renderPipelinePanel();
+}
 function refreshSheetToggle() {
+  if (!sheetEl) return;
   on.sheet = false; sheetEl.classList.add('off');
   sheetEl.querySelector('.st').textContent = '○';
   sheetEl.style.opacity = underlaySpec ? '' : '0.3';
@@ -649,11 +714,13 @@ function refreshSheetToggle() {
 
 // ---------------------------------------------------------------- plan library + loader
 const PLANS = [
-  { name: 'Sample House',       src: './sample-house.dxf' },
-  { name: 'Reno 1 — Floor 1',   src: './plans/home-l1.dxf',
+  { name: 'Sample House',            src: './sample-house.dxf' },
+  { name: 'Reno 1 — raw DXF',        src: './plans/home-l1-raw.dxf', raw: true },
+  { name: 'Big Laundry — raw DXF',   src: './plans/home-l1-biglaundry-raw.dxf', raw: true },
+  { name: 'Reno 1 — processed 3D',   src: './plans/home-l1.dxf',
     spawn: { px: -17.9, py: -258.3, yaw: 0.24 },
     underlay: { file: 'home-l1.png', x0: -780.55, y1: 268.9, in_per_px: 0.48 } },
-  { name: 'Reno — Big Laundry', src: './plans/home-l1-biglaundry.dxf',
+  { name: 'Big Laundry — processed 3D', src: './plans/home-l1-biglaundry.dxf',
     spawn: { px: 0.1, py: -254.8, yaw: 0.18 } },
 ];
 function framePlan(spawn) {                     // fit orbit to the plan + set walk spawn
@@ -680,11 +747,28 @@ function loadPlan(src) {
     ENTS = parseDXF(txt);
     srcKind = 'dxf';
     srcLayerCounts = {}; for (const e of ENTS) srcLayerCounts[e.layer] = (srcLayerCounts[e.layer] || 0) + 1;
-    underlaySpec = planDef.underlay || null;
-    refreshSheetToggle();
-    DXF = src; loadFA(); build();
-    if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
-    else framePlan(planDef.spawn || null);
+    DXF = src;
+    if (planDef.raw) {                                 // render the DXF's own layers verbatim (2D)
+      rawMode = true; view2D = true; underlaySpec = null;
+      const order = ['1.1WALL', '1.2WALLS', '1.1DRWDWS', '1.2DRWDWS', '1.1COLUMNS', '1.1COLLINE', '1.1FURN', '1.1FILL', '1.1DEMO', '1.1NOTES', '1.1RMNAMES'];
+      const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
+      const names = Object.keys(srcLayerCounts).filter(n => n && n !== '0').sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+      let ci = 0;
+      const dimmed = ['1.1DEMO', '1.1FILL', '1.1NOTES'];   // annotation/demo layers off by default (toggle on)
+      rawLayers = names.map(name => ({ name, on: !dimmed.includes(name), color: RAW_COLORS[name] || RAW_CYCLE[ci++ % RAW_CYCLE.length] }));
+      renderLayerPanel();
+      build2DRaw(); fit2DCam(); apply2DVisibility();
+      if (typeof twoDBtn !== 'undefined') twoDBtn.style.display = 'none';
+    } else {
+      const wasRaw = rawMode; rawMode = false;
+      if (wasRaw) view2D = false;                       // leaving raw returns to the 3D pipeline
+      underlaySpec = planDef.underlay || null;
+      renderLayerPanel();
+      loadFA(); build();
+      if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
+      else { apply2DVisibility(); framePlan(planDef.spawn || null); }
+      if (typeof twoDBtn !== 'undefined') twoDBtn.style.display = '';
+    }
     errEl.style.display = 'none';
   }).catch(e => {
     if (tok !== loadTok) return;
