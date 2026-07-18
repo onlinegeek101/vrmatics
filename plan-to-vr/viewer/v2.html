@@ -932,13 +932,14 @@ function buildExportText() {                            // rewrite the 1.1WALL l
   for (let i = ei; i < lines.length - 1; i++) if (T(i) === '0' && T(i + 1) === 'ENDSEC') { endi = i; break; }
   if (endi < 0) endi = lines.length;
   const head = lines.slice(0, ei + 1), body = lines.slice(ei + 1, endi), tail = lines.slice(endi);
-  const kept = []; let ent = null;                     // drop original 1.1WALL entities (code/value pairs)
+  const kept = []; let ent = null;                     // drop ONLY the 1.1WALL wall lines; keep everything else
+  const isWallLine = e => e && e.layer === '1.1WALL' && (e.type === 'LINE' || e.type === 'LWPOLYLINE');
   for (let i = 0; i + 1 < body.length; i += 2) {
     const c = body[i].trim(), v = body[i + 1];
-    if (c === '0') { if (ent && ent.layer !== '1.1WALL') kept.push(...ent.f); ent = { layer: null, f: [body[i], body[i + 1]] }; }
+    if (c === '0') { if (ent && !isWallLine(ent)) kept.push(...ent.f); ent = { type: v.trim(), layer: null, f: [body[i], body[i + 1]] }; }
     else if (ent) { ent.f.push(body[i], body[i + 1]); if (c === '8') ent.layer = v.trim(); }
   }
-  if (ent && ent.layer !== '1.1WALL') kept.push(...ent.f);
+  if (ent && !isWallLine(ent)) kept.push(...ent.f);
   const fmt = x => (+x).toFixed(4), wall = [];          // re-emit every current wall as a double-line pair
   for (const w of mergedWalls) {
     const dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
