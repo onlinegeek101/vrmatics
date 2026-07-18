@@ -44,7 +44,7 @@
   <div id="layers"></div>
 </div>
 <div id="hud"></div>
-<div id="hint">orbit: drag / pinch, <b>tap a door</b> to open, <b>tap furniture</b> to swap · <b>🚶 walk</b>: <b>WASD</b> or left-thumb joystick, right-drag / <b>📱</b> look, <b>E</b> door, <b>Q</b> furniture · toggle layers left</div>
+<div id="hint">orbit: drag / pinch, <b>tap a door</b> / <b>furniture</b> · <b>🚶 walk</b>: <b>WASD</b> or joystick, right-drag / <b>📱</b> look · <b>▦ 2D</b> flat blueprint · <b>long-press a layer</b> for its DXF source</div>
 <div id="err"></div>
 
 <script async src="./vendor/es-module-shims.js"></script>
@@ -60,6 +60,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 const IN2M = 0.0254;
 const WALL_TH = 5, WALL_H = 96, HEAD = 84, SILL = 30, CEIL = 96;   // inches
 let DXF = './sample-house.dxf';   // active plan (swapped by the layout picker)
+let view2D = false, oCam = null, flatRoot = null;   // flat blueprint mode (referenced by resize())
 
 // ---------------------------------------------------------------- DXF parse
 // Minimal reader for the entities this pipeline uses: LINE, LWPOLYLINE, TEXT.
@@ -201,15 +202,24 @@ canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') ret
 addEventListener('pointerup', () => drag = null);
 addEventListener('pointermove', e => {
   if (!drag) return;
+  if (view2D && oCam) {                         // pan the blueprint
+    const sx = (oCam.right - oCam.left) / oCam.zoom / innerWidth, sz = (oCam.top - oCam.bottom) / oCam.zoom / innerHeight;
+    oCam.position.x -= (e.clientX - drag.x) * sx; oCam.position.z -= (e.clientY - drag.y) * sz;
+    drag = { x: e.clientX, y: e.clientY }; return;
+  }
   moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
   az -= (e.clientX - drag.x) * 0.008;
   pol = Math.max(0.15, Math.min(1.45, pol - (e.clientY - drag.y) * 0.006));
   drag = { x: e.clientX, y: e.clientY }; place();
 });
-addEventListener('wheel', e => { dist = Math.max(4, Math.min(40, dist * (e.deltaY > 0 ? 1.1 : 0.9))); place(); }, { passive: true });
+addEventListener('wheel', e => {
+  if (view2D && oCam) { oCam.zoom = Math.max(0.2, Math.min(12, oCam.zoom * (e.deltaY > 0 ? 0.9 : 1.1))); oCam.updateProjectionMatrix(); return; }
+  dist = Math.max(4, Math.min(40, dist * (e.deltaY > 0 ? 1.1 : 0.9))); place();
+}, { passive: true });
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (view2D && oCam) fit2DCam();
 }
 addEventListener('resize', resize); resize(); place();
 
@@ -288,8 +298,14 @@ const STAGES = [
   { id: 'furniture', name: 'furniture', color: '#4aa24a', step: '6' },
 ];
 const on = { grade: true, walls: true, openings: true, stairs: true, materials: true, furniture: true, sheet: false };
+// which raw DXF layer(s) feed each pipeline category (for the long-press explainer)
+const STAGE_LAYERS = {
+  grade: ['TOPO'], walls: ['WALL'], openings: ['OPENING'], stairs: ['STAIR'], furniture: ['FURN'],
+  materials: [],  // a finishing pass (ceilings, lights, trim, casings) applied to walls + grade — no raw layer
+};
 
 let ENTS = null, root = null;
+let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
 let underlaySpec = null;        // {file,x0,y1,in_per_px} of the current plan's source sheet
 const texCache = {};
 const gltf = new GLTFLoader();
@@ -534,7 +550,64 @@ function build() {
   window.__V2_READY = true;
 }
 
+// ---------------------------------------------------------------- 2D blueprint (no extrusion)
+// Draws the raw DXF entities as flat linework, colour-coded by stage, respecting the
+// same layer toggles. Top-down orthographic — a live blueprint of what feeds the 3D.
+function build2D() {
+  if (flatRoot) scene.remove(flatRoot);
+  flatRoot = new THREE.Group(); scene.add(flatRoot);
+  const col = {}; for (const st of STAGES) col[st.id] = new THREE.Color(st.color).getHex();
+  const seg = (arr, a, b) => arr.push(new THREE.Vector3(wx(a[0]), 0, wz(a[1])), new THREE.Vector3(wx(b[0]), 0, wz(b[1])));
+  const poly = (pts, arr, close) => { for (let i = 0; i + 1 < pts.length; i++) seg(arr, pts[i], pts[i + 1]); if (close && pts.length > 2) seg(arr, pts[pts.length - 1], pts[0]); };
+  const addLines = (pts, color, w) => { if (!pts.length) return; const g = new THREE.BufferGeometry().setFromPoints(pts);
+    flatRoot.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, linewidth: w || 1 }))); };
+  if (on.grade) { const s = []; for (const e of byLayer(ENTS, 'TOPO')) poly(e.pts, s, true); addLines(s, col.grade); }
+  if (on.walls) { const s = []; for (const w of byLayer(ENTS, 'WALL')) if (w.type === 'LINE') seg(s, w.pts[0], w.pts[1]); addLines(s, col.walls); }
+  if (on.openings) { const s = []; for (const e of byLayer(ENTS, 'OPENING')) poly(e.pts, s, false); addLines(s, col.openings); }
+  if (on.stairs) { const s = []; for (const e of byLayer(ENTS, 'STAIR')) { poly(e.pts, s, true); } addLines(s, col.stairs); }
+  if (on.furniture) { const s = []; for (const e of byLayer(ENTS, 'FURN')) if (e.type === 'LWPOLYLINE') poly(e.pts, s, true); addLines(s, col.furniture); }
+  window.__V2_READY = true;
+}
+function fit2DCam() {
+  let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
+  for (const w of byLayer(ENTS, 'WALL')) for (const [x, y] of w.pts) { const X = wx(x), Z = wz(y);
+    minx = Math.min(minx, X); maxx = Math.max(maxx, X); minz = Math.min(minz, Z); maxz = Math.max(maxz, Z); }
+  if (minx > maxx) { minx = -5; maxx = 5; minz = -5; maxz = 5; }
+  const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2;
+  let hw = (maxx - minx) / 2 * 1.12 || 5, hh = (maxz - minz) / 2 * 1.12 || 5;
+  const aspect = innerWidth / innerHeight;
+  if (hw / hh > aspect) hh = hw / aspect; else hw = hh * aspect;
+  if (!oCam) oCam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, 0.1, 200);
+  else { oCam.left = -hw; oCam.right = hw; oCam.top = hh; oCam.bottom = -hh; }
+  oCam.position.set(cx, 60, cz); oCam.up.set(0, 0, -1); oCam.lookAt(cx, 0, cz);
+  oCam.zoom = 1; oCam.updateProjectionMatrix();
+}
+function apply2DVisibility() {
+  if (root) root.visible = !view2D;
+  if (flatRoot) flatRoot.visible = view2D;
+  sky.visible = !view2D;
+  scene.background = view2D ? new THREE.Color(0x141a24) : null;   // dark blueprint — stage colours pop
+}
+
 // ---------------------------------------------------------------- layer UI
+const rebuild = () => view2D ? build2D() : build();      // toggles rebuild whichever view is active
+// long-press explainer: which raw DXF layer(s) feed a category
+const layerInfo = document.createElement('div');
+layerInfo.style.cssText = 'position:fixed;z-index:50;max-width:240px;background:#0e131d;color:#dfe6f2;' +
+  'border:1px solid #3a4a63;border-radius:9px;padding:9px 11px;font:12px system-ui;' +
+  'box-shadow:0 6px 20px #0008;display:none';
+document.body.appendChild(layerInfo);
+function showLayerInfo(st, x, y) {
+  const layers = STAGE_LAYERS[st.id] || [];
+  const rows = layers.length
+    ? layers.map(L => `<div><code style="color:#7fd0ff">${L}</code> — ${(srcLayerCounts[L] || 0)} entit${(srcLayerCounts[L] || 0) === 1 ? 'y' : 'ies'}</div>`).join('')
+    : `<div style="color:#9aa4b8">a finishing pass — ceilings, lights, baseboards, casings &amp; window/door trim applied to the walls + grade. Not a raw layer.</div>`;
+  layerInfo.innerHTML = `<b>${st.name}</b><div style="color:#8b95ac;margin:2px 0 6px">built from ${srcKind === 'dxf' ? 'DXF layer' : 'plan (' + srcKind + ')'}${layers.length > 1 ? 's' : ''}:</div>${rows}`;
+  layerInfo.style.left = Math.min(x, innerWidth - 250) + 'px';
+  layerInfo.style.top = y + 'px';
+  layerInfo.style.display = 'block';
+}
+addEventListener('pointerdown', e => { if (!layerInfo.contains(e.target)) layerInfo.style.display = 'none'; }, true);
 const layersEl = document.getElementById('layers');
 for (const st of STAGES) {
   const el = document.createElement('div');
@@ -542,8 +615,19 @@ for (const st of STAGES) {
   el.innerHTML = `<span class="step">${st.step}</span>
     <span class="sw" style="background:${st.color}"></span>
     <span class="nm">${st.name}</span><span class="st">●</span>`;
-  el.onclick = () => { on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
-    el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; build(); };
+  let lpTimer = null, lpFired = false;
+  const startLP = e => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true;
+    const r = el.getBoundingClientRect(); showLayerInfo(st, r.right + 6, r.top); }, 500); };
+  const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+  el.addEventListener('pointerdown', startLP);
+  el.addEventListener('pointerup', cancelLP);
+  el.addEventListener('pointermove', cancelLP);
+  el.addEventListener('pointerleave', cancelLP);
+  el.onclick = () => {
+    if (lpFired) { lpFired = false; return; }             // long-press already handled it
+    on[st.id] = !on[st.id]; el.classList.toggle('off', !on[st.id]);
+    el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; rebuild();
+  };
   layersEl.appendChild(el);
 }
 // source-sheet underlay: a separate toggle (only lit when the plan ships a sheet)
@@ -554,7 +638,7 @@ sheetEl.innerHTML = `<span class="step">▦</span><span class="sw" style="backgr
 sheetEl.onclick = () => {
   if (!underlaySpec) return;
   on.sheet = !on.sheet; sheetEl.classList.toggle('off', !on.sheet);
-  sheetEl.querySelector('.st').textContent = on.sheet ? '●' : '○'; build();
+  sheetEl.querySelector('.st').textContent = on.sheet ? '●' : '○'; rebuild();
 };
 layersEl.appendChild(sheetEl);
 function refreshSheetToggle() {
@@ -596,9 +680,13 @@ function loadPlan(src) {
   fetch(src).then(r => { if (!r.ok) throw new Error(r.status); return isJSON ? r.json() : r.text(); }).then(data => {
     if (tok !== loadTok) return;
     ENTS = isJSON ? entsFromJSON(data) : parseDXF(data);
+    srcKind = isJSON ? 'json' : 'dxf';
+    srcLayerCounts = {}; for (const e of ENTS) srcLayerCounts[e.layer] = (srcLayerCounts[e.layer] || 0) + 1;
     underlaySpec = (isJSON && data.underlay && data.underlay.file) ? data.underlay : null;
     refreshSheetToggle();
-    DXF = src; loadFA(); build(); framePlan(isJSON ? ENTS._spawn : null);
+    DXF = src; loadFA(); build();
+    if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
+    else framePlan(isJSON ? ENTS._spawn : null);
     errEl.style.display = 'none';
   }).catch(e => {
     if (tok !== loadTok) return;
@@ -773,11 +861,15 @@ canvas.addEventListener('touchmove', e => {
       const dx = t.clientX - o.cx, dy = t.clientY - o.cy;
       if (gyro.enabled && gyro.seen) gyro.yawOffset -= dx * 0.005;
       else { walker.yaw -= dx * 0.005; walker.pitch = Math.max(-1.3, Math.min(1.3, walker.pitch - dy * 0.005)); }
-    } else if (touchArr().length >= 2) {              // orbit pinch-zoom
+    } else if (touchArr().length >= 2) {              // two-finger pinch-zoom
       o.cx = t.clientX; o.cy = t.clientY;
       const d = touchDist();
-      if (pinchPrev && d) { dist = Math.max(4, Math.min(40, dist * (pinchPrev / d))); place(); }
+      if (view2D && oCam) { if (pinchPrev && d) { oCam.zoom = Math.max(0.2, Math.min(12, oCam.zoom * (d / pinchPrev))); oCam.updateProjectionMatrix(); } }
+      else if (pinchPrev && d) { dist = Math.max(4, Math.min(40, dist * (pinchPrev / d))); place(); }
       pinchPrev = d; continue;
+    } else if (view2D && oCam) {                       // 2D one-finger pan
+      const sx = (oCam.right - oCam.left) / oCam.zoom / innerWidth, sz = (oCam.top - oCam.bottom) / oCam.zoom / innerHeight;
+      oCam.position.x -= (t.clientX - o.cx) * sx; oCam.position.z -= (t.clientY - o.cy) * sz;
     } else {                                          // orbit 1-finger rotate
       az -= (t.clientX - o.cx) * 0.006;
       pol = Math.max(0.15, Math.min(1.45, pol - (t.clientY - o.cy) * 0.005)); place();
@@ -789,7 +881,7 @@ canvas.addEventListener('touchmove', e => {
 function endTouch(e) {
   for (const t of e.changedTouches) {
     const o = tState[t.identifier]; if (!o) continue;
-    if (o.moved < 10) {                               // a tap
+    if (o.moved < 10 && !view2D) {                    // a tap (no selection in flat 2D)
       if (mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.2); if (d) toggleDoor(d.key); }
       else if (!doorAtScreen(o.cx, o.cy)) fixtureAtScreen(o.cx, o.cy);
     }
@@ -849,6 +941,24 @@ gyroBtn.onclick = () => {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function')
     DeviceOrientationEvent.requestPermission().then(s => { if (s === 'granted') go(); else alert('Motion access was denied.'); }).catch(() => {});
   else go();
+};
+
+// 2D blueprint toggle — flat DXF linework, no extrusion
+const twoDBtn = document.createElement('button');
+twoDBtn.textContent = '▦ 2D'; twoDBtn.className = 'hud-btn'; twoDBtn.style.background = '#4a5568';
+twoDBtn.title = 'flat blueprint: the DXF layers, no extrusion';
+hud.appendChild(twoDBtn);
+twoDBtn.onclick = () => {
+  view2D = !view2D;
+  twoDBtn.classList.toggle('on', view2D);
+  twoDBtn.textContent = view2D ? '⬛ 3D' : '▦ 2D';
+  if (view2D) {
+    if (mode === 'walk') modeBtn.click();               // leave first-person
+    build2D(); fit2DCam(); apply2DVisibility();
+  } else {
+    if (flatRoot) { scene.remove(flatRoot); flatRoot = null; }
+    apply2DVisibility(); place();
+  }
 };
 addEventListener('keydown', e => {
   if (e.code === 'Escape') { if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click(); }
@@ -1238,14 +1348,16 @@ renderer.setAnimationLoop((t) => {
   const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
   if (pendingRebuild) { pendingRebuild = false; build(); }   // deferred fixture swap from XR
   if (renderer.xr.isPresenting) vrTick(dt);
-  else if (mode === 'walk') walkTick(dt);
+  else if (mode === 'walk' && !view2D) walkTick(dt);
   doorTick(dt);
-  renderer.render(scene, camera);
+  renderer.render(scene, renderer.xr.isPresenting ? camera : (view2D ? oCam : camera));
 });
 window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
   fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
   planOpenings: () => planOpenings, solveAlignment, feedbackCfg,
-  gyro, joy, camera, mode: () => mode };
+  gyro, joy, camera, mode: () => mode,
+  toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
+  srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS };
 </script>
