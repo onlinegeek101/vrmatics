@@ -16,14 +16,14 @@
   .layer:hover { background:#232b3d; }
   .layer .sw { width:14px; height:14px; border-radius:4px; flex:none; box-shadow:inset 0 0 0 1px #0004; }
   .layer .nm { flex:1; }
-  .layer .st { font-size:16px; width:18px; text-align:center; }
+  .layer .st { font-size:16px; width:22px; text-align:center; cursor:pointer; }
   .layer.off { opacity:.45; }
   .layer.off .nm { text-decoration:line-through; }
   .step { color:#5f6b85; font:10px ui-monospace,monospace; width:14px; text-align:right; }
   .layer .chev { color:#7f8aa3; cursor:pointer; padding:0 5px; user-select:none; font-size:11px; }
   .layer .catsel { background:#232b3d; color:#c3ccdd; border:1px solid #2f3850; border-radius:5px;
     font:10px system-ui; padding:2px 3px; max-width:82px; cursor:pointer; }
-  .layer .wedit { color:#5f6b85; font-size:13px; padding:0 3px; user-select:none; }
+  .layer .wedit { color:#5f6b85; font-size:13px; padding:0 3px; user-select:none; cursor:pointer; }
   .layer .wedit.on { color:#53d0ff; }
   .subwrap { display:none; margin:0 0 3px 0; }
   .subwrap.open { display:block; }
@@ -855,7 +855,7 @@ function updateEditBar() {                             // activated by long-pres
     `background:#232936;color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
   let html = '';
   if (editMode) html += `<div style="width:100%;font:11px system-ui;color:#8fd0ff;margin-bottom:2px">` +
-    `✎ ${editAnchor ? 'click to finish (snaps to walls)' : 'click a wall to start'} · Esc to stop</div>`;
+    `✎ edit on — ${editAnchor ? 'tap to finish (snaps to walls)' : 'tap a wall to start'} · tap ✎ row or Esc to stop</div>`;
   const bits = [];
   if (editMode) bits.push(btn('undo', 'undo'));
   if (edits.length) bits.push(btn('export', `⬇ DXF (${edits.length})`));
@@ -975,15 +975,21 @@ function renderRawPanel() {                          // the DXF's own layers →
     const opts = RAW_CATS.map(c => `<option value="${c}"${layerCat[L.name] === c ? ' selected' : ''}>${c}</option>`).join('');
     el.innerHTML = `<span class="sw" style="background:${L.color}"></span>
       <span class="nm" title="${srcLayerCounts[L.name] || 0} entities">${L.name}</span>` +
-      (isWalls ? `<span class="wedit${editMode ? ' on' : ''}" title="long-press to connect/extrude walls">✎</span>` : '') +
-      `<select class="catsel" title="render category">${opts}</select><span class="st">${L.on ? '●' : '○'}</span>`;
+      (isWalls ? `<span class="wedit${editMode ? ' on' : ''}" title="connect / extrude walls">✎</span>` : '') +
+      `<select class="catsel" title="render category">${opts}</select>` +
+      `<span class="st" title="show / hide layer">${L.on ? '●' : '○'}</span>`;
+    const stEl = el.querySelector('.st');
+    const toggleVis = () => { L.on = !L.on; el.classList.toggle('off', !L.on); stEl.textContent = L.on ? '●' : '○'; rebuild(); };
+    stEl.onclick = ev => { ev.stopPropagation(); toggleVis(); };   // the ●/○ dot is the ONLY show/hide control
     let lpTimer = null, lpFired = false;
     el.addEventListener('pointerdown', () => { lpFired = false; lpTimer = setTimeout(() => {
       lpFired = true; if (layerCat[L.name] === 'walls') toggleWallEdit(); }, 500); });
     const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
     el.addEventListener('pointerup', cancelLP); el.addEventListener('pointermove', cancelLP); el.addEventListener('pointerleave', cancelLP);
+    // Walls row: a body tap enters/exits edit (never hides the layer — that's what nuked the model).
+    // Other rows: a body tap toggles visibility, as before.
     el.onclick = () => { if (lpFired) { lpFired = false; return; }
-      L.on = !L.on; el.classList.toggle('off', !L.on); el.querySelector('.st').textContent = L.on ? '●' : '○'; rebuild(); };
+      if (layerCat[L.name] === 'walls') toggleWallEdit(); else toggleVis(); };
     const sel = el.querySelector('.catsel');
     sel.onclick = ev => ev.stopPropagation();
     sel.onchange = ev => { ev.stopPropagation(); layerCat[L.name] = sel.value; rebuild(); };
