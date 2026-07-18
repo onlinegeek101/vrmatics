@@ -302,10 +302,14 @@ let ENTS = null, root = null;
 let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
 let rawMode = false, rawLayers = [];                // render the DXF's own layers verbatim (no pipeline)
 let layerCat = {};                                  // raw layer name -> render category (auto by name, overridable)
-// in-viewer wall editing: extrude a wall from a face; the free end snaps to nearby wall faces.
+// in-viewer wall editing — SketchUp push/pull style: grab a wall END, pull it
+// ALONG the wall's own axis, and the free end infers/snaps to the first wall it
+// meets (a T-junction crossing, or a facing endpoint across a collinear gap).
 // Revisions persist per plan + export to a new DXF.
-let editMode = false, editAnchor = null, editPreview = null, mergedWalls = [], edits = [], rawText = '';
-const SNAP_R = 20;                                   // inches — snap the wall end to a face within this
+let editMode = false, editAnchor = null, editDir = null, editSrcWall = null,
+    editGrab = null, editPreview = null, mergedWalls = [], edits = [], rawText = '';
+const SNAP_R = 24;                                   // inches — snap tolerance to a face/endpoint
+const GRAB_R = 40;                                   // inches — how close a tap must be to grab a wall end
 const editMarkers = new THREE.Group(); editMarkers.renderOrder = 999;
 function editKey() { return 'plan2vr-v2-edits:' + DXF; }
 function loadEdits() { try { return JSON.parse(localStorage.getItem(editKey())) || []; } catch (e) { return []; } }
@@ -782,31 +786,77 @@ function planFromClient(clientX, clientY) {           // screen point → plan i
   if (!isFinite(px) || !isFinite(py) || Math.abs(px) > 1e5 || Math.abs(py) > 1e5) return null;  // grazing ray guard
   return [px, py];
 }
-function snapPoint(px, py) {                           // nearest point on any wall face within SNAP_R
-  let best = [px, py], bd = SNAP_R * SNAP_R, snapped = false;
-  for (const w of mergedWalls) {
-    const dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L2 = dx * dx + dy * dy || 1;
-    let t = ((px - w.a[0]) * dx + (py - w.a[1]) * dy) / L2; t = Math.max(0, Math.min(1, t));
-    const cx = w.a[0] + dx * t, cy = w.a[1] + dy * t, d = (cx - px) ** 2 + (cy - py) ** 2;
-    if (d < bd) { bd = d; best = [cx, cy]; snapped = true; }
-  }
-  return { pt: best, snapped };
+const JOIN_R = 6;                                      // an end within this of another wall is already joined
+function distToSeg(px, py, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
+  let t = ((px - a[0]) * dx + (py - a[1]) * dy) / L2; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(a[0] + dx * t - px, a[1] + dy * t - py);
 }
-function dot(p, c) { const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8),
-  new THREE.MeshBasicMaterial({ color: c, depthTest: false })); m.position.set(wx(p[0]), 0.07, wz(p[1])); m.renderOrder = 999; editMarkers.add(m); }
+function isFreeEnd(end, src) {                          // true = a dangling end (not already butting a wall)
+  for (const w of mergedWalls) { if (w === src) continue;
+    if (distToSeg(end[0], end[1], w.a, w.b) < JOIN_R) return false; }
+  return true;
+}
+function grabEnd(px, py) {                             // nearest grabbable LOOSE wall end + its outward axis
+  let best = null, bd = GRAB_R * GRAB_R;
+  for (const w of mergedWalls) {
+    for (const [end, other] of [[w.a, w.b], [w.b, w.a]]) {
+      const d = (end[0] - px) ** 2 + (end[1] - py) ** 2;
+      if (d < bd && isFreeEnd(end, w)) {              // only dangling ends can be grabbed; outward = away from body
+        const dx = end[0] - other[0], dy = end[1] - other[1], L = Math.hypot(dx, dy) || 1;
+        bd = d; best = { pt: end.slice(), dir: [dx / L, dy / L], wall: w };
+      }
+    }
+  }
+  return best;
+}
+function raySegT(o, d, a, b) {                          // ray param t>=0 where o+t·d crosses segment ab, else null
+  const vx = b[0] - a[0], vy = b[1] - a[1];
+  const den = d[0] * vy - d[1] * vx;
+  if (Math.abs(den) < 1e-9) return null;               // parallel
+  const wx0 = a[0] - o[0], wy0 = a[1] - o[1];
+  const t = (wx0 * vy - wy0 * vx) / den;               // along the ray
+  const s = (wx0 * d[1] - wy0 * d[0]) / den;           // along the segment
+  return (t > 0 && s >= 0 && s <= 1) ? t : null;
+}
+function firstHit(o, d, src) {                          // first wall the axis meets: T-crossing or facing endpoint
+  let best = null;
+  for (const w of mergedWalls) {
+    if (w === src) continue;
+    const t = raySegT(o, d, w.a, w.b);                 // perpendicular / angled walls → body crossing
+    if (t !== null && t > 2 && (!best || t < best.t)) best = { pt: [o[0] + d[0] * t, o[1] + d[1] * t], t, kind: 'wall' };
+    for (const e of [w.a, w.b]) {                      // collinear gaps → the facing endpoint sits on the axis
+      const te = (e[0] - o[0]) * d[0] + (e[1] - o[1]) * d[1];
+      if (te <= 2) continue;
+      const perp = Math.hypot(o[0] + d[0] * te - e[0], o[1] + d[1] * te - e[1]);
+      if (perp <= SNAP_R && (!best || te < best.t)) best = { pt: e.slice(), t: te, kind: 'end' };
+    }
+  }
+  return best;
+}
+function extrudeEnd(cursor) {                           // where the pulled end lands, given the cursor
+  const o = editAnchor, d = editDir;
+  let tCur = Math.max(0, (cursor[0] - o[0]) * d[0] + (cursor[1] - o[1]) * d[1]);  // project onto axis, forward only
+  const hit = firstHit(o, d, editSrcWall);
+  if (hit && tCur >= hit.t - SNAP_R) return { pt: hit.pt, snapped: true, len: hit.t };  // near/past a wall → snap
+  return { pt: [o[0] + d[0] * tCur, o[1] + d[1] * tCur], snapped: false, len: tCur };    // else free length
+}
+function dot(p, c, r) { const m = new THREE.Mesh(new THREE.SphereGeometry(r || 0.07, 14, 10),
+  new THREE.MeshBasicMaterial({ color: c, depthTest: false })); m.position.set(wx(p[0]), 0.09, wz(p[1])); m.renderOrder = 999; editMarkers.add(m); }
 function refreshEditViz() {
   editMarkers.clear();
   if (!editMode) return;
-  if (editAnchor && editPreview) {                    // extruding: translucent ghost of the wall to be
-    const c = editPreview.snapped ? 0x53ff9a : 0x53d0ff, a = editAnchor, b = editPreview.pt;
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (editAnchor) {                                    // pulling: translucent ghost along the wall's axis
+    const b = editPreview ? editPreview.pt : editAnchor;
+    const snapped = !!(editPreview && editPreview.snapped), c = snapped ? 0x53ff9a : 0x53d0ff;
+    const len = Math.hypot(b[0] - editAnchor[0], b[1] - editAnchor[1]);
     if (len > 1 && len < 5000) {
-      const ghost = boxBetween(wx(a[0]), wz(a[1]), wx(b[0]), wz(b[1]), WALL_TH, 0, WALL_H * IN2M,
+      const ghost = boxBetween(wx(editAnchor[0]), wz(editAnchor[1]), wx(b[0]), wz(b[1]), WALL_TH, 0, WALL_H * IN2M,
         new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.45, depthTest: false }));
       ghost.castShadow = ghost.receiveShadow = false; ghost.renderOrder = 999; editMarkers.add(ghost);
     }
-    dot(a, 0xffd24a); dot(b, c);
-  } else if (editPreview) dot(editPreview.pt, editPreview.snapped ? 0x53ff9a : 0x8b95ac);  // hover: where the start will land
+    dot(editAnchor, 0xffd24a); dot(b, c, snapped ? 0.11 : 0.07);  // fatter green dot when it will connect
+  } else if (editGrab) dot(editGrab.pt, 0xffd24a, 0.1);           // hover: the wall end you'd grab
 }
 function commitWall(a, b) {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -815,23 +865,32 @@ function commitWall(a, b) {
   ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [a.slice(), b.slice()], text: '', h: 0, _edit: true });
   buildRaw(); updateEditBar();
 }
-function editClick(clientX, clientY) {                 // click 1 = anchor on a wall; click 2 = extrude end
+function editClick(clientX, clientY) {                 // tap 1 = grab a wall end; tap 2 = set the pull distance
   const p = planFromClient(clientX, clientY); if (!p) return;
-  const s = snapPoint(p[0], p[1]);
-  if (!editAnchor) { editAnchor = s.pt; editPreview = { pt: s.pt, snapped: false }; }
-  else { commitWall(editAnchor, s.pt); editAnchor = null; editPreview = null; }
-  refreshEditViz();
+  if (!editAnchor) {
+    const g = grabEnd(p[0], p[1]); if (!g) return;     // must start on a loose wall end
+    editAnchor = g.pt; editDir = g.dir; editSrcWall = g.wall; editGrab = null;
+    const auto = firstHit(editAnchor, editDir, editSrcWall);   // propose the connection immediately
+    editPreview = auto ? { pt: auto.pt, snapped: true, len: auto.t } : { pt: editAnchor.slice(), snapped: false, len: 0 };
+  } else {
+    const s = extrudeEnd(p);                            // second tap sets distance along the axis (snaps near walls)
+    commitWall(editAnchor, s.pt);
+    editAnchor = editDir = editSrcWall = editPreview = null;
+  }
+  refreshEditViz(); updateEditBar();
 }
 function editHover(clientX, clientY) {                 // live preview + snapping (desktop)
   if (!editMode) return;
   const p = planFromClient(clientX, clientY); if (!p) return;
-  editPreview = snapPoint(p[0], p[1]); refreshEditViz();
+  if (!editAnchor) { editGrab = grabEnd(p[0], p[1]); editPreview = null; }
+  else editPreview = extrudeEnd(p);
+  refreshEditViz();
 }
 function undoEdit() {
   if (!edits.length) return;
   edits.pop(); saveEdits();
   for (let i = ENTS.length - 1; i >= 0; i--) if (ENTS[i]._edit) { ENTS.splice(i, 1); break; }
-  editAnchor = null; editPreview = null; refreshEditViz(); buildRaw(); updateEditBar();
+  editAnchor = editDir = editSrcWall = editPreview = editGrab = null; refreshEditViz(); buildRaw(); updateEditBar();
 }
 function buildExportText() {                           // original DXF + the edit walls, on 1.1WALL
   const lines = rawText.split(/\r\n|\n/);
@@ -855,7 +914,7 @@ function updateEditBar() {                             // activated by long-pres
     `background:#232936;color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
   let html = '';
   if (editMode) html += `<div style="width:100%;font:11px system-ui;color:#8fd0ff;margin-bottom:2px">` +
-    `✎ edit on — ${editAnchor ? 'tap to finish (snaps to walls)' : 'tap a wall to start'} · tap ✎ row or Esc to stop</div>`;
+    `✎ ${editAnchor ? 'pull along the wall — tap to connect' : 'tap a wall end to grab'} · tap ✎ row or Esc to stop</div>`;
   const bits = [];
   if (editMode) bits.push(btn('undo', 'undo'));
   if (edits.length) bits.push(btn('export', `⬇ DXF (${edits.length})`));
@@ -866,7 +925,7 @@ function updateEditBar() {                             // activated by long-pres
   };
 }
 function toggleWallEdit() {
-  editMode = !editMode; editAnchor = null; editPreview = null;
+  editMode = !editMode; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
   for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode);  // update in place
   refreshEditViz(); updateEditBar();
 }
@@ -1052,7 +1111,7 @@ function loadPlan(src) {
     DXF = src;
     if (planDef.raw) {                                 // render the DXF's own layers by category (3D)
       rawMode = true; view2D = false; underlaySpec = null;
-      rawText = txt; editMode = false; editAnchor = null; editPreview = null;
+      rawText = txt; editMode = false; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
       edits = loadEdits().filter(e => e && e.a && e.b && isFinite(e.a[0] + e.a[1] + e.b[0] + e.b[1]) &&
         Math.abs(e.a[0]) < 1e5 && Math.abs(e.a[1]) < 1e5 && Math.abs(e.b[0]) < 1e5 && Math.abs(e.b[1]) < 1e5);  // drop any bad persisted walls
       if (edits.length !== (loadEdits() || []).length) saveEdits();
@@ -1069,7 +1128,7 @@ function loadPlan(src) {
       if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
     } else {
       const wasRaw = rawMode; rawMode = false;
-      editMode = false; editAnchor = null; editPreview = null; editMarkers.clear();
+      editMode = false; editAnchor = editDir = editSrcWall = editPreview = editGrab = null; editMarkers.clear();
       if (wasRaw) view2D = false;                       // leaving raw returns to the 3D pipeline
       underlaySpec = planDef.underlay || null;
       renderLayerPanel();
@@ -1361,7 +1420,7 @@ twoDBtn.onclick = () => {
 };
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
-    if (editMode) { if (editAnchor) { editAnchor = null; editPreview = null; refreshEditViz(); updateEditBar(); } else toggleWallEdit(); return; }
+    if (editMode) { if (editAnchor) { editAnchor = editDir = editSrcWall = editPreview = null; refreshEditViz(); updateEditBar(); } else toggleWallEdit(); return; }
     if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click();
   }
   if (e.code === 'KeyE' && mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.0); if (d) toggleDoor(d.key); }
@@ -1763,8 +1822,8 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, snapPoint,
-  setEdit: v => { editMode = v; editAnchor = null; editPreview = null;
+  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, grabEnd, firstHit, extrudeEnd,
+  setEdit: v => { editMode = v; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
   toggleWallEdit, editClick, editHover };
 </script>
