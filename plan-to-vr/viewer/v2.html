@@ -177,10 +177,14 @@ function place() {
   camera.lookAt(target);
 }
 let drag = null, moved = 0;
-canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return; drag = { x: e.clientX, y: e.clientY }; moved = 0; });
-addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return;
+  if (editMode && mode === 'orbit' && !view2D && beginWallDrag(e.clientX, e.clientY)) { drag = null; return; }  // grab a wall face
+  drag = { x: e.clientX, y: e.clientY }; moved = 0; });
+addEventListener('pointerup', () => { if (wallDrag) endWallDrag(); drag = null; });
 addEventListener('pointermove', e => {
+  if (wallDrag) { updateWallDrag(e.clientX, e.clientY); return; }   // push/pull the grabbed wall
   if (!drag) return;
+  if (editMode && mode === 'orbit' && !view2D) return;               // edit on: single-drag never spins the camera
   if (view2D && oCam) {                         // pan the blueprint
     const sx = (oCam.right - oCam.left) / oCam.zoom / innerWidth, sz = (oCam.top - oCam.bottom) / oCam.zoom / innerHeight;
     oCam.position.x -= (e.clientX - drag.x) * sx; oCam.position.z -= (e.clientY - drag.y) * sz;
@@ -306,10 +310,9 @@ let layerCat = {};                                  // raw layer name -> render 
 // ALONG the wall's own axis, and the free end infers/snaps to the first wall it
 // meets (a T-junction crossing, or a facing endpoint across a collinear gap).
 // Revisions persist per plan + export to a new DXF.
-let editMode = false, editAnchor = null, editDir = null, editSrcWall = null,
-    editGrab = null, editPreview = null, mergedWalls = [], edits = [], rawText = '';
-const SNAP_R = 24;                                   // inches — snap tolerance to a face/endpoint
-const GRAB_R = 40;                                   // inches — how close a tap must be to grab a wall end
+let editMode = false, mergedWalls = [], edits = [], rawText = '';
+let wallDrag = null, hoverWall = null;               // active face push/pull + hover highlight
+const PICK_TOL = 16, FACE_SNAP = 12;                 // inches — grab reach onto a wall face; parallel-face snap
 const editMarkers = new THREE.Group(); editMarkers.renderOrder = 999;
 function editKey() { return 'plan2vr-v2-edits:' + DXF; }
 function loadEdits() { try { return JSON.parse(localStorage.getItem(editKey())) || []; } catch (e) { return []; } }
@@ -721,7 +724,8 @@ function buildRaw() {
     else flat.push({ color: L.color, segs });          // stairs / furniture / linework
   }
   const merged = mergeDoubleWalls(wallSegs);
-  mergedWalls = merged;                               // snap targets for the extrusion editor
+  applyMoveEdits(merged);                             // relocate walls the user pushed/pulled
+  mergedWalls = merged;                               // live wall set (targets for the editor + export)
   // floor slab under the merged walls
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
   for (const w of merged) for (const q of [w.a, w.b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
@@ -786,121 +790,132 @@ function planFromClient(clientX, clientY) {           // screen point → plan i
   if (!isFinite(px) || !isFinite(py) || Math.abs(px) > 1e5 || Math.abs(py) > 1e5) return null;  // grazing ray guard
   return [px, py];
 }
-const JOIN_R = 6;                                      // an end within this of another wall is already joined
+function groundWorld(clientX, clientY) {                // screen point → world (metres) on the floor plane
+  const p = planFromClient(clientX, clientY);
+  return p ? { x: wx(p[0]), z: wz(p[1]) } : null;
+}
 function distToSeg(px, py, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
   let t = ((px - a[0]) * dx + (py - a[1]) * dy) / L2; t = Math.max(0, Math.min(1, t));
   return Math.hypot(a[0] + dx * t - px, a[1] + dy * t - py);
 }
-function isFreeEnd(end, src) {                          // true = a dangling end (not already butting a wall)
-  for (const w of mergedWalls) { if (w === src) continue;
-    if (distToSeg(end[0], end[1], w.a, w.b) < JOIN_R) return false; }
-  return true;
+function pickWall(px, py) {                             // the wall under a plan point — grab anywhere on its face
+  let best = null, bd = 1e9;
+  for (let i = 0; i < mergedWalls.length; i++) {
+    const w = mergedWalls[i], d = distToSeg(px, py, w.a, w.b);
+    if (d < w.thick / 2 + PICK_TOL && d < bd) { bd = d; best = i; }
+  }
+  if (best == null) return null;
+  const w = mergedWalls[best], dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
+  return { i: best, u: [dx / L, dy / L], n: [-dy / L, dx / L], a: w.a.slice(), b: w.b.slice(), thick: w.thick };
 }
-function grabEnd(px, py) {                             // nearest grabbable LOOSE wall end + its outward axis
-  let best = null, bd = GRAB_R * GRAB_R;
-  for (const w of mergedWalls) {
-    for (const [end, other] of [[w.a, w.b], [w.b, w.a]]) {
-      const d = (end[0] - px) ** 2 + (end[1] - py) ** 2;
-      if (d < bd && isFreeEnd(end, w)) {              // only dangling ends can be grabbed; outward = away from body
-        const dx = end[0] - other[0], dy = end[1] - other[1], L = Math.hypot(dx, dy) || 1;
-        bd = d; best = { pt: end.slice(), dir: [dx / L, dy / L], wall: w };
-      }
+function snapMove(dw, m) {                              // snap the moving wall's faces to nearby parallel faces
+  const u = dw.u, n = dw.n, half = dw.thick / 2, L = Math.hypot(dw.b[0] - dw.a[0], dw.b[1] - dw.a[1]) || 1;
+  const marks = [m - half, m, m + half];               // moving wall: near face / centre / far face (signed on n from a)
+  let bestM = m, bd = FACE_SNAP;
+  for (let j = 0; j < mergedWalls.length; j++) {
+    if (j === dw.i) continue;
+    const w2 = mergedWalls[j], d2x = w2.b[0] - w2.a[0], d2y = w2.b[1] - w2.a[1], L2 = Math.hypot(d2x, d2y) || 1;
+    if (Math.abs((d2x / L2) * u[0] + (d2y / L2) * u[1]) < 0.985) continue;             // not parallel
+    const tA = (w2.a[0] - dw.a[0]) * u[0] + (w2.a[1] - dw.a[1]) * u[1];
+    const tB = (w2.b[0] - dw.a[0]) * u[0] + (w2.b[1] - dw.a[1]) * u[1];
+    if (Math.min(tA, tB) > L + FACE_SNAP || Math.max(tA, tB) < -FACE_SNAP) continue;   // no length overlap
+    const s2 = (w2.a[0] - dw.a[0]) * n[0] + (w2.a[1] - dw.a[1]) * n[1], h2 = w2.thick / 2;
+    for (const tf of [s2 - h2, s2, s2 + h2]) for (const mk of marks) {                 // land a face on a target line
+      const nm = m + (tf - mk);
+      if (Math.abs(nm - m) < bd) { bd = Math.abs(nm - m); bestM = nm; }
     }
   }
-  return best;
+  return { m: bestM, snapped: bestM !== m };
 }
-function raySegT(o, d, a, b) {                          // ray param t>=0 where o+t·d crosses segment ab, else null
-  const vx = b[0] - a[0], vy = b[1] - a[1];
-  const den = d[0] * vy - d[1] * vx;
-  if (Math.abs(den) < 1e-9) return null;               // parallel
-  const wx0 = a[0] - o[0], wy0 = a[1] - o[1];
-  const t = (wx0 * vy - wy0 * vx) / den;               // along the ray
-  const s = (wx0 * d[1] - wy0 * d[0]) / den;           // along the segment
-  return (t > 0 && s >= 0 && s <= 1) ? t : null;
+function beginWallDrag(clientX, clientY) {              // grab the wall under the pointer
+  const p = planFromClient(clientX, clientY); if (!p) return false;
+  const pk = pickWall(p[0], p[1]); if (!pk) return false;
+  wallDrag = { ...pk, startP: p, m: 0, snapped: false, curA: pk.a.slice(), curB: pk.b.slice() };
+  hoverWall = null; refreshEditViz(); return true;
 }
-function firstHit(o, d, src) {                          // first wall the axis meets: T-crossing or facing endpoint
-  let best = null;
-  for (const w of mergedWalls) {
-    if (w === src) continue;
-    const t = raySegT(o, d, w.a, w.b);                 // perpendicular / angled walls → body crossing
-    if (t !== null && t > 2 && (!best || t < best.t)) best = { pt: [o[0] + d[0] * t, o[1] + d[1] * t], t, kind: 'wall' };
-    for (const e of [w.a, w.b]) {                      // collinear gaps → the facing endpoint sits on the axis
-      const te = (e[0] - o[0]) * d[0] + (e[1] - o[1]) * d[1];
-      if (te <= 2) continue;
-      const perp = Math.hypot(o[0] + d[0] * te - e[0], o[1] + d[1] * te - e[1]);
-      if (perp <= SNAP_R && (!best || te < best.t)) best = { pt: e.slice(), t: te, kind: 'end' };
-    }
-  }
-  return best;
-}
-function extrudeEnd(cursor) {                           // where the pulled end lands, given the cursor
-  const o = editAnchor, d = editDir;
-  let tCur = Math.max(0, (cursor[0] - o[0]) * d[0] + (cursor[1] - o[1]) * d[1]);  // project onto axis, forward only
-  const hit = firstHit(o, d, editSrcWall);
-  if (hit && tCur >= hit.t - SNAP_R) return { pt: hit.pt, snapped: true, len: hit.t };  // near/past a wall → snap
-  return { pt: [o[0] + d[0] * tCur, o[1] + d[1] * tCur], snapped: false, len: tCur };    // else free length
-}
-function dot(p, c, r) { const m = new THREE.Mesh(new THREE.SphereGeometry(r || 0.07, 14, 10),
-  new THREE.MeshBasicMaterial({ color: c, depthTest: false })); m.position.set(wx(p[0]), 0.09, wz(p[1])); m.renderOrder = 999; editMarkers.add(m); }
-function refreshEditViz() {
-  editMarkers.clear();
-  if (!editMode) return;
-  if (editAnchor) {                                    // pulling: translucent ghost along the wall's axis
-    const b = editPreview ? editPreview.pt : editAnchor;
-    const snapped = !!(editPreview && editPreview.snapped), c = snapped ? 0x53ff9a : 0x53d0ff;
-    const len = Math.hypot(b[0] - editAnchor[0], b[1] - editAnchor[1]);
-    if (len > 1 && len < 5000) {
-      const ghost = boxBetween(wx(editAnchor[0]), wz(editAnchor[1]), wx(b[0]), wz(b[1]), WALL_TH, 0, WALL_H * IN2M,
-        new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.45, depthTest: false }));
-      ghost.castShadow = ghost.receiveShadow = false; ghost.renderOrder = 999; editMarkers.add(ghost);
-    }
-    dot(editAnchor, 0xffd24a); dot(b, c, snapped ? 0.11 : 0.07);  // fatter green dot when it will connect
-  } else if (editGrab) dot(editGrab.pt, 0xffd24a, 0.1);           // hover: the wall end you'd grab
-}
-function commitWall(a, b) {
-  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  if (!(len >= 2 && len < 5000) || !isFinite(a[0] + a[1] + b[0] + b[1])) return;   // reject bad/huge walls
-  edits.push({ a: a.slice(), b: b.slice() }); saveEdits();
-  ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [a.slice(), b.slice()], text: '', h: 0, _edit: true });
-  buildRaw(); updateEditBar();
-}
-function editClick(clientX, clientY) {                 // tap 1 = grab a wall end; tap 2 = set the pull distance
+function updateWallDrag(clientX, clientY) {             // slide it perpendicular; snap to parallel faces
+  if (!wallDrag) return;
   const p = planFromClient(clientX, clientY); if (!p) return;
-  if (!editAnchor) {
-    const g = grabEnd(p[0], p[1]); if (!g) return;     // must start on a loose wall end
-    editAnchor = g.pt; editDir = g.dir; editSrcWall = g.wall; editGrab = null;
-    const auto = firstHit(editAnchor, editDir, editSrcWall);   // propose the connection immediately
-    editPreview = auto ? { pt: auto.pt, snapped: true, len: auto.t } : { pt: editAnchor.slice(), snapped: false, len: 0 };
-  } else {
-    const s = extrudeEnd(p);                            // second tap sets distance along the axis (snaps near walls)
-    commitWall(editAnchor, s.pt);
-    editAnchor = editDir = editSrcWall = editPreview = null;
+  const raw = (p[0] - wallDrag.startP[0]) * wallDrag.n[0] + (p[1] - wallDrag.startP[1]) * wallDrag.n[1];
+  const sn = snapMove(wallDrag, raw);
+  wallDrag.m = sn.m; wallDrag.snapped = sn.snapped;
+  wallDrag.curA = [wallDrag.a[0] + wallDrag.n[0] * sn.m, wallDrag.a[1] + wallDrag.n[1] * sn.m];
+  wallDrag.curB = [wallDrag.b[0] + wallDrag.n[0] * sn.m, wallDrag.b[1] + wallDrag.n[1] * sn.m];
+  refreshEditViz();
+}
+function endWallDrag() {
+  if (!wallDrag) return;
+  const w = wallDrag; wallDrag = null;
+  if (Math.abs(w.m) >= 1 && isFinite(w.curA[0] + w.curA[1] + w.curB[0] + w.curB[1])) {
+    edits.push({ kind: 'move', o: [w.a[0], w.a[1], w.b[0], w.b[1]], n: [w.curA[0], w.curA[1], w.curB[0], w.curB[1]] });
+    saveEdits(); buildRaw();
   }
   refreshEditViz(); updateEditBar();
 }
-function editHover(clientX, clientY) {                 // live preview + snapping (desktop)
+function ghostBox(a, b, thick, color, op) {
+  const g = boxBetween(wx(a[0]), wz(a[1]), wx(b[0]), wz(b[1]), thick, 0, WALL_H * IN2M,
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: op, depthTest: false }));
+  g.castShadow = g.receiveShadow = false; g.renderOrder = 999; editMarkers.add(g);
+}
+function refreshEditViz() {
+  editMarkers.clear();
   if (!editMode) return;
-  const p = planFromClient(clientX, clientY); if (!p) return;
-  if (!editAnchor) { editGrab = grabEnd(p[0], p[1]); editPreview = null; }
-  else editPreview = extrudeEnd(p);
-  refreshEditViz();
+  if (wallDrag) ghostBox(wallDrag.curA, wallDrag.curB, wallDrag.thick, wallDrag.snapped ? 0x53ff9a : 0x53d0ff, 0.5);
+  else if (hoverWall != null && mergedWalls[hoverWall]) {   // hover: the wall you'd grab
+    const w = mergedWalls[hoverWall]; ghostBox(w.a, w.b, w.thick + 2, 0xffd24a, 0.22);
+  }
+}
+function editHover(clientX, clientY) {                 // desktop: highlight the wall under the cursor
+  if (!editMode || wallDrag) return;
+  const p = planFromClient(clientX, clientY);
+  const pk = p ? pickWall(p[0], p[1]) : null;
+  hoverWall = pk ? pk.i : null; refreshEditViz();
+}
+function wallMatchDist(w, o) {                          // how well a merged wall matches a stored move's origin
+  const d = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+  const f = d(w.a[0], w.a[1], o[0], o[1]) + d(w.b[0], w.b[1], o[2], o[3]);
+  const r = d(w.a[0], w.a[1], o[2], o[3]) + d(w.b[0], w.b[1], o[0], o[1]);
+  return Math.min(f, r) / 2;
+}
+function applyMoveEdits(merged) {                       // relocate the walls the user pushed/pulled
+  for (const ed of edits) {
+    if (ed.kind !== 'move') continue;
+    let bi = -1, bd = 24;
+    for (let i = 0; i < merged.length; i++) { const d = wallMatchDist(merged[i], ed.o); if (d < bd) { bd = d; bi = i; } }
+    if (bi >= 0) merged[bi] = { a: [ed.n[0], ed.n[1]], b: [ed.n[2], ed.n[3]], thick: merged[bi].thick };
+  }
 }
 function undoEdit() {
   if (!edits.length) return;
-  edits.pop(); saveEdits();
-  for (let i = ENTS.length - 1; i >= 0; i--) if (ENTS[i]._edit) { ENTS.splice(i, 1); break; }
-  editAnchor = editDir = editSrcWall = editPreview = editGrab = null; refreshEditViz(); buildRaw(); updateEditBar();
+  const last = edits.pop(); saveEdits();
+  if (last.kind !== 'move') for (let i = ENTS.length - 1; i >= 0; i--) if (ENTS[i]._edit) { ENTS.splice(i, 1); break; }
+  wallDrag = null; hoverWall = null; refreshEditViz(); buildRaw(); updateEditBar();
 }
-function buildExportText() {                           // original DXF + the edit walls, on 1.1WALL
+function buildExportText() {                            // rewrite the 1.1WALL layer from the edited walls
+  if (!edits.length) return rawText;
   const lines = rawText.split(/\r\n|\n/);
-  const ei = lines.indexOf('ENTITIES'); let endi = -1;
-  for (let i = Math.max(0, ei); i < lines.length - 1; i++) if (lines[i] === '0' && lines[i + 1] === 'ENDSEC') { endi = i; break; }
+  const T = i => (lines[i] || '').trim();              // DXF group codes are space-padded — compare trimmed
+  const ei = lines.findIndex(l => l.trim() === 'ENTITIES'); if (ei < 0) return rawText;
+  let endi = -1;
+  for (let i = ei; i < lines.length - 1; i++) if (T(i) === '0' && T(i + 1) === 'ENDSEC') { endi = i; break; }
   if (endi < 0) endi = lines.length;
-  const block = [];
-  for (const e of edits) block.push('0', 'LINE', '8', '1.1WALL', '10', e.a[0], '20', e.a[1], '11', e.b[0], '21', e.b[1]);
-  lines.splice(endi, 0, ...block.map(String));
-  return lines.join('\n');
+  const head = lines.slice(0, ei + 1), body = lines.slice(ei + 1, endi), tail = lines.slice(endi);
+  const kept = []; let ent = null;                     // drop original 1.1WALL entities (code/value pairs)
+  for (let i = 0; i + 1 < body.length; i += 2) {
+    const c = body[i].trim(), v = body[i + 1];
+    if (c === '0') { if (ent && ent.layer !== '1.1WALL') kept.push(...ent.f); ent = { layer: null, f: [body[i], body[i + 1]] }; }
+    else if (ent) { ent.f.push(body[i], body[i + 1]); if (c === '8') ent.layer = v.trim(); }
+  }
+  if (ent && ent.layer !== '1.1WALL') kept.push(...ent.f);
+  const fmt = x => (+x).toFixed(4), wall = [];          // re-emit every current wall as a double-line pair
+  for (const w of mergedWalls) {
+    const dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L * (w.thick / 2), ny = dx / L * (w.thick / 2);
+    for (const s of [1, -1]) wall.push('0', 'LINE', '8', '1.1WALL',
+      '10', fmt(w.a[0] + nx * s), '20', fmt(w.a[1] + ny * s), '11', fmt(w.b[0] + nx * s), '21', fmt(w.b[1] + ny * s));
+  }
+  return head.concat(kept, wall, tail).join('\n');
 }
 function exportDXF() {
   const a = document.createElement('a');
@@ -914,7 +929,7 @@ function updateEditBar() {                             // activated by long-pres
     `background:#232936;color:#dfe6f2;cursor:pointer;font:11px system-ui">${label}</button>`;
   let html = '';
   if (editMode) html += `<div style="width:100%;font:11px system-ui;color:#8fd0ff;margin-bottom:2px">` +
-    `✎ ${editAnchor ? 'pull along the wall — tap to connect' : 'tap a wall end to grab'} · tap ✎ row or Esc to stop</div>`;
+    `✎ drag a wall face to push/pull it — snaps to nearby walls · tap ✎ row or Esc to stop</div>`;
   const bits = [];
   if (editMode) bits.push(btn('undo', 'undo'));
   if (edits.length) bits.push(btn('export', `⬇ DXF (${edits.length})`));
@@ -925,7 +940,7 @@ function updateEditBar() {                             // activated by long-pres
   };
 }
 function toggleWallEdit() {
-  editMode = !editMode; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
+  editMode = !editMode; wallDrag = null; hoverWall = null;
   for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode);  // update in place
   refreshEditViz(); updateEditBar();
 }
@@ -1034,7 +1049,7 @@ function renderRawPanel() {                          // the DXF's own layers →
     const opts = RAW_CATS.map(c => `<option value="${c}"${layerCat[L.name] === c ? ' selected' : ''}>${c}</option>`).join('');
     el.innerHTML = `<span class="sw" style="background:${L.color}"></span>
       <span class="nm" title="${srcLayerCounts[L.name] || 0} entities">${L.name}</span>` +
-      (isWalls ? `<span class="wedit${editMode ? ' on' : ''}" title="connect / extrude walls">✎</span>` : '') +
+      (isWalls ? `<span class="wedit${editMode ? ' on' : ''}" title="drag a wall face to push/pull it">✎</span>` : '') +
       `<select class="catsel" title="render category">${opts}</select>` +
       `<span class="st" title="show / hide layer">${L.on ? '●' : '○'}</span>`;
     const stEl = el.querySelector('.st');
@@ -1111,11 +1126,14 @@ function loadPlan(src) {
     DXF = src;
     if (planDef.raw) {                                 // render the DXF's own layers by category (3D)
       rawMode = true; view2D = false; underlaySpec = null;
-      rawText = txt; editMode = false; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
-      edits = loadEdits().filter(e => e && e.a && e.b && isFinite(e.a[0] + e.a[1] + e.b[0] + e.b[1]) &&
-        Math.abs(e.a[0]) < 1e5 && Math.abs(e.a[1]) < 1e5 && Math.abs(e.b[0]) < 1e5 && Math.abs(e.b[1]) < 1e5);  // drop any bad persisted walls
-      if (edits.length !== (loadEdits() || []).length) saveEdits();
-      for (const ed of edits) ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [ed.a.slice(), ed.b.slice()], text: '', h: 0, _edit: true });
+      rawText = txt; editMode = false; wallDrag = null; hoverWall = null;
+      const ok4 = a => Array.isArray(a) && a.length >= 4 && a.every(v => isFinite(v) && Math.abs(v) < 1e5);
+      const ok2 = p => Array.isArray(p) && p.length >= 2 && isFinite(p[0] + p[1]) && Math.abs(p[0]) < 1e5 && Math.abs(p[1]) < 1e5;
+      const raw0 = loadEdits() || [];
+      edits = raw0.filter(e => e && (e.kind === 'move' ? (ok4(e.o) && ok4(e.n)) : (ok2(e.a) && ok2(e.b))));  // keep valid moves + adds
+      if (edits.length !== raw0.length) saveEdits();
+      for (const ed of edits) if (ed.kind !== 'move')  // added walls flow through the wall pipeline; moves apply post-merge
+        ENTS.push({ type: 'LINE', layer: '1.1WALL', color: 256, elev: 0, pts: [ed.a.slice(), ed.b.slice()], text: '', h: 0, _edit: true });
       const order = ['1.1WALL', '1.2WALLS', '1.1DRWDWS', '1.2DRWDWS', '1.1COLUMNS', '1.1COLLINE', '1.1FURN', '1.1FILL', '1.1DEMO', '1.1NOTES', '1.1RMNAMES'];
       const rank = n => { const i = order.indexOf(n); return i < 0 ? 99 : i; };
       const names = Object.keys(srcLayerCounts).filter(n => n && n !== '0').sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
@@ -1128,7 +1146,7 @@ function loadPlan(src) {
       if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
     } else {
       const wasRaw = rawMode; rawMode = false;
-      editMode = false; editAnchor = editDir = editSrcWall = editPreview = editGrab = null; editMarkers.clear();
+      editMode = false; wallDrag = null; hoverWall = null; editMarkers.clear();
       if (wasRaw) view2D = false;                       // leaving raw returns to the 3D pipeline
       underlaySpec = planDef.underlay || null;
       renderLayerPanel();
@@ -1157,14 +1175,14 @@ addEventListener('keydown', e => { keys[e.code] = true; });
 addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('click', (e) => {
   if (IS_TOUCH) return;                        // touch is handled by the touch manager below
-  if (editMode && mode === 'orbit') { if (moved < 6) editClick(e.clientX, e.clientY); updateEditBar(); return; }  // extrude wall
+  if (editMode && mode === 'orbit') return;    // edit mode: clicks are wall push/pull (pointer handlers)
   if (mode === 'walk') {
     if (document.pointerLockElement === canvas) toggleDoor((nearestDoor(walker.x, walker.z, 2.0) || {}).key);
     else canvas.requestPointerLock();
   } else if (moved < 6 && !doorAtScreen(e.clientX, e.clientY)) fixtureAtScreen(e.clientX, e.clientY);  // orbit: click door or fixture
 });
-canvas.addEventListener('pointermove', e => {          // extrusion live preview + snap (desktop hover)
-  if (editMode && mode === 'orbit' && e.pointerType !== 'touch') editHover(e.clientX, e.clientY);
+canvas.addEventListener('pointermove', e => {          // desktop hover: highlight the wall you'd grab
+  if (editMode && mode === 'orbit' && !view2D && !wallDrag && e.pointerType !== 'touch') editHover(e.clientX, e.clientY);
 });
 addEventListener('mousemove', e => {
   if (document.pointerLockElement !== canvas) return;
@@ -1293,21 +1311,40 @@ function walkTick(dt) {
 // orbit: 1-finger drag rotates, 2-finger pinch zooms, tap opens a door / swaps furniture.
 // walk: left half = move joystick, right half = look (or twist heading when 📱 look is on), tap = door.
 const tState = {};        // touch id -> {kind,ox,oy,cx,cy,moved}
-let pinchPrev = 0;
+let pinchPrev = 0, pinchC = null;
 const touchArr = () => Object.values(tState);
 function touchDist() { const a = touchArr(); return a.length < 2 ? 0 : Math.hypot(a[0].cx - a[1].cx, a[0].cy - a[1].cy); }
+function touchCentroid() { const a = touchArr(); return [(a[0].cx + a[1].cx) / 2, (a[0].cy + a[1].cy) / 2]; }
 canvas.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
     const kind = mode === 'walk' ? (t.clientX < innerWidth / 2 ? 'move' : 'look') : 'orbit';
     tState[t.identifier] = { kind, ox: t.clientX, oy: t.clientY, cx: t.clientX, cy: t.clientY, moved: 0 };
   }
-  if (mode === 'orbit' && touchArr().length >= 2) pinchPrev = touchDist();
+  if (mode === 'orbit' && touchArr().length >= 2) {   // second finger → pan/zoom, cancel any wall drag
+    pinchPrev = touchDist(); pinchC = touchCentroid();
+    if (wallDrag) { wallDrag = null; refreshEditViz(); }
+  } else if (editMode && mode === 'orbit' && !view2D && touchArr().length === 1) {
+    const t = e.changedTouches[0]; beginWallDrag(t.clientX, t.clientY);   // grab a wall face
+  }
   if (e.cancelable) e.preventDefault();
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
+  if (mode === 'orbit' && !view2D && touchArr().length >= 2) {           // two-finger pan + zoom (3D orbit)
+    for (const t of e.changedTouches) { const o = tState[t.identifier]; if (o) { o.cx = t.clientX; o.cy = t.clientY; } }
+    const c = touchCentroid(), d = touchDist();
+    if (pinchC) { const g0 = groundWorld(pinchC[0], pinchC[1]), g1 = groundWorld(c[0], c[1]);
+      if (g0 && g1) { target.x -= (g1.x - g0.x); target.z -= (g1.z - g0.z); } }   // pan: keep ground under the fingers
+    if (pinchPrev && d) dist = Math.max(4, Math.min(40, dist * (pinchPrev / d)));  // pinch zoom
+    pinchPrev = d; pinchC = c; place();
+    if (e.cancelable) e.preventDefault(); return;
+  }
   for (const t of e.changedTouches) {
     const o = tState[t.identifier]; if (!o) continue;
     o.moved += Math.abs(t.clientX - o.cx) + Math.abs(t.clientY - o.cy);
+    if (editMode && mode === 'orbit' && !view2D) {     // edit: drag a wall face, never spin the camera
+      if (wallDrag) updateWallDrag(t.clientX, t.clientY);
+      o.cx = t.clientX; o.cy = t.clientY; continue;
+    }
     if (o.kind === 'move') {
       joy.s = Math.max(-1, Math.min(1, (t.clientX - o.ox) / 55));
       joy.f = Math.max(-1, Math.min(1, -(t.clientY - o.oy) / 55));
@@ -1315,11 +1352,10 @@ canvas.addEventListener('touchmove', e => {
       const dx = t.clientX - o.cx, dy = t.clientY - o.cy;
       if (gyro.enabled && gyro.seen) gyro.yawOffset -= dx * 0.005;
       else { walker.yaw -= dx * 0.005; walker.pitch = Math.max(-1.3, Math.min(1.3, walker.pitch - dy * 0.005)); }
-    } else if (touchArr().length >= 2) {              // two-finger pinch-zoom
+    } else if (touchArr().length >= 2) {              // 2D two-finger pinch-zoom
       o.cx = t.clientX; o.cy = t.clientY;
       const d = touchDist();
-      if (view2D && oCam) { if (pinchPrev && d) { oCam.zoom = Math.max(0.2, Math.min(12, oCam.zoom * (d / pinchPrev))); oCam.updateProjectionMatrix(); } }
-      else if (pinchPrev && d) { dist = Math.max(4, Math.min(40, dist * (pinchPrev / d))); place(); }
+      if (view2D && oCam && pinchPrev && d) { oCam.zoom = Math.max(0.2, Math.min(12, oCam.zoom * (d / pinchPrev))); oCam.updateProjectionMatrix(); }
       pinchPrev = d; continue;
     } else if (view2D && oCam) {                       // 2D one-finger pan
       const sx = (oCam.right - oCam.left) / oCam.zoom / innerWidth, sz = (oCam.top - oCam.bottom) / oCam.zoom / innerHeight;
@@ -1335,9 +1371,10 @@ canvas.addEventListener('touchmove', e => {
 function endTouch(e) {
   for (const t of e.changedTouches) {
     const o = tState[t.identifier]; if (!o) continue;
-    if (o.moved < 10) {                               // a tap
-      if (editMode && mode === 'orbit') { editClick(o.cx, o.cy); updateEditBar(); }   // extrude wall
-      else if (!view2D) {
+    if (editMode && mode === 'orbit' && !view2D) {    // finish a wall push/pull
+      if (wallDrag) endWallDrag();
+    } else if (o.moved < 10) {                         // a tap
+      if (!view2D) {
         if (mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.2); if (d) toggleDoor(d.key); }
         else if (!doorAtScreen(o.cx, o.cy)) fixtureAtScreen(o.cx, o.cy);
       }
@@ -1345,7 +1382,7 @@ function endTouch(e) {
     if (o.kind === 'move') { joy.f = 0; joy.s = 0; }
     delete tState[t.identifier];
   }
-  pinchPrev = 0;
+  if (touchArr().length < 2) { pinchPrev = 0; pinchC = null; }
 }
 canvas.addEventListener('touchend', endTouch);
 canvas.addEventListener('touchcancel', endTouch);
@@ -1420,7 +1457,7 @@ twoDBtn.onclick = () => {
 };
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
-    if (editMode) { if (editAnchor) { editAnchor = editDir = editSrcWall = editPreview = null; refreshEditViz(); updateEditBar(); } else toggleWallEdit(); return; }
+    if (editMode) { if (wallDrag) { wallDrag = null; refreshEditViz(); } else toggleWallEdit(); return; }
     if (fmenu.style.display !== 'none') { fmenu.style.display = 'none'; return; } if (mode === 'walk') modeBtn.click();
   }
   if (e.code === 'KeyE' && mode === 'walk') { const d = nearestDoor(walker.x, walker.z, 2.0); if (d) toggleDoor(d.key); }
@@ -1822,8 +1859,8 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, grabEnd, firstHit, extrudeEnd,
-  setEdit: v => { editMode = v; editAnchor = editDir = editSrcWall = editPreview = editGrab = null;
+  edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapMove,
+  setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
-  toggleWallEdit, editClick, editHover };
+  toggleWallEdit, editHover, beginWallDrag, updateWallDrag, endWallDrag };
 </script>
