@@ -20,6 +20,17 @@
   .layer.off { opacity:.45; }
   .layer.off .nm { text-decoration:line-through; }
   .step { color:#5f6b85; font:10px ui-monospace,monospace; width:14px; text-align:right; }
+  .layer .chev { color:#7f8aa3; cursor:pointer; padding:0 5px; user-select:none; font-size:11px; }
+  .subwrap { display:none; margin:0 0 3px 0; }
+  .subwrap.open { display:block; }
+  .subrow { display:flex; align-items:center; gap:8px; padding:5px 8px 5px 28px; border-radius:7px;
+    cursor:pointer; user-select:none; font-size:12px; color:#c3ccdd; }
+  .subrow:hover { background:#232b3d; }
+  .subrow .sw { width:11px; height:11px; border-radius:3px; flex:none; box-shadow:inset 0 0 0 1px #0004; }
+  .subrow .nm { flex:1; }
+  .subrow .st { font-size:14px; width:16px; text-align:center; }
+  .subrow.off { opacity:.42; }
+  .subrow.off .nm { text-decoration:line-through; }
   #hud { position:fixed; top:10px; right:10px; z-index:20; display:flex; flex-wrap:wrap; gap:8px;
     justify-content:flex-end; max-width:56vw; }
   .hud-btn { color:#fff; border:none; border-radius:9px; padding:9px 13px; font:14px system-ui; cursor:pointer;
@@ -303,6 +314,21 @@ const STAGE_LAYERS = {
   grade: ['TOPO'], walls: ['WALL'], openings: ['OPENING'], stairs: ['STAIR'], furniture: ['FURN'],
   materials: [],  // a finishing pass (ceilings, lights, trim, casings) applied to walls + grade — no raw layer
 };
+// sub-categories within a layer, each independently toggleable
+const SUBCATS = {
+  openings: [
+    { id: 'door', name: 'doors', color: '#d64550' },
+    { id: 'window', name: 'windows', color: '#5aa9d6' },
+    { id: 'opening', name: 'cased openings', color: '#d69a45' },
+  ],
+  materials: [
+    { id: 'ceil', name: 'ceilings', color: '#f3f0ea' },
+    { id: 'light', name: 'room lights', color: '#ffe8c4' },
+    { id: 'trim', name: 'trim (base + casing)', color: '#f4f1ea' },
+  ],
+};
+const subOn = { openings: { door: true, window: true, opening: true },
+                materials: { ceil: true, light: true, trim: true } };
 
 let ENTS = null, root = null;
 let srcLayerCounts = {}, srcKind = 'dxf';           // layer→entity tally of the loaded plan
@@ -393,14 +419,14 @@ function build() {
       const ox = wx(o.cx), oz = wz(o.cy);
       const t = ((ox - ax) * ux + (oz - az) * uz);
       const perp = Math.hypot(ox - (ax + ux * t), oz - (az + uz * t));
-      o._t = t; return perp < 5 * IN2M && t > 0 && t < len;
+      o._t = t; return perp < 5 * IN2M && t > 0 && t < len && subOn.openings[o.kind];  // sub-toggle
     }).sort((a, b) => a._t - b._t) : [];
 
     const hw = WALL_TH / 2 * IN2M;
     const solid = (x1_, z1_, x2_, z2_, y0, y1) => {           // wall + collider
       root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH, y0, y1, M.wall));
       colliders.push({ ax: x1_, az: z1_, bx: x2_, bz: z2_, hw });
-      if (M.styled) root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH + 1.4, y0, y0 + 4 * IN2M, M.trim)); // baseboard
+      if (M.styled && subOn.materials.trim) root.add(boxBetween(x1_, z1_, x2_, z2_, WALL_TH + 1.4, y0, y0 + 4 * IN2M, M.trim)); // baseboard
     };
     if (!mine.length) { solid(ax, az, bx, bz, base, top); continue; }
     // solid sub-walls between openings, header over each, apron under windows
@@ -418,7 +444,7 @@ function build() {
         const sillY = base + SILL * IN2M;
         root.add(boxBetween(sx, sz, ex, ez, WALL_TH, base, sillY, M.wall));                    // apron (wall under)
         colliders.push({ ax: sx, az: sz, bx: ex, bz: ez, hw });
-        if (M.styled) {                                     // a trimmed, divided-lite window
+        if (M.styled && subOn.materials.trim) {             // a trimmed, divided-lite window
           const FT = 2 * IN2M, ct = WALL_TH + 1, gp = WALL_TH * 0.4, si = s + FT, ei = e - FT;
           const glassLo = sillY + FT, glassHi = headY - FT;
           root.add(boxBetween(sx, sz, ex, ez, ct, sillY, sillY + FT, M.trim));                  // sill board
@@ -453,7 +479,7 @@ function build() {
           open: isOpen, leaf, cx: (sx + ex) / 2, cz: (sz + ez) / 2,
           seg: { ax: sx, az: sz, bx: ex, bz: ez, hw } });
       }
-      if (M.styled && o.kind === 'door') {                  // door casing: floor→head jambs + head
+      if (M.styled && subOn.materials.trim && o.kind === 'door') {  // door casing: floor→head jambs + head
         const jw = 3 * IN2M, ct = WALL_TH + 2, headC = headY + 3 * IN2M;
         root.add(boxBetween(...P(s), ...P(Math.min(e, s + jw)), ct, base, headC, M.trim));
         root.add(boxBetween(...P(Math.max(s, e - jw)), ...P(e), ct, base, headC, M.trim));
@@ -466,11 +492,14 @@ function build() {
 
   // 5a. CEILINGS + room lights (styling layer) — one per grade region
   if (on.materials) for (const r of regions) {
-    const shp = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), -wz(y))));
-    const cg = new THREE.ShapeGeometry(shp); cg.rotateX(-Math.PI / 2);
-    const cm = new THREE.Mesh(cg, M.ceil);
-    cm.position.y = r.elev * IN2M + CEIL * IN2M;
-    cm.receiveShadow = true; root.add(cm);
+    if (subOn.materials.ceil) {
+      const shp = new THREE.Shape(r.pts.map(([x, y]) => new THREE.Vector2(wx(x), -wz(y))));
+      const cg = new THREE.ShapeGeometry(shp); cg.rotateX(-Math.PI / 2);
+      const cm = new THREE.Mesh(cg, M.ceil);
+      cm.position.y = r.elev * IN2M + CEIL * IN2M;
+      cm.receiveShadow = true; root.add(cm);
+    }
+    if (!subOn.materials.light) continue;
     const cxs = r.pts.map(p => p[0]), cys = r.pts.map(p => p[1]);
     const ccx = (Math.min(...cxs) + Math.max(...cxs)) / 2, ccy = (Math.min(...cys) + Math.max(...cys)) / 2;
     const pl = new THREE.PointLight(0xffe8c4, 6, 9, 2);
@@ -563,7 +592,14 @@ function build2D() {
     flatRoot.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, linewidth: w || 1 }))); };
   if (on.grade) { const s = []; for (const e of byLayer(ENTS, 'TOPO')) poly(e.pts, s, true); addLines(s, col.grade); }
   if (on.walls) { const s = []; for (const w of byLayer(ENTS, 'WALL')) if (w.type === 'LINE') seg(s, w.pts[0], w.pts[1]); addLines(s, col.walls); }
-  if (on.openings) { const s = []; for (const e of byLayer(ENTS, 'OPENING')) poly(e.pts, s, false); addLines(s, col.openings); }
+  if (on.openings) {                                 // colour + filter by sub-category
+    const byKind = { door: [], window: [], opening: [] }, kcol = { door: 0xd64550, window: 0x5aa9d6, opening: 0xd69a45 };
+    for (const e of byLayer(ENTS, 'OPENING')) {
+      const kind = e.color === 1 ? 'door' : e.color === 5 ? 'window' : 'opening';
+      if (subOn.openings[kind]) poly(e.pts, byKind[kind], false);
+    }
+    for (const k in byKind) addLines(byKind[k], kcol[k]);
+  }
   if (on.stairs) { const s = []; for (const e of byLayer(ENTS, 'STAIR')) { poly(e.pts, s, true); } addLines(s, col.stairs); }
   if (on.furniture) { const s = []; for (const e of byLayer(ENTS, 'FURN')) if (e.type === 'LWPOLYLINE') poly(e.pts, s, true); addLines(s, col.furniture); }
   window.__V2_READY = true;
@@ -610,11 +646,12 @@ function showLayerInfo(st, x, y) {
 addEventListener('pointerdown', e => { if (!layerInfo.contains(e.target)) layerInfo.style.display = 'none'; }, true);
 const layersEl = document.getElementById('layers');
 for (const st of STAGES) {
+  const subs = SUBCATS[st.id];
   const el = document.createElement('div');
   el.className = 'layer';
   el.innerHTML = `<span class="step">${st.step}</span>
     <span class="sw" style="background:${st.color}"></span>
-    <span class="nm">${st.name}</span><span class="st">●</span>`;
+    <span class="nm">${st.name}</span>` + (subs ? `<span class="chev" title="show sub-types">▸</span>` : '') + `<span class="st">●</span>`;
   let lpTimer = null, lpFired = false;
   const startLP = e => { lpFired = false; lpTimer = setTimeout(() => { lpFired = true;
     const r = el.getBoundingClientRect(); showLayerInfo(st, r.right + 6, r.top); }, 500); };
@@ -629,6 +666,22 @@ for (const st of STAGES) {
     el.querySelector('.st').textContent = on[st.id] ? '●' : '○'; rebuild();
   };
   layersEl.appendChild(el);
+  if (subs) {                                             // expandable sub-category toggles
+    const wrap = document.createElement('div'); wrap.className = 'subwrap';
+    for (const sc of subs) {
+      const sr = document.createElement('div'); sr.className = 'subrow';
+      sr.innerHTML = `<span class="sw" style="background:${sc.color}"></span><span class="nm">${sc.name}</span><span class="st">●</span>`;
+      sr.onclick = ev => { ev.stopPropagation();
+        subOn[st.id][sc.id] = !subOn[st.id][sc.id];
+        sr.classList.toggle('off', !subOn[st.id][sc.id]);
+        sr.querySelector('.st').textContent = subOn[st.id][sc.id] ? '●' : '○'; rebuild(); };
+      wrap.appendChild(sr);
+    }
+    layersEl.appendChild(wrap);
+    const chev = el.querySelector('.chev');
+    chev.onclick = ev => { ev.stopPropagation(); wrap.classList.toggle('open');
+      chev.textContent = wrap.classList.contains('open') ? '▾' : '▸'; };
+  }
 }
 // source-sheet underlay: a separate toggle (only lit when the plan ships a sheet)
 const sheetEl = document.createElement('div');
@@ -1359,5 +1412,5 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   planOpenings: () => planOpenings, solveAlignment, feedbackCfg,
   gyro, joy, camera, mode: () => mode,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
-  srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS };
+  srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS };
 </script>
