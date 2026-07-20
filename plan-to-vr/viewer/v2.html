@@ -328,6 +328,7 @@ function autoCat(name) {                             // assign a DXF layer to a 
   if (/FURN|FIXT|APPL|CASE|CAB/.test(n)) return 'furniture';
   if (/SLAB|FLOOR|TOPO/.test(n)) return 'floor';
   if (/RMNAME|NAME|NOTE|DIM|TEXT|LEAD|DEMO|FILL|HATCH/.test(n)) return 'hidden';
+  if (/BORDER|TITLE|SHEET|FRAME|LOGO|VIEWPORT|MATCHLINE/.test(n)) return 'hidden';   // sheet furniture, not the building
   return 'linework';
 }
 const RAW_COLORS = {
@@ -1154,6 +1155,7 @@ const PLANS = [
   { name: 'Sample House',            src: './sample-house.dxf' },
   { name: 'Reno 1 — raw DXF',        src: './plans/home-l1-raw.dxf', raw: true },
   { name: 'Big Laundry — raw DXF',   src: './plans/home-l1-biglaundry-raw.dxf', raw: true },
+  { name: 'Big Laundry — full walls', src: './plans/home-l1-biglaundry-full.dxf', raw: true },
   { name: 'Reno 1 — processed 3D',   src: './plans/home-l1.dxf',
     spawn: { px: -17.9, py: -258.3, yaw: 0.24 },
     underlay: { file: 'home-l1.png', x0: -780.55, y1: 268.9, in_per_px: 0.48 } },
