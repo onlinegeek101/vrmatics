@@ -3,5 +3,12 @@
  "stairs": [
   {"near": [-105, -257], "down": true, "direction": [-1, 0],
    "_note": "main stairwell: down to floor 1 (attic-up flight shares the well; fast-follow to split them)"}
+ ],
+ "rooms": [
+  {"name": "GUEST ROOM", "kind": "room",
+   "polygon": [[-732, -253], [-196, -253], [-196, 42], [-732, 42]],
+   "walls": true, "thickness": 5.0,
+   "doors": [[-196, -80]], "door_width": 40,
+   "_note": "guest suite over the garage; existing structure the architect left as reference (barely on 1.2WALLS) so the tracer drops it - footprint taken from the F1 garage rectangle, label sits at (-511,-106), 'Existing door' opening on the east wall at y=-80"}
  ]
 }

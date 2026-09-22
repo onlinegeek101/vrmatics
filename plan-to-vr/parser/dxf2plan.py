@@ -61,11 +61,33 @@ def kind_for(name):
     return "room"
 
 
+def is_room_name(t):
+    """This architect writes ROOM names in all-caps (BEDROOM, GUEST ROOM,
+    WASHROOM, WALK-IN, CLOS.). Callouts and dimensions on the same RMNAMES
+    layer are mixed-case or numeric ("Low wall", "New structural beam",
+    "New transom windows", "Existing door", "Soaking tub", '96" vanity',
+    "11'-8" x 15'-9""), so a label is only a room name when it carries a
+    letter, no digit, and no lowercase - a systemic filter, not a blacklist,
+    that also stops fixture/dimension text from ever naming a room."""
+    return (any(c.isalpha() for c in t)
+            and not any(c.isdigit() for c in t)
+            and t == t.upper())
+
+
 def assign_names(plan, labels):
     """Give each detected room the label whose point sits inside it (else
     the nearest label), and a kind derived from that name."""
+    labels = [(n, p) for (n, p) in labels if is_room_name(n)]
     for r in plan.get("rooms", []):
         poly = r["polygon"]
+        # A label OUTSIDE every room only names one if it is genuinely near
+        # it: cap the nearest-fallback at the room's own half-diagonal plus
+        # a margin, so a distant BATHROOM/BEDROOM label can no longer be
+        # borrowed by a far room the tracer failed to seed a label into
+        # (that borrowing was minting duplicate PRIMARY BATHROOM rooms).
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
+        cap = 0.5 * math.hypot(max(xs) - min(xs), max(ys) - min(ys)) + 48.0
         best, bestd = None, 1e18
         for name, (lx, ly) in labels:
             if point_in_poly(lx, ly, poly):
@@ -76,6 +98,8 @@ def assign_names(plan, labels):
             d = math.hypot(cx - lx, cy - ly)
             if d < bestd:
                 best, bestd = name, d
+        if best is not None and bestd != -1 and bestd > cap:
+            best = None                    # nearest label too far - leave unnamed
         if best is not None:
             r["name"] = best.replace("  ", " ")
             k = kind_for(best)
@@ -86,6 +110,93 @@ def assign_names(plan, labels):
             # drop the main floor slab by 4 risers in the viewer.
             r["kind"] = k if k in ("garage", "bath", "laundry",
                                    "kitchen") else "room"
+
+
+def _poly_area(poly):
+    a = 0.0
+    n = len(poly)
+    for i in range(n):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % n]
+        a += x0 * y1 - x1 * y0
+    return abs(a) / 2.0
+
+
+def _edge_with_gaps(a, b, doors, dw):
+    """Split polygon edge a->b into wall segments, cutting a `dw`-wide gap
+    wherever a door point lands on the edge (so a synthesized room reads as
+    enclosed but walk-through, not a sealed box)."""
+    ax, ay = a
+    bx, by = b
+    L = math.hypot(bx - ax, by - ay)
+    if L == 0:
+        return [(a, b)]
+    ux, uy = (bx - ax) / L, (by - ay) / L
+    cuts = []
+    for dx, dy in doors:
+        t = (dx - ax) * ux + (dy - ay) * uy            # along-edge distance
+        perp = abs((dx - ax) * (-uy) + (dy - ay) * ux)  # off-edge distance
+        if -dw <= t <= L + dw and perp <= dw:
+            cuts.append((max(0.0, t - dw / 2), min(L, t + dw / 2)))
+    if not cuts:
+        return [(a, b)]
+    cuts.sort()
+    segs, cur = [], 0.0
+    for s, e in cuts:
+        if s > cur:
+            segs.append((cur, s))
+        cur = max(cur, e)
+    if cur < L:
+        segs.append((cur, L))
+    return [((ax + ux * s, ay + uy * s), (ax + ux * e, ay + uy * e))
+            for s, e in segs]
+
+
+def inject_gt_rooms(plan, gt, wall_height):
+    """Add rooms the DXF cannot yield on its own. The guest suite over the
+    garage is EXISTING structure the architect left as reference linework,
+    not on the wall layer, so the tracer never forms it and the west bay
+    renders as bare slab. A ground-truth room entry gives it a floor, name,
+    kind and (optionally) synthesized perimeter walls with door gaps."""
+    grooms = gt.get("rooms", [])
+    if not grooms:
+        return 0
+    # A GT room fills a gap only when the tracer did not already find it, so
+    # a sidecar shared with a DXF that DOES draw the room's walls (the legacy
+    # DataCAD export) never gets a second, injected copy on top.
+    have = {(r.get("name") or "").strip().upper() for r in plan.get("rooms", [])}
+    grooms = [g for g in grooms
+              if (g.get("name") or "").strip().upper() not in have]
+    if not grooms:
+        return 0
+    added_walls = False
+    for gr in grooms:
+        poly = [[float(p[0]), float(p[1])] for p in gr["polygon"]]
+        plan.setdefault("rooms", []).append({
+            "polygon": poly, "kind": gr.get("kind", "room"),
+            "area": _poly_area(poly), "name": gr.get("name", "")})
+        if gr.get("walls"):
+            th = float(gr.get("thickness", 5.0))
+            doors = [tuple(d) for d in gr.get("doors", [])]
+            dw = float(gr.get("door_width", 40.0))
+            n = len(poly)
+            for i in range(n):
+                for s, e in _edge_with_gaps(tuple(poly[i]),
+                                            tuple(poly[(i + 1) % n]), doors, dw):
+                    plan["walls"].append({
+                        "start": [s[0], s[1]], "end": [e[0], e[1]],
+                        "thickness": th, "height": wall_height})
+                    added_walls = True
+    if added_walls:
+        class _W:
+            pass
+        ad = []
+        for w in plan["walls"]:
+            a = _W(); a.c0 = tuple(w["start"]); a.c1 = tuple(w["end"])
+            a.thickness = w["thickness"]; ad.append(a)
+        plan["footprint"] = X.compute_footprint(
+            ad, plan.setdefault("warnings", []))
+    return len(grooms)
 
 
 def filter_disconnected(plan, snap=6.0, min_component=3, min_keep_len=72.0):
@@ -352,6 +463,9 @@ def main():
     if args.rmnames_layer:
         labels = room_labels(args.input, args.rmnames_layer)
         assign_names(plan, labels)
+        n_inj = inject_gt_rooms(plan, gt, args.wall_height)
+        if n_inj:
+            report["gt_rooms"] = n_inj
         named_garage = [r for r in plan["rooms"] if r.get("kind") == "garage"]
         report["garage_rooms"] = len(named_garage)
         # stairwell markers the architect places: STAIR + the flight tags
