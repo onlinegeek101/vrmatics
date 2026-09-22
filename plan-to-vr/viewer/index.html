@@ -108,7 +108,9 @@
 <div id="hud" hidden>
   <h1>Plan-to-VR</h1>
   <select id="plan-select">
-    <option value="plans/home-l1.json" selected>Home Reno — first floor (DataCAD DXF)</option>
+    <option value="plans/home-rev-l1.json" selected>Home Reno — first floor (2026 revision)</option>
+    <option value="plans/home-rev-l2.json">Home Reno — second floor (2026 revision)</option>
+    <option value="plans/home-l1.json">Home Reno — first floor (DataCAD DXF)</option>
     <option value="plans/home-l1-biglaundry.json">Home Reno — first floor · Big Laundry (variant)</option>
     <option value="plans/home-l2.json">Home Reno — second floor (DataCAD DXF)</option>
     <option value="plan.json">Bishop-Overland — imperial ranch house</option>
@@ -281,7 +283,7 @@ const spawnPose = { x: 0, z: 0, rot: 0 };
 let tourStops = [];    // world-space waypoints for the automated walkthrough
 let planOpeningsWorld = []; // door/window base segments in world XZ
 let planWallsWorld = [];    // wall spans in world XZ, indexed by wall
-let currentPlanKey = 'plans/home-l1.json';  // localStorage namespace for anchors
+let currentPlanKey = 'plans/home-rev-l1.json';  // localStorage namespace for anchors
 let doorStyle = 'raised6';       // interior door style preset (#32)
 let perDoorStyles = {};          // per-door overrides, persisted per plan
 let perFixtureAssets = {};       // per-fixture GLB overrides, persisted per plan (#61 follow-up)
@@ -5216,7 +5218,7 @@ function fetchPlan(url) {
     });
 }
 
-fetchPlan('plans/home-l1.json');
+fetchPlan('plans/home-rev-l1.json');
 document.getElementById('plan-select').addEventListener('change', e => {
   fetchPlan(e.target.value);
 });
