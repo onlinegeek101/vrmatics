@@ -162,6 +162,16 @@ def inject_gt_rooms(plan, gt, wall_height):
     grooms = gt.get("rooms", [])
     if not grooms:
         return 0
+    # A GT room fills a gap only when the tracer did not already find it.
+    # The same sidecar feeds both the current DXF and the legacy DataCAD
+    # export of this house; that older export DID draw the guest-suite
+    # walls, so it traces a real GUEST ROOM and must not get a second,
+    # injected one on top.
+    have = {(r.get("name") or "").strip().upper() for r in plan.get("rooms", [])}
+    grooms = [g for g in grooms
+              if (g.get("name") or "").strip().upper() not in have]
+    if not grooms:
+        return 0
     added_walls = False
     for gr in grooms:
         poly = [[float(p[0]), float(p[1])] for p in gr["polygon"]]
