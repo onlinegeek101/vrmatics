@@ -841,11 +841,13 @@ const OBJ_RULES = [                                   // [name test, how, base",
   [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
   [n => /BENCH/.test(n),                              'box', 0, 18, 'CASEWORK'],
   [n => /COFFEE/.test(n),                             'model', 0, 34, 'FURN'],        // a furniture piece (table), per owner
-  [n => /ISLAND|COUNTER/.test(n),                     'counter', 0, 36, 'CASEWORK'],
+  [n => /ISLAND|COUNTER/.test(n) && !/SINK/.test(n),                     'counter', 0, 36, 'CASEWORK'],
   [n => /REFRIG|FRIDGE/.test(n),                      'model', 0, 70, 'APPLIANCES'],  // full height
   [n => /RANGE/.test(n),                              'model', 0, 36, 'APPLIANCES'],
   [n => /DISHWASH/.test(n),                           'model', 0, 34.5, 'APPLIANCES'],
   [n => /WASHER|DRYER/.test(n),                       'model', 0, 38, 'APPLIANCES'],
+  [n => /ICE MACHINE|ICE MAKER/.test(n),              'model', 0, 36, 'APPLIANCES'],
+  [n => /FIREPLACE/.test(n),                          'fireplace', 0, 0, 'FIREPLACE'],  // hearth + masonry + firebox (GAS = glass front)
   [n => /APPLIANCE|FREEZER/.test(n),                  'box', 0, 34, 'APPLIANCES'],
   [n => /TOILET/.test(n),                             'model', 0, 30, 'FIXTURES'],
   [n => /TUB/.test(n),                                'model', 0, 22, 'FIXTURES'],    // a tub/shower is a tub (+ glass, below)
@@ -942,6 +944,14 @@ function buildRaw() {
   const cabMat = new THREE.MeshStandardMaterial({ color: 0xc9b89a, roughness: 0.75 });
   const topMat = new THREE.MeshStandardMaterial({ color: 0x5b5752, roughness: 0.45 });
   const panMat = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.35 });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xa8a197, roughness: 0.97 });
+  const brickMat = new THREE.MeshStandardMaterial({ color: 0x94543f, roughness: 0.95 });
+  const hearthMat = new THREE.MeshStandardMaterial({ color: 0x6f6b66, roughness: 0.8 });
+  const sootMat = new THREE.MeshStandardMaterial({ color: 0x1d1b1a, roughness: 1 });
+  const smokedGlassMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.55 });
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa33a, transparent: true, opacity: 0.9 });   // unlit: reads as glowing
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 1 });
+  const mantelMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.7 });
   const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.85, roughness: 0.25 });
   const objs = rawObjects(), objLayerSuffixes = new Set();
   for (const o of objs) for (const r of OBJ_RULES) if (r[0](o.name)) { objLayerSuffixes.add(o.prefix + r[4]); break; }
@@ -1183,6 +1193,46 @@ function buildRaw() {
         head.position.set(wx(hx), (lv + headAt) * IN2M, wz(hy)); root.add(arm, tagSrc(head, srcLayer, o.name.toLowerCase() + ' — head'));
       }
       if (how === 'shower') continue;                     // a tub/shower still gets its tub model below
+    }
+    if (how === 'fireplace') {
+      // front = the footprint side away from the nearest wall; from the front: a 12in hearth, then the
+      // masonry mass to the ceiling with a firebox (65% of the width, 30in tall) — glass-fronted gas
+      // insert when the name says GAS, else an open hearth with logs and a wood mantel
+      const sides = [[-R.uy, R.ux, R.dep, R.len], [R.uy, -R.ux, R.dep, R.len], [R.ux, R.uy, R.len, R.dep], [-R.ux, -R.uy, R.len, R.dep]];
+      let back = sides[0], bestD = 1e9;
+      for (const sd of sides) { const m = [R.cx + sd[0] * sd[2] / 2, R.cy + sd[1] * sd[2] / 2];
+        for (const w of merged) { if (w.single) continue; const S = segInfo(w.a, w.b), t = Math.max(0, Math.min(S.len, alongOf(S, m)));
+          const dd = Math.hypot(m[0] - (S.a[0] + S.ux * t), m[1] - (S.a[1] + S.uy * t)) - w.thick / 2; if (dd < bestD) { bestD = dd; back = sd; } } }
+      const f = [-back[0], -back[1]], a = [-f[1], f[0]], dep = back[2], wid = back[3];
+      const C = [R.cx + f[0] * dep / 2, R.cy + f[1] * dep / 2];              // centre of the front edge
+      const P = (sd, t) => [C[0] - f[0] * sd + a[0] * t, C[1] - f[1] * sd + a[1] * t];
+      const gas = /GAS|GLASS/.test(o.name), H = Math.min(12, dep * 0.3), ow = wid * 0.65, oh = 30, fb = Math.min(20, dep - H - 6);
+      const stone = srcMat(srcLayer, gas ? stoneMat : brickMat), soot = srcMat(srcLayer, sootMat);
+      const blk = (s0, s1, t0, t1, y0, y1, m, what) => { const p0 = P(s0, (t0 + t1) / 2), p1 = P(s1, (t0 + t1) / 2);
+        const b = boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), t1 - t0, (lv + y0) * IN2M, (lv + y1) * IN2M, m);
+        b.castShadow = b.receiveShadow = true; root.add(tagSrc(b, srcLayer, `${o.name.toLowerCase()} — ${what}`)); return b; };
+      const top = TOP - lv;
+      blk(0, H, -wid / 2, wid / 2, 0, 2, srcMat(srcLayer, hearthMat), 'hearth');
+      blk(H, dep, -wid / 2, -ow / 2, 0, top, stone, 'surround');
+      blk(H, dep, ow / 2, wid / 2, 0, top, stone, 'surround');
+      blk(H, dep, -ow / 2, ow / 2, 2 + oh, top, stone, 'surround');
+      blk(H + fb, dep, -ow / 2, ow / 2, 0, 2 + oh, soot, 'firebox back');
+      blk(H, H + fb, -ow / 2, ow / 2, 0, 2, soot, 'firebox floor');
+      const flame = (s, t, w, h) => { const p0 = P(s, t - w / 2), p1 = P(s, t + w / 2);
+        root.add(boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), 1.2, (lv + 3) * IN2M, (lv + 3 + h) * IN2M, flameMat)); };
+      if (gas) {
+        blk(H + 0.3, H + 0.7, -ow / 2, ow / 2, 2, 2 + oh, srcMat(srcLayer, smokedGlassMat), 'glass front (gas)');
+        for (const [t, h] of [[-ow * 0.25, 5], [0, 7], [ow * 0.25, 5]]) flame(H + fb * 0.55, t, ow * 0.18, h);
+      } else {
+        for (const t of [-ow * 0.15, ow * 0.15]) { const p0 = P(H + fb * 0.35, t), p1 = P(H + fb * 0.75, t);
+          root.add(boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), 4, (lv + 2) * IN2M, (lv + 6) * IN2M, logMat)); }
+        flame(H + fb * 0.55, 0, ow * 0.3, 8);
+        blk(H - 4, H, -wid / 2 - 2, wid / 2 + 2, 54, 57, srcMat(srcLayer, mantelMat), 'mantel');
+      }
+      const hx = R.len / 2, hz = R.dep / 2, cor = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) =>
+        [wx(R.cx + R.ux * u - R.uy * v), wz(R.cy + R.uy * u + R.ux * v)]);
+      for (let i = 0; i < 4; i++) { const p0 = cor[i], p1 = cor[(i + 1) % 4]; fixtureColliders.push({ ax: p0[0], az: p0[1], bx: p1[0], bz: p1[1], hw: 0.03 }); }
+      continue;
     }
     if (how === 'halfwall') {                            // stands on the lower floor beside it, tops out 42in over the higher
       const lvs = [lv];
