@@ -836,7 +836,7 @@ function srcMat(layer, normal, colorOverride) {
 function tagSrc(m, layer, what) { m.userData.src = { layer, what }; return m; }
 // labelled objects (1.xOBJNAMES: a closed footprint + a name) → what to build
 const OBJ_RULES = [                                   // [name test, how, base", top" (model: height"), source-layer suffix]
-  [n => /LOW WALL|HALF WALL|PONY WALL|KNEE WALL/.test(n), 'box', 0, 42, 'CASEWORK'],
+  [n => /LOW WALL|HALF WALL|PONY WALL/.test(n),       'halfwall', 0, 42, 'CASEWORK'],   // 42in above the higher floor beside it
   [n => /UPPER CAB/.test(n),                          'box', 54, 84, 'CASEWORK-UPPER'],
   [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
   [n => /BENCH/.test(n),                              'box', 0, 18, 'CASEWORK'],
@@ -1183,6 +1183,20 @@ function buildRaw() {
         head.position.set(wx(hx), (lv + headAt) * IN2M, wz(hy)); root.add(arm, tagSrc(head, srcLayer, o.name.toLowerCase() + ' — head'));
       }
       if (how === 'shower') continue;                     // a tub/shower still gets its tub model below
+    }
+    if (how === 'halfwall') {                            // stands on the lower floor beside it, tops out 42in over the higher
+      const lvs = [lv];
+      for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;
+        for (const sg of [1, -1]) { const qx = mx + nx * sg * 3, qy = my + ny * sg * 3; if (!pointIn(o.pts, qx, qy)) lvs.push(levelAt(qx, qy, 'open')); } }
+      const lo = Math.min(...lvs), hi = Math.max(...lvs) + y1;
+      const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
+      const m = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: (hi - lo) * IN2M, bevelEnabled: false }), srcMat(srcLayer, wallMat));
+      m.rotation.x = -Math.PI / 2; m.position.y = lo * IN2M; m.castShadow = m.receiveShadow = true;
+      root.add(tagSrc(m, srcLayer, `${o.name.toLowerCase()} (${lo}" → ${hi}")`));
+      for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length];
+        fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
+      continue;
     }
     if (how === 'box' || how === 'counter') {             // extrude the footprint (handles L-shaped runs)
       const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
