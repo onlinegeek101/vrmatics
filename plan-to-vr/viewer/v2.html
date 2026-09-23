@@ -886,6 +886,26 @@ const OBJ_RULES = [                                   // [name test, how, base",
   [n => /VANITY/.test(n),                             'model', 0, 34, 'FIXTURES'],
   [n => /STOOL|CHAIR/.test(n),                        'model', 0, 36, 'FURN'],
 ];
+function buildToilet(grp, w, d) {                     // a real-size close-coupled toilet; model +Z = front, back at -d/2
+  const I = IN2M, z0 = -d / 2 * I;
+  const china = new THREE.MeshStandardMaterial({ color: 0xf6f6f3, roughness: 0.16, metalness: 0.02 });
+  const seatM = new THREE.MeshStandardMaterial({ color: 0xfbfbf8, roughness: 0.35 });
+  const water = new THREE.MeshStandardMaterial({ color: 0x7c93a3, roughness: 0.05, metalness: 0.2 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.9, roughness: 0.2 });
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x * I, y * I, z0 + z * I); m.castShadow = m.receiveShadow = true; grp.add(m); return m; };
+  add(new THREE.BoxGeometry(20 * I, 14.5 * I, 8 * I), china, 0, 15 + 7.25, 4);                       // tank
+  add(new THREE.BoxGeometry(21 * I, 1 * I, 8.8 * I), china, 0, 30, 4);                               // tank lid
+  add(new THREE.BoxGeometry(3 * I, 0.8 * I, 0.8 * I), chrome, -6.5, 26.5, 8.4);                      // flush lever
+  const bowl = add(new THREE.CylinderGeometry(1, 0.66, 15 * I, 32), china, 0, 7.5, 8 + 9.2);         // bowl on a tapered pedestal
+  bowl.scale.set(7 * I, 1, 9.5 * I);
+  const ring = new THREE.Shape(); ring.absellipse(0, 0, 7.3 * I, 9.8 * I, 0, Math.PI * 2);
+  const hole = new THREE.Path(); hole.absellipse(0, 0.6 * I, 4.6 * I, 6.3 * I, 0, Math.PI * 2); ring.holes.push(hole);
+  const seat = add(new THREE.ExtrudeGeometry(ring, { depth: 1 * I, bevelEnabled: false, curveSegments: 32 }), seatM, 0, 15, 8 + 9.2);
+  seat.rotation.x = -Math.PI / 2;                                                                    // seat ring 15-16in
+  const wtr = add(new THREE.CircleGeometry(1, 32), water, 0, 13.5, 8 + 9.2 + 0.6);
+  wtr.rotation.x = -Math.PI / 2; wtr.scale.set(4.4 * I, 6.1 * I, 1);
+  return grp;
+}
 function loadModelFit(grp, id, w, d, h) {            // stretch a GLB to exactly fill its footprint at a set height
   const stand = () => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.8 }));
     m.position.y = h / 2; m.castShadow = true; grp.add(m); };
@@ -1130,6 +1150,7 @@ function buildRaw() {
     const c = classifyOpening(o, ev); if (!c) continue;
     if (c.kind === 'opening' && isCorner(o.a, o) && isCorner(o.b, o)) continue;
     rawOps.push({ ...o, kind: c.kind, leaves: c.leaves, layer: c.layer });
+    planOpenings.push({ key: `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`, planA: [wx(o.a[0]), wz(o.a[1])], planB: [wx(o.b[0]), wz(o.b[1])], kind: c.kind });   // VR room-alignment targets
     const ax = wx(o.a[0]), az = wz(o.a[1]), bx = wx(o.b[0]), bz = wz(o.b[1]);
     const sv = sidesOf(o.a, o.ux, o.uy, o.width, o.thick, 'open'), lvHi = Math.max(...sv), lvLo = Math.min(...sv);
     const lvBot = Math.min(...sidesOf(o.a, o.ux, o.uy, o.width, o.thick, 'wall'));   // e.g. a stair well below the sill
@@ -1326,6 +1347,7 @@ function buildRaw() {
     const ov = perFixtureAssets[key], id = ov === '__none__' ? null : ov ? ov : asset ? asset.id : null;
     if (srcColors) { const bx = new THREE.Mesh(new THREE.BoxGeometry(mw * IN2M, y1 * IN2M, md * IN2M), srcMat(srcLayer, cabMat));
       bx.position.y = y1 * IN2M / 2; grp.add(bx); }
+    else if (how === 'model' && /TOILET/.test(o.name) && !ov) buildToilet(grp, mw, md);   // built at real size, not a stretched mesh
     else loadModelFit(grp, id, mw * IN2M, md * IN2M, y1 * IN2M);
     const hx = R.len / 2, hz = R.dep / 2, cor = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) =>
       [wx(R.cx + R.ux * u - R.uy * v), wz(R.cy + R.uy * u + R.ux * v)]);
@@ -2238,7 +2260,7 @@ function rotatePlayerVR(head, angle) {                 // snap-turn about the he
   dolly.rotation.y += angle;
 }
 // ---- multi-anchor calibration: trace real door/window edges to align the model to your room ----
-const calib = { mode: false, stage: 'off', target: null, bPrev: false, anchors: [], tracing: false, samples: [] };
+const calib = { mode: false, stage: 'off', target: null, bPrev: false, anchors: [], tracing: false, samples: [], locked: false, floorY: 0, yPrev: false };
 function anchorKeyLS() { return 'plan2vr-v2-anchors:' + DXF; }
 function saveAnchors() { try { localStorage.setItem(anchorKeyLS(), JSON.stringify(calib.anchors)); } catch (e) {} }
 function loadAnchors() { try { calib.anchors = JSON.parse(localStorage.getItem(anchorKeyLS())) || []; } catch (e) { calib.anchors = []; } }
@@ -2288,7 +2310,25 @@ function solveAlignment(anchors) {                      // rigid real→plan (Ka
 }
 function applyAlignment() {
   const T = solveAlignment(calib.anchors); if (!T) return null;
-  dolly.position.set(T.tx, 0, T.tz); dolly.rotation.set(0, T.theta, 0); return T;
+  const fl = calib.anchors.map(a => a.floorY).filter(v => typeof v === 'number');
+  calib.floorY = fl.length ? fl[fl.length - 1] : 0;
+  dolly.position.set(T.tx, calib.floorY, T.tz); dolly.rotation.set(0, T.theta, 0); calib.locked = true;
+  const off = Math.abs(T.scale - 1) * 100;
+  vrToast(`aligned to ${calib.anchors.length} edge${calib.anchors.length > 1 ? 's' : ''} · fit ±${T.residIn.toFixed(1)}in · room/plan scale ${T.scale.toFixed(3)}` +
+    (calib.anchors.length < 2 ? ' · trace a 2nd edge far from this one' : off > 1 ? ' · SCALE OFF ' + off.toFixed(1) + '% — check the plan units' : '') + ' · 1:1 lock ON (left Y)');
+  return T;
+}
+let vrToastMesh = null, vrToastT = null;
+function vrToast(text) {                               // a message card floating in front of your eyes for 6 s
+  const c = document.createElement('canvas'); c.width = 1400; c.height = 160; const x = c.getContext('2d');
+  x.fillStyle = 'rgba(16,22,34,0.88)'; x.fillRect(0, 0, c.width, c.height); x.strokeStyle = '#53d0ff'; x.lineWidth = 5; x.strokeRect(3, 3, c.width - 6, c.height - 6);
+  x.fillStyle = '#e8eefb'; x.font = 'bold 38px system-ui'; x.textBaseline = 'middle';
+  const words = text.split(' '), lines = ['']; for (const w of words) { const t = (lines[lines.length - 1] + ' ' + w).trim(); if (x.measureText(t).width > c.width - 60) lines.push(w); else lines[lines.length - 1] = t; }
+  lines.slice(0, 3).forEach((l, i, a) => x.fillText(l, 30, c.height / 2 + (i - (a.length - 1) / 2) * 44));
+  if (vrToastMesh) camera.remove(vrToastMesh);
+  vrToastMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 0.12), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), toneMapped: false, transparent: true, depthTest: false }));
+  vrToastMesh.position.set(0, -0.22, -1.1); vrToastMesh.renderOrder = 999; camera.add(vrToastMesh);
+  clearTimeout(vrToastT); vrToastT = setTimeout(() => { if (vrToastMesh) camera.remove(vrToastMesh); vrToastMesh = null; }, 6000);
 }
 function finishTrace() {
   calib.tracing = false; const s = calib.samples; calib.samples = [];
@@ -2296,7 +2336,7 @@ function finishTrace() {
   const seg = fitTraceSegment(s); if (seg.len < 0.25) return;
   const op = calib.target || nearestOpening((seg.a[0] + seg.b[0]) / 2, (seg.a[1] + seg.b[1]) / 2, 2.5);
   if (!op) return;
-  const an = { key: op.key, planA: op.planA, planB: op.planB, realA: seg.a, realB: seg.b, headReal: [camera.position.x, camera.position.z] };
+  const an = { key: op.key, planA: op.planA, planB: op.planB, realA: seg.a, realB: seg.b, headReal: [camera.position.x, camera.position.z], floorY: dolly.position.y };
   calib.anchors = calib.anchors.filter(x => x.key !== an.key); calib.anchors.push(an);
   saveAnchors(); applyAlignment();
   calib.stage = 'off'; calib.mode = false;
@@ -2332,8 +2372,16 @@ function vrTick(dt) {
     const sx = ax.length >= 4 ? ax[2] : ax[0], sy = ax.length >= 4 ? ax[3] : ax[1];
     const ctrl = src.handedness === 'left' ? ctrlL : ctrlR;
     if (src.handedness === 'right') handleCalib(gp, ctrl);   // right B: room calibration
+    if (src.handedness === 'left') {                   // left Y: toggle the 1:1 lock (only once aligned)
+      const yNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
+      if (yNow && !calib.yPrev && calib.anchors.length) {
+        if (calib.locked) { calib.locked = false; vrToast('1:1 lock OFF — joystick walking on; the model no longer sits on your real room'); }
+        else applyAlignment();
+      }
+      calib.yPrev = yNow;
+    }
     if (calib.mode) continue;                          // calibration pauses locomotion + normal actions
-    if (src.handedness === 'left') {                   // smooth head-relative walking
+    if (src.handedness === 'left' && !calib.locked) {  // smooth head-relative walking (off while locked 1:1)
       const dx = Math.abs(sx) > 0.15 ? sx : 0, dy = Math.abs(sy) > 0.15 ? sy : 0;
       if (dx || dy) {
         camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
@@ -2343,7 +2391,7 @@ function vrTick(dt) {
                           _head.z + _fwd.z * -dy * sp + _side.z * dx * sp);
         dolly.position.x += c[0] - _head.x; dolly.position.z += c[1] - _head.z;
       }
-    } else if (src.handedness === 'right') {           // snap turn
+    } else if (src.handedness === 'right' && !calib.locked) {   // snap turn (off while locked 1:1)
       if (Math.abs(sx) > 0.7 && vrSnapReady) { rotatePlayerVR(_head, sx > 0 ? -Math.PI / 4 : Math.PI / 4); vrSnapReady = false; }
       else if (Math.abs(sx) < 0.3) vrSnapReady = true;
     }
@@ -2384,7 +2432,7 @@ function vrTick(dt) {
     }
   }
   camera.getWorldPosition(_head);                      // follow the floor / step up + down
-  dolly.position.y = groundAt(_head.x, _head.z, dolly.position.y + 0.6);
+  dolly.position.y = calib.locked ? calib.floorY : groundAt(_head.x, _head.z, dolly.position.y + 0.6);   // locked: real stairs move you
 }
 renderer.xr.addEventListener('sessionstart', () => {
   dolly.add(camera); camera.position.set(0, 0, 0);
@@ -2392,7 +2440,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   dolly.rotation.set(0, walker.yaw, 0);
   document.getElementById('panel').style.display = 'none';
   setVrRayEdit(editMode && rawMode);                   // reflect any edit mode armed before entering VR
-  loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment
+  calib.locked = false; loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment (re-locks 1:1)
 });
 renderer.xr.addEventListener('sessionend', () => {
   scene.add(camera); document.getElementById('panel').style.display = '';
