@@ -803,6 +803,29 @@ function classifyOpening(o, ev) {
 // of the wall it meets. Extend each end that reaches a crossing wall to that wall's
 // centreline + half its thickness: corners close, T-junctions tuck in. Ends only grow,
 // and only toward CROSSING walls — door gaps (between collinear pieces) are untouched.
+// a door jamb / wall-end box drawn a little wider than its wall pairs up as its own short wall,
+// set off the wall's line by an inch or two: a visible bump. A stub (<= 8in) at the END of a longer
+// parallel wall, sticking out <= 5in past that wall's faces, is folded in: the wall runs through to
+// the stub's far end and the stub goes. (Corner blocks stick out further and stay.)
+function absorbJambs(walls) {
+  const drop = new Set();
+  for (let i = 0; i < walls.length; i++) {
+    const S = walls[i], si = segInfo(S.a, S.b); if (S.single || si.len > 8) continue;
+    for (let j = 0; j < walls.length; j++) {
+      const W = walls[j]; if (j === i || drop.has(j) || W.single) continue;
+      const wi = segInfo(W.a, W.b); if (wi.len < 12 || Math.abs(si.ux * wi.uy - si.uy * wi.ux) > 0.035) continue;
+      const m = [(S.a[0] + S.b[0]) / 2, (S.a[1] + S.b[1]) / 2], off = Math.abs(perpOff(wi, m));
+      if (off > W.thick / 2 + 1 || off + S.thick / 2 - W.thick / 2 > 5) continue;
+      const ta = alongOf(wi, S.a), tb = alongOf(wi, S.b), t0 = Math.min(ta, tb), t1 = Math.max(ta, tb);
+      const atEnd = (t1 >= wi.len - 1 && t0 <= wi.len + 1) || (t0 <= 1 && t1 >= -1); if (!atEnd) continue;
+      if (t1 > wi.len) W.b = [W.a[0] + wi.ux * t1, W.a[1] + wi.uy * t1];
+      if (t0 < 0) W.a = [W.a[0] + wi.ux * t0, W.a[1] + wi.uy * t0];
+      drop.add(i); break;
+    }
+  }
+  for (let k = walls.length - 1; k >= 0; k--) if (drop.has(k)) walls.splice(k, 1);
+  return walls;
+}
 function extendEnds(walls) {
   const W = walls.map(w => ({ w, s: segInfo(w.a, w.b) }));
   for (const A of W) {
@@ -994,7 +1017,7 @@ function buildRaw() {
     else if (cat === 'floor') continue;                // outlines become level slabs below
     else if (!(objs.length && objLayerSuffixes.has(L.name))) flat.push({ color: L.color, segs });   // objects rendered in 3D: skip their flat outline
   }
-  const merged = pruneSingles(mergeDoubleWalls(dedupeFaces(wallSegs)));
+  const merged = absorbJambs(pruneSingles(mergeDoubleWalls(dedupeFaces(wallSegs))));
   applyMoveEdits(merged);                             // relocate walls the user pushed/pulled
   extendEnds(merged);                                 // close L-corners, tuck T-junctions in
   mergedWalls = merged;                               // live wall set (targets for the editor + export)
@@ -1041,7 +1064,8 @@ function buildRaw() {
   // each level: a solid block up from the level it sits in (house on grade, landing in the
   // garage), or a thin slab when it sits lower; lower levels inside it are cut out as holes
   for (const l of slabs) {
-    const par = parentOf(l), below = par ? par.elev : 0, h = l.elev > below ? l.elev - below : 0.5;
+    const par = parentOf(l), below = par ? par.elev : 0;
+    const h = l.elev <= below ? 0.5 : l.area < 20000 && l.elev - below > 48 ? 10 : l.elev - below;   // high winder/landing: a 10in plate
     const shape = toShape(l.pts);
     for (const c of slabs) if (c !== l && c.elev < l.elev && parentOf(c) === l) shape.holes.push(toShape(c.pts, THREE.Path));
     for (const c of stepSets) if (c.lo < l.elev && parentOf(c) === l) shape.holes.push(toShape(c.pts, THREE.Path));   // stair well
@@ -1056,12 +1080,24 @@ function buildRaw() {
     l.built = true;
     const H = [R.cx - r[0] * run / 2, R.cy - r[1] * run / 2], dep = run / treads;
     const base = Math.min(lo, slabAt(R.cx, R.cy));     // solid down to the floor under the flight (an upper run doesn't float)
-    for (let k = 0; k < treads; k++) {
-      const p0 = [H[0] + r[0] * dep * k, H[1] + r[1] * dep * k], p1 = [H[0] + r[0] * dep * (k + 1), H[1] + r[1] * dep * (k + 1)];
-      const top = hi - (k + 1) * (hi - lo) / N;
-      const m = boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), width, base * IN2M, top * IN2M, srcMat(l.layer, floorMat));
-      m.castShadow = m.receiveShadow = true; root.add(tagSrc(m, l.layer, `step ${k + 1}/${treads} (${N} risers, ${hi}" → ${lo}")`)); floors.push(m);
-    }
+    // one solid in the stair's side profile, extruded across its width: the treads/risers on top and a
+    // stringer underneath parallel to the pitch (10in deep), clamped to the floor below — so a flight
+    // that starts from the floor is solid near its foot, and an upper run is open underneath (walk under it)
+    const rise = (hi - lo) / N, D = 10, prof = [];
+    for (let k = 0; k < treads; k++) { const t = hi - (k + 1) * rise; prof.push([dep * k, t], [dep * (k + 1), t]); }
+    prof.push([run, lo]);
+    const open = hi - base > 48;                        // short flights (porch, garage steps) stay solid
+    const under = s2 => open ? Math.max(base, (hi - rise - D) + (lo - (hi - rise - D)) * s2 / run) : base;   // stringer, high → low
+    const bot = [[run, Math.max(base, lo)]];
+    for (let q = 15; q >= 0; q--) bot.push([run * q / 16, under(run * q / 16)]);
+    const pts2 = [[0, hi - rise], ...prof.slice(1), ...bot];
+    const shape = new THREE.Shape(pts2.map(([x, y]) => new THREE.Vector2(x * IN2M, y * IN2M)));
+    const g = new THREE.ExtrudeGeometry(shape, { depth: width * IN2M, bevelEnabled: false });
+    const wv = [r[1], -r[0]], O = [H[0] - wv[0] * width / 2, H[1] - wv[1] * width / 2];     // plan: run r, width wv
+    const X = new THREE.Vector3(r[0], 0, -r[1]), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(r[1], 0, r[0]);
+    g.applyMatrix4(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(wx(O[0]), 0, wz(O[1])));
+    const m = new THREE.Mesh(g, srcMat(l.layer, floorMat)); m.castShadow = m.receiveShadow = true;
+    root.add(tagSrc(m, l.layer, `stair: ${treads} treads, ${N} risers, ${hi}" → ${lo}"`)); floors.push(m);
   }
   // the levels either side of a wall / opening (sampled just off each face)
   const sidesOf = (a, ux, uy, len, th, mode) => { const out = [], off = th / 2 + 3, ins = Math.min(len / 2, 8), n = Math.max(1, Math.ceil((len - 2 * ins) / 24));
@@ -1779,10 +1815,10 @@ addEventListener('mousemove', e => {
   walker.pitch = Math.max(-1.3, Math.min(1.3, walker.pitch - e.movementY * 0.0025));
 });
 const down = new THREE.Raycaster();
-function groundAt(x, z) {
-  down.set(new THREE.Vector3(x, 8, z), new THREE.Vector3(0, -1, 0));
+function groundAt(x, z, fromY = 8) {
+  down.set(new THREE.Vector3(x, fromY, z), new THREE.Vector3(0, -1, 0));
   const hit = down.intersectObjects(floors, false)[0];
-  return hit ? hit.point.y : 0;
+  return hit ? hit.point.y : fromY < 8 ? fromY - 0.6 : 0;
 }
 function collide(x, z) {                     // push the walker out of wall segments
   const R = 0.22;
@@ -1887,7 +1923,7 @@ function walkTick(dt) {
   let mx = mf * fx + ms * rx, mz = mf * fz + ms * rz;
   const ml = Math.hypot(mx, mz);
   if (ml > 0) { const c = collide(walker.x + mx / ml * sp, walker.z + mz / ml * sp); walker.x = c[0]; walker.z = c[1]; }
-  const g = groundAt(walker.x, walker.z);
+  const g = groundAt(walker.x, walker.z, walker.y - 1.62 + 0.6);
   walker.y += (g + 1.62 - walker.y) * Math.min(1, dt * 12);         // ease onto floor / steps
   camera.position.set(walker.x, walker.y, walker.z);
   if (!useGyro) {
@@ -2348,7 +2384,7 @@ function vrTick(dt) {
     }
   }
   camera.getWorldPosition(_head);                      // follow the floor / step up + down
-  dolly.position.y = groundAt(_head.x, _head.z);
+  dolly.position.y = groundAt(_head.x, _head.z, dolly.position.y + 0.6);
 }
 renderer.xr.addEventListener('sessionstart', () => {
   dolly.add(camera); camera.position.set(0, 0, 0);
