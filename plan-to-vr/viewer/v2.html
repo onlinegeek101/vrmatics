@@ -334,6 +334,7 @@ function autoCat(name) {                             // assign a DXF layer to a 
   if (/STAIR|STEP|TREAD|RAIL/.test(n)) return 'stairs';
   if (/COLLINE|GRIDLINE|CENTERLINE|CENTRELINE/.test(n)) return 'hidden';   // reference grid, not walls
   if (/COLUMN/.test(n)) return 'hidden';                               // structural grid reference, not rendered
+  if (/FLUSH/.test(n)) return 'hidden';                                 // flush beam: inside the ceiling, nothing to draw
   if (/BEAM|HEADER|LINTEL/.test(n)) return 'beam';                    // overhead: a header across an open span
   if (/STRUCT|POST|PIER/.test(n)) return 'structure';
   if (/FURN|FIXT|APPL|CASE|CAB/.test(n)) return 'furniture';
@@ -1011,7 +1012,7 @@ function buildRaw() {
   // level at a point; mode 'wall' reads a flight as its bottom (walls go down a stair well), 'open' as its top
   const levelAt = (x, y, mode) => { if (mode) for (const l of stepSets) if (pointIn(l.pts, x, y)) return mode === 'wall' ? l.lo : l.hi; return slabAt(x, y); };
   const parentOf = l => slabs.find(p => p !== l && p.area > l.area && pointIn(p.pts, l.c[0], l.c[1]));
-  const TOP = (slabs.length ? Math.max(0, ...slabs.map(l => l.elev)) : 0) + WALL_H;   // one ceiling plate over every level
+  const TOP = Math.max(0, ...slabs.filter(l => l.area >= 20000).map(l => l.elev)) + WALL_H;   // one ceiling plate over the floors (not landings / winders)
   // pushed back in depth: where a floor block's edge is flush with a wall face the wall wins (no flicker)
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
   // ground under everything (grade 0; lawn-coloured once real floors are outlined)
@@ -1047,10 +1048,11 @@ function buildRaw() {
     const N = l.steps || Math.max(1, Math.round((hi - lo) / 7.5)), treads = N - 1; if (treads < 1) continue;
     l.built = true;
     const H = [R.cx - r[0] * run / 2, R.cy - r[1] * run / 2], dep = run / treads;
+    const base = Math.min(lo, slabAt(R.cx, R.cy));     // solid down to the floor under the flight (an upper run doesn't float)
     for (let k = 0; k < treads; k++) {
       const p0 = [H[0] + r[0] * dep * k, H[1] + r[1] * dep * k], p1 = [H[0] + r[0] * dep * (k + 1), H[1] + r[1] * dep * (k + 1)];
       const top = hi - (k + 1) * (hi - lo) / N;
-      const m = boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), width, lo * IN2M, top * IN2M, srcMat(l.layer, floorMat));
+      const m = boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), width, base * IN2M, top * IN2M, srcMat(l.layer, floorMat));
       m.castShadow = m.receiveShadow = true; root.add(tagSrc(m, l.layer, `step ${k + 1}/${treads} (${N} risers, ${hi}" → ${lo}")`)); floors.push(m);
     }
   }
