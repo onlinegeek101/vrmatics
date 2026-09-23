@@ -565,7 +565,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-103B
+104E
   9
 $SURFTAB1
  70
@@ -1785,7 +1785,7 @@ LAYER
 100
 AcDbSymbolTable
  70
-    26
+    27
   0
 LAYER
   5
@@ -2452,6 +2452,32 @@ AcDbLayerTableRecord
      0
  62
      2
+  6
+Continuous
+370
+    -3
+390
+1D
+347
+FD8
+348
+0
+  0
+LAYER
+  5
+FF3
+330
+2
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+1.1FLOOR-LEVELS
+ 70
+     0
+ 62
+    30
   6
 Continuous
 370
@@ -138841,7 +138867,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FF3
+FF4
 330
 A
 100
@@ -138875,7 +138901,7 @@ AcDbPolyline
   0
 TEXT
   5
-FF4
+FF5
 330
 A
 100
@@ -138913,7 +138939,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FF5
+FF6
 330
 A
 100
@@ -138947,7 +138973,7 @@ AcDbPolyline
   0
 TEXT
   5
-FF6
+FF7
 330
 A
 100
@@ -138985,7 +139011,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FF7
+FF8
 330
 A
 100
@@ -139019,7 +139045,7 @@ AcDbPolyline
   0
 TEXT
   5
-FF8
+FF9
 330
 A
 100
@@ -139057,7 +139083,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FF9
+FFA
 330
 A
 100
@@ -139091,7 +139117,7 @@ AcDbPolyline
   0
 TEXT
   5
-FFA
+FFB
 330
 A
 100
@@ -139129,7 +139155,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FFB
+FFC
 330
 A
 100
@@ -139163,7 +139189,7 @@ AcDbPolyline
   0
 TEXT
   5
-FFC
+FFD
 330
 A
 100
@@ -139201,7 +139227,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FFD
+FFE
 330
 A
 100
@@ -139235,7 +139261,7 @@ AcDbPolyline
   0
 TEXT
   5
-FFE
+FFF
 330
 A
 100
@@ -139273,7 +139299,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-FFF
+1000
 330
 A
 100
@@ -139307,7 +139333,7 @@ AcDbPolyline
   0
 TEXT
   5
-1000
+1001
 330
 A
 100
@@ -139345,7 +139371,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1001
+1002
 330
 A
 100
@@ -139379,7 +139405,7 @@ AcDbPolyline
   0
 TEXT
   5
-1002
+1003
 330
 A
 100
@@ -139417,7 +139443,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1003
+1004
 330
 A
 100
@@ -139451,7 +139477,7 @@ AcDbPolyline
   0
 TEXT
   5
-1004
+1005
 330
 A
 100
@@ -139489,7 +139515,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1005
+1006
 330
 A
 100
@@ -139523,7 +139549,7 @@ AcDbPolyline
   0
 TEXT
   5
-1006
+1007
 330
 A
 100
@@ -139561,7 +139587,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1007
+1008
 330
 A
 100
@@ -139595,7 +139621,7 @@ AcDbPolyline
   0
 TEXT
   5
-1008
+1009
 330
 A
 100
@@ -139633,7 +139659,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1009
+100A
 330
 A
 100
@@ -139667,7 +139693,7 @@ AcDbPolyline
   0
 TEXT
   5
-100A
+100B
 330
 A
 100
@@ -139705,7 +139731,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-100B
+100C
 330
 A
 100
@@ -139739,7 +139765,7 @@ AcDbPolyline
   0
 TEXT
   5
-100C
+100D
 330
 A
 100
@@ -139777,7 +139803,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-100D
+100E
 330
 A
 100
@@ -139811,7 +139837,7 @@ AcDbPolyline
   0
 TEXT
   5
-100E
+100F
 330
 A
 100
@@ -139849,7 +139875,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-100F
+1010
 330
 A
 100
@@ -139883,7 +139909,7 @@ AcDbPolyline
   0
 TEXT
   5
-1010
+1011
 330
 A
 100
@@ -139921,7 +139947,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1011
+1012
 330
 A
 100
@@ -139955,7 +139981,7 @@ AcDbPolyline
   0
 TEXT
   5
-1012
+1013
 330
 A
 100
@@ -139993,7 +140019,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1013
+1014
 330
 A
 100
@@ -140027,7 +140053,7 @@ AcDbPolyline
   0
 TEXT
   5
-1014
+1015
 330
 A
 100
@@ -140065,7 +140091,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1015
+1016
 330
 A
 100
@@ -140099,7 +140125,7 @@ AcDbPolyline
   0
 TEXT
   5
-1016
+1017
 330
 A
 100
@@ -140137,7 +140163,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1017
+1018
 330
 A
 100
@@ -140179,7 +140205,7 @@ AcDbPolyline
   0
 TEXT
   5
-1018
+1019
 330
 A
 100
@@ -140217,7 +140243,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1019
+101A
 330
 A
 100
@@ -140267,7 +140293,7 @@ AcDbPolyline
   0
 TEXT
   5
-101A
+101B
 330
 A
 100
@@ -140305,7 +140331,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-101B
+101C
 330
 A
 100
@@ -140339,7 +140365,7 @@ AcDbPolyline
   0
 TEXT
   5
-101C
+101D
 330
 A
 100
@@ -140377,7 +140403,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-101D
+101E
 330
 A
 100
@@ -140411,7 +140437,7 @@ AcDbPolyline
   0
 TEXT
   5
-101E
+101F
 330
 A
 100
@@ -140449,7 +140475,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-101F
+1020
 330
 A
 100
@@ -140483,7 +140509,7 @@ AcDbPolyline
   0
 TEXT
   5
-1020
+1021
 330
 A
 100
@@ -140521,7 +140547,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1021
+1022
 330
 A
 100
@@ -140555,7 +140581,7 @@ AcDbPolyline
   0
 TEXT
   5
-1022
+1023
 330
 A
 100
@@ -140593,7 +140619,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1023
+1024
 330
 A
 100
@@ -140627,7 +140653,7 @@ AcDbPolyline
   0
 TEXT
   5
-1024
+1025
 330
 A
 100
@@ -140665,7 +140691,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1025
+1026
 330
 A
 100
@@ -140707,7 +140733,7 @@ AcDbPolyline
   0
 TEXT
   5
-1026
+1027
 330
 A
 100
@@ -140745,7 +140771,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1027
+1028
 330
 A
 100
@@ -140779,7 +140805,7 @@ AcDbPolyline
   0
 TEXT
   5
-1028
+1029
 330
 A
 100
@@ -140817,7 +140843,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1029
+102A
 330
 A
 100
@@ -140859,7 +140885,7 @@ AcDbPolyline
   0
 TEXT
   5
-102A
+102B
 330
 A
 100
@@ -140897,7 +140923,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-102B
+102C
 330
 A
 100
@@ -140931,7 +140957,7 @@ AcDbPolyline
   0
 TEXT
   5
-102C
+102D
 330
 A
 100
@@ -140969,7 +140995,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-102D
+102E
 330
 A
 100
@@ -141019,7 +141045,7 @@ AcDbPolyline
   0
 TEXT
   5
-102E
+102F
 330
 A
 100
@@ -141057,7 +141083,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-102F
+1030
 330
 A
 100
@@ -141091,7 +141117,7 @@ AcDbPolyline
   0
 TEXT
   5
-1030
+1031
 330
 A
 100
@@ -141129,7 +141155,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1031
+1032
 330
 A
 100
@@ -141163,7 +141189,7 @@ AcDbPolyline
   0
 TEXT
   5
-1032
+1033
 330
 A
 100
@@ -141201,7 +141227,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1033
+1034
 330
 A
 100
@@ -141235,7 +141261,7 @@ AcDbPolyline
   0
 TEXT
   5
-1034
+1035
 330
 A
 100
@@ -141273,7 +141299,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1035
+1036
 330
 A
 100
@@ -141307,7 +141333,7 @@ AcDbPolyline
   0
 TEXT
   5
-1036
+1037
 330
 A
 100
@@ -141345,7 +141371,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1037
+1038
 330
 A
 100
@@ -141379,7 +141405,7 @@ AcDbPolyline
   0
 TEXT
   5
-1038
+1039
 330
 A
 100
@@ -141417,7 +141443,7 @@ AcDbText
   0
 LWPOLYLINE
   5
-1039
+103A
 330
 A
 100
@@ -141451,7 +141477,7 @@ AcDbPolyline
   0
 TEXT
   5
-103A
+103B
 330
 A
 100
@@ -141480,6 +141506,712 @@ DCADTXTSTYLE1
 170.40478889230562
  21
 -50.45859223093326
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+103C
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+       12
+ 70
+     1
+ 43
+0.0
+ 38
+28.0
+ 10
+-743.3
+ 20
+-262.28
+ 10
+-743.3
+ 20
+49.72
+ 10
+-191.3
+ 20
+49.72
+ 10
+-191.3
+ 20
+229.72
+ 10
+216.7
+ 20
+229.72
+ 10
+216.7
+ 20
+73.72
+ 10
+264.7
+ 20
+73.72
+ 10
+264.7
+ 20
+-82.28
+ 10
+408.7
+ 20
+-82.28
+ 10
+408.7
+ 20
+-286.28
+ 10
+-191.3
+ 20
+-286.28
+ 10
+-191.3
+ 20
+-262.28
+  0
+TEXT
+  5
+103D
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+40.0
+ 20
+-150.0
+ 30
+0.0
+ 40
+3.0
+  1
+MAIN FLOOR +28
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+40.0
+ 21
+-150.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+103E
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        6
+ 70
+     1
+ 43
+0.0
+ 38
+0.0
+ 10
+-737.8
+ 20
+-256.78
+ 10
+-191.3
+ 20
+-256.78
+ 10
+-191.3
+ 20
+-100.14
+ 10
+-294.3
+ 20
+-100.14
+ 10
+-294.3
+ 20
+44.22
+ 10
+-737.8
+ 20
+44.22
+  0
+TEXT
+  5
+103F
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+-506.0
+ 20
+-140.0
+ 30
+0.0
+ 40
+3.0
+  1
+GARAGE SLAB +0
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+-506.0
+ 21
+-140.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+1040
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+0.0
+ 10
+-288.8
+ 20
+-4.78
+ 10
+-191.3
+ 20
+-4.78
+ 10
+-191.3
+ 20
+44.22
+ 10
+-288.8
+ 20
+44.22
+  0
+TEXT
+  5
+1041
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+-240.0
+ 20
+30.0
+ 30
+0.0
+ 40
+3.0
+  1
+GARAGE STAIR (foot) +0
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+-240.0
+ 21
+30.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+1042
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+28.0
+ 10
+-294.8
+ 20
+-131.1
+ 10
+-191.3
+ 20
+-131.1
+ 10
+-191.3
+ 20
+-100.14
+ 10
+-294.8
+ 20
+-100.14
+  0
+TEXT
+  5
+1043
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+-212.0
+ 20
+-116.0
+ 30
+0.0
+ 40
+3.0
+  1
+GARAGE LANDING +28
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+-212.0
+ 21
+-116.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+1044
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+28.0
+ 10
+-294.8
+ 20
+-164.1
+ 10
+-228.6
+ 20
+-164.1
+ 10
+-228.6
+ 20
+-131.1
+ 10
+-294.8
+ 20
+-131.1
+  0
+TEXT
+  5
+1045
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+-261.7
+ 20
+-147.6
+ 30
+0.0
+ 40
+3.0
+  1
+STEPS 4R
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+-261.7
+ 21
+-147.6
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+1046
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+21.0
+ 10
+-119.3
+ 20
+-346.3
+ 10
+264.7
+ 20
+-346.3
+ 10
+264.7
+ 20
+-286.28
+ 10
+-119.3
+ 20
+-286.28
+  0
+TEXT
+  5
+1047
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+100.0
+ 20
+-316.0
+ 30
+0.0
+ 40
+3.0
+  1
+PORCH +21
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+100.0
+ 21
+-316.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+1048
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+21.0
+ 10
+-53.8
+ 20
+-366.3
+ 10
+18.2
+ 20
+-366.3
+ 10
+18.2
+ 20
+-346.3
+ 10
+-53.8
+ 20
+-346.3
+  0
+TEXT
+  5
+1049
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+-17.8
+ 20
+-361.0
+ 30
+0.0
+ 40
+3.0
+  1
+STEPS 3R
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+-17.8
+ 21
+-361.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+104A
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+28.0
+ 10
+269.2
+ 20
+-81.8
+ 10
+317.2
+ 20
+-81.8
+ 10
+317.2
+ 20
+-44.4
+ 10
+269.2
+ 20
+-44.4
+  0
+TEXT
+  5
+104B
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+293.2
+ 20
+-63.0
+ 30
+0.0
+ 40
+3.0
+  1
+SUNROOM LANDING +28
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+293.2
+ 21
+-63.0
+ 31
+0.0
+100
+AcDbText
+ 73
+     2
+  0
+LWPOLYLINE
+  5
+104C
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbPolyline
+ 90
+        4
+ 70
+     1
+ 43
+0.0
+ 38
+28.0
+ 10
+269.2
+ 20
+-44.4
+ 10
+317.2
+ 20
+-44.4
+ 10
+317.2
+ 20
+-14.4
+ 10
+269.2
+ 20
+-14.4
+  0
+TEXT
+  5
+104D
+330
+A
+100
+AcDbEntity
+  8
+1.1FLOOR-LEVELS
+100
+AcDbText
+ 10
+293.2
+ 20
+-29.4
+ 30
+0.0
+ 40
+3.0
+  1
+STEPS 4R
+ 50
+0.0
+  7
+DCADTXTSTYLE1
+ 72
+     1
+ 11
+293.2
+ 21
+-29.4
  31
 0.0
 100

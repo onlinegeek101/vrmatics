@@ -885,6 +885,30 @@ function orientedRect(pts) {                          // long axis, centre, leng
   const tc = (t0 + t1) / 2, sc = (s0 + s1) / 2;
   return { cx: tc * ux - sc * uy, cy: tc * uy + sc * ux, ux, uy, len, dep };
 }
+// floor levels ('floor' layers, e.g. 1.1FLOOR-LEVELS): closed outlines whose polyline elevation
+// is the finished-floor height in inches (grade = 0). The smallest outline containing a point
+// wins, so a landing drawn inside the garage keeps its own height. An outline labelled
+// "STEPS nR" is a flight of n risers between whatever levels sit on either side of it.
+function rawLevels() {
+  const polys = [], texts = [];
+  for (const L of rawLayers) {
+    if (!L.on || layerCat[L.name] !== 'floor') continue;
+    for (const e of byLayer(ENTS, L.name)) {
+      if (e.type === 'LWPOLYLINE' && e.pts.length >= 3) {
+        let a = 0; for (let i = 0; i < e.pts.length; i++) { const p = e.pts[i], q = e.pts[(i + 1) % e.pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+        polys.push({ pts: e.pts, elev: e.elev || 0, layer: L.name, area: Math.abs(a / 2), name: '', steps: null,
+          c: [e.pts.reduce((s, p) => s + p[0], 0) / e.pts.length, e.pts.reduce((s, p) => s + p[1], 0) / e.pts.length] });
+      } else if (e.type === 'TEXT' && e.pts.length) texts.push(e);
+    }
+  }
+  polys.sort((a, b) => a.area - b.area);
+  for (const t of texts) {                              // a label names the smallest outline it sits in
+    const [px, py] = t.pts[t.pts.length > 1 ? 1 : 0], P = polys.find(p => pointIn(p.pts, px, py));
+    if (P && !P.name) P.name = (t.text || '').toUpperCase();
+  }
+  for (const P of polys) if (/STEP|STAIR/.test(P.name)) P.steps = +((P.name.match(/(\d+)\s*R\b/) || [])[1]) || 0;
+  return polys;
+}
 function buildRaw() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
@@ -926,28 +950,70 @@ function buildRaw() {
       else if (isWin) { ev.win.push(...segs); ev.winLayer = L.name; }
       else { ev.glaze.push(...segs); ev.glazeLayer = L.name; }
     }
+    else if (cat === 'floor') continue;                // outlines become level slabs below
     else if (!(objs.length && objLayerSuffixes.has(L.name))) flat.push({ color: L.color, segs });   // objects rendered in 3D: skip their flat outline
   }
   const merged = pruneSingles(mergeDoubleWalls(dedupeFaces(wallSegs)));
   applyMoveEdits(merged);                             // relocate walls the user pushed/pulled
   extendEnds(merged);                                 // close L-corners, tuck T-junctions in
   mergedWalls = merged;                               // live wall set (targets for the editor + export)
-  // floor slab under the merged walls
+  const levels = rawLevels(), slabs = levels.filter(l => l.steps === null), stepSets = levels.filter(l => l.steps !== null);
+  const levelAt = (x, y) => { for (const l of slabs) if (pointIn(l.pts, x, y)) return l.elev; return 0; };
+  const parentOf = l => slabs.find(p => p !== l && p.area > l.area && pointIn(p.pts, l.c[0], l.c[1]));
+  const TOP = (slabs.length ? Math.max(0, ...slabs.map(l => l.elev)) : 0) + WALL_H;   // one ceiling plate over every level
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85 });
+  // ground under everything (grade 0; lawn-coloured once real floors are outlined)
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
   for (const w of merged) for (const q of [w.a, w.b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
   if (minx < maxx) {
-    const fm = new THREE.Mesh(new THREE.PlaneGeometry((maxx - minx) * IN2M, (maxy - miny) * IN2M),
-      new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85 }));
-    fm.rotation.x = -Math.PI / 2; fm.position.set(wx((minx + maxx) / 2), 0, wz((miny + maxy) / 2)); fm.receiveShadow = true;
+    const pad = slabs.length ? 120 : 0;
+    const fm = new THREE.Mesh(new THREE.PlaneGeometry((maxx - minx + 2 * pad) * IN2M, (maxy - miny + 2 * pad) * IN2M),
+      slabs.length ? new THREE.MeshStandardMaterial({ color: 0x9aa886, roughness: 0.95 }) : floorMat);
+    fm.rotation.x = -Math.PI / 2; fm.position.set(wx((minx + maxx) / 2), slabs.length ? -0.03 : 0, wz((miny + maxy) / 2)); fm.receiveShadow = true;
     root.add(fm); floors.push(fm);
   }
+  // each level: a solid block up from the level it sits in (house on grade, landing in the
+  // garage), or a thin slab when it sits lower; lower levels inside it are cut out as holes
+  const toShape = (pts, S) => { const sh = new (S || THREE.Shape)(); pts.forEach((p, k) => k ? sh.lineTo(p[0] * IN2M, p[1] * IN2M) : sh.moveTo(p[0] * IN2M, p[1] * IN2M)); sh.closePath(); return sh; };
+  for (const l of slabs) {
+    const par = parentOf(l), below = par ? par.elev : 0, h = l.elev > below ? l.elev - below : 0.5;
+    const shape = toShape(l.pts);
+    for (const c of slabs) if (c !== l && c.elev < l.elev && parentOf(c) === l) shape.holes.push(toShape(c.pts, THREE.Path));
+    const m = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: h * IN2M, bevelEnabled: false }), srcMat(l.layer, floorMat));
+    m.rotation.x = -Math.PI / 2; m.position.y = (l.elev - h) * IN2M; m.castShadow = m.receiveShadow = true;
+    root.add(tagSrc(m, l.layer, `${(l.name || 'floor').toLowerCase()} at ${l.elev}"`)); floors.push(m);
+  }
+  // steps: the run goes from the higher level on one side to the lower on the opposite side
+  for (const l of stepSets) {
+    const R = orientedRect(l.pts), nx = -R.uy, ny = R.ux;
+    const at = (dx, dy, d) => levelAt(R.cx + dx * d, R.cy + dy * d);
+    const al = [at(R.ux, R.uy, R.len / 2 + 3), at(-R.ux, -R.uy, R.len / 2 + 3)], ac = [at(nx, ny, R.dep / 2 + 3), at(-nx, -ny, R.dep / 2 + 3)];
+    const useAl = Math.abs(al[0] - al[1]) >= Math.abs(ac[0] - ac[1]), pr = useAl ? al : ac;
+    const u = useAl ? [R.ux, R.uy] : [nx, ny], run = useAl ? R.len : R.dep, width = useAl ? R.dep : R.len;
+    const hi = Math.max(...pr), lo = Math.min(...pr); if (hi - lo < 1) continue;
+    const r = pr[0] >= pr[1] ? [-u[0], -u[1]] : u;             // high side → low side
+    const N = l.steps || Math.max(1, Math.round((hi - lo) / 7.5)), treads = N - 1; if (treads < 1) continue;
+    const H = [R.cx - r[0] * run / 2, R.cy - r[1] * run / 2], dep = run / treads;
+    for (let k = 0; k < treads; k++) {
+      const p0 = [H[0] + r[0] * dep * k, H[1] + r[1] * dep * k], p1 = [H[0] + r[0] * dep * (k + 1), H[1] + r[1] * dep * (k + 1)];
+      const top = hi - (k + 1) * (hi - lo) / N;
+      const m = boxBetween(wx(p0[0]), wz(p0[1]), wx(p1[0]), wz(p1[1]), width, lo * IN2M, top * IN2M, srcMat(l.layer, floorMat));
+      m.castShadow = m.receiveShadow = true; root.add(tagSrc(m, l.layer, `step ${k + 1}/${treads} (${N} risers, ${lo}" → ${hi}")`)); floors.push(m);
+    }
+  }
+  // the levels either side of a wall / opening (sampled just off each face)
+  const sidesOf = (a, ux, uy, len, th) => { const out = [], off = th / 2 + 3, ins = Math.min(len / 2, 8), n = Math.max(1, Math.ceil((len - 2 * ins) / 24));
+    for (let k = 0; k <= n; k++) { const t = ins + (len - 2 * ins) * k / n, px = a[0] + ux * t, py = a[1] + uy * t;
+      out.push(levelAt(px - uy * off, py + ux * off), levelAt(px + uy * off, py - ux * off)); }
+    return out; };
   // solid walls from the merged centrelines (gaps stay open for the doorways)
   wallMeshes = [];
   for (let wi = 0; wi < merged.length; wi++) {
     const w = merged[wi];
     const ax = wx(w.a[0]), az = wz(w.a[1]), bx = wx(w.b[0]), bz = wz(w.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    const m = boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, srcMat(w.layer, wallMat, w.single ? SINGLE_WALL_COLOR : null));
+    const ws = segInfo(w.a, w.b), base = slabs.length ? Math.min(...sidesOf(w.a, ws.ux, ws.uy, ws.len, w.thick)) : 0;
+    const m = boxBetween(ax, az, bx, bz, w.thick, base * IN2M, TOP * IN2M, srcMat(w.layer, wallMat, w.single ? SINGLE_WALL_COLOR : null));
     tagSrc(m, w.layer, w.single ? 'wall GUESSED from a single line (no second face found)' : `wall (two faces ${w.thick.toFixed(1)}" apart)`);
     m.userData.wallIndex = wi;                          // so a tap anywhere on the face grabs this wall
     root.add(m); wallMeshes.push(m);
@@ -967,15 +1033,20 @@ function buildRaw() {
     if (c.kind === 'opening' && isCorner(o.a, o) && isCorner(o.b, o)) continue;
     rawOps.push({ ...o, kind: c.kind, leaves: c.leaves, layer: c.layer });
     const ax = wx(o.a[0]), az = wz(o.a[1]), bx = wx(o.b[0]), bz = wz(o.b[1]);
-    const th = o.thick, headY = HEAD * IN2M, top = WALL_H * IN2M, what = c.kind === 'opening' ? 'cased opening' : c.kind;
+    const sv = sidesOf(o.a, o.ux, o.uy, o.width, o.thick), lvHi = Math.max(...sv), lvLo = Math.min(...sv);
+    const th = o.thick, B = lvHi * IN2M, headY = B + HEAD * IN2M, top = TOP * IN2M, what = c.kind === 'opening' ? 'cased opening' : c.kind;
+    if (lvHi - lvLo > 0.5) {                            // wall under a sill set at the upper floor (a step up at the door)
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, th, lvLo * IN2M, B, srcMat(c.layer, wallMat)), c.layer, what + ' — wall below the upper floor'));
+      if (lvHi - lvLo > 10) colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
+    }
     if (headY < top) root.add(tagSrc(boxBetween(ax, az, bx, bz, th, headY, top, srcMat(c.layer, wallMat)), c.layer, what + ' header'));
     if (c.kind === 'window') {
-      const sillY = SILL * IN2M;
-      root.add(tagSrc(boxBetween(ax, az, bx, bz, th, 0, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
+      const sillY = B + SILL * IN2M;
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, th, B, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
       colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, srcMat(c.layer, glassMat)), c.layer, 'window glass'));
     } else if (c.kind === 'overhead') {                 // overhead garage door, shown closed
-      root.add(tagSrc(boxBetween(ax, az, bx, bz, 2, 0, headY, srcMat(c.layer, garageMat)), c.layer, 'overhead garage door'));
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, 2, B, headY, srcMat(c.layer, garageMat)), c.layer, 'overhead garage door'));
       colliders.push({ ax, az, bx, bz, hw: 1 * IN2M });
     } else if (c.kind === 'door') {
       const P = t => [o.a[0] + o.ux * t, o.a[1] + o.uy * t];
@@ -990,18 +1061,18 @@ function buildRaw() {
         const swingN = [-o.uy * lf.swingSide, o.ux * lf.swingSide];
         const openAngle = (right[0] * swingN[0] + right[1] * swingN[1]) > 0 ? DOOR_OPEN : -DOOR_OPEN;
         const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}${c.leaves.length > 1 ? ':' + li : ''}`, isOpen = !!doorState[key];
-        const pivot = new THREE.Group(); pivot.position.set(hx, 0, hz);
+        const pivot = new THREE.Group(); pivot.position.set(hx, B, hz);
         pivot.rotation.y = closedRot + (isOpen ? openAngle : 0); pivot.userData.doorKey = key;
-        const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, headY, 1.75 * IN2M), srcMat(lf.layer, leafMat));
+        const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, HEAD * IN2M, 1.75 * IN2M), srcMat(lf.layer, leafMat));
         tagSrc(leaf, lf.layer, `door leaf ${Math.round(lf.r)}" (hinge + swing from the drawn arc)`);
-        leaf.position.set(dl / 2, headY / 2, 0); leaf.castShadow = true;
+        leaf.position.set(dl / 2, HEAD * IN2M / 2, 0); leaf.castShadow = true;
         pivot.add(leaf); root.add(pivot);
         doors.push({ key, pivot, closedRot, openAngle, angle: isOpen ? openAngle : 0, target: isOpen ? openAngle : 0,
           open: isOpen, leaf, cx: (hx + tx) / 2, cz: (hz + tz) / 2, seg: { ax: hx, az: hz, bx: tx, bz: tz, hw: th / 2 * IN2M } });
       });
       for (const [t0, t1] of (c.sidelights || [])) {     // fixed glass beside the leaf (entry sidelights)
         const s0 = P(t0), s1 = P(t1), X0 = wx(s0[0]), Z0 = wz(s0[1]), X1 = wx(s1[0]), Z1 = wz(s1[1]);
-        root.add(tagSrc(boxBetween(X0, Z0, X1, Z1, th * 0.4, 0, headY, srcMat(ev.winLayer, glassMat)), ev.winLayer, 'sidelight glass'));
+        root.add(tagSrc(boxBetween(X0, Z0, X1, Z1, th * 0.4, B, headY, srcMat(ev.winLayer, glassMat)), ev.winLayer, 'sidelight glass'));
         colliders.push({ ax: X0, az: Z0, bx: X1, bz: Z1, hw: th * 0.2 * IN2M });
       }
     }
@@ -1011,33 +1082,35 @@ function buildRaw() {
   for (const b of mergeDoubleWalls(beamSegs)) {
     const ax = wx(b.a[0]), az = wz(b.a[1]), bx = wx(b.b[0]), bz = wz(b.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(tagSrc(boxBetween(ax, az, bx, bz, b.thick, HEAD * IN2M, WALL_H * IN2M, srcMat(b.layer, wallMat)), b.layer, 'beam (overhead header)'));
+    const bl = levelAt((b.a[0] + b.b[0]) / 2, (b.a[1] + b.b[1]) / 2);
+    root.add(tagSrc(boxBetween(ax, az, bx, bz, b.thick, (bl + HEAD) * IN2M, TOP * IN2M, srcMat(b.layer, wallMat)), b.layer, 'beam (overhead header)'));
   }
   // structure: posts drawn as circles become round columns; other linework as thin posts
   for (const p of structCircles) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r * IN2M, p.r * IN2M, WALL_H * IN2M, 20), srcMat(p.layer, wallMat));
-    m.position.set(wx(p.cx), WALL_H * IN2M / 2, wz(p.cy)); m.castShadow = true; root.add(tagSrc(m, p.layer, 'post'));
+    m.position.set(wx(p.cx), (levelAt(p.cx, p.cy) + WALL_H / 2) * IN2M, wz(p.cy)); m.castShadow = true; root.add(tagSrc(m, p.layer, 'post'));
     colliders.push({ ax: wx(p.cx), az: wz(p.cy), bx: wx(p.cx) + 1e-3, bz: wz(p.cy), hw: p.r * IN2M });
   }
   for (const [a, b, lay] of structSegs) {
     const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(tagSrc(boxBetween(ax, az, bx, bz, 3, 0, WALL_H * IN2M, srcMat(lay, structMat)), lay, 'structure'));
+    const sl = levelAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    root.add(tagSrc(boxBetween(ax, az, bx, bz, 3, sl * IN2M, (sl + WALL_H) * IN2M, srcMat(lay, structMat)), lay, 'structure'));
   }
   // labelled objects → GLB models / extruded casework (each follows its source layer's toggle)
   for (const o of objs) {
     const rule = OBJ_RULES.find(r => r[0](o.name)); if (!rule) continue;
     const [, how, y0, y1, suffix] = rule, srcLayer = o.prefix + suffix, L = rawLayers.find(x => x.name === srcLayer);
     if (L && !L.on) continue;
-    const R = orientedRect(o.pts);
+    const R = orientedRect(o.pts), lv = levelAt(R.cx, R.cy);
     rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep });
     if (how === 'box' || how === 'counter') {             // extrude the footprint (handles L-shaped runs)
       const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
       const body = (how === 'counter' ? 34.5 : y1) - y0;
       const mk = (h, mat) => { const g = new THREE.ExtrudeGeometry(shape, { depth: h * IN2M, bevelEnabled: false });
         const m = new THREE.Mesh(g, mat); m.rotation.x = -Math.PI / 2; m.castShadow = m.receiveShadow = true; return m; };
-      const m = mk(body, srcMat(srcLayer, cabMat)); m.position.y = y0 * IN2M; root.add(tagSrc(m, srcLayer, o.name.toLowerCase()));
-      if (how === 'counter') { const t = mk(1.5, srcMat(srcLayer, topMat)); t.position.y = 34.5 * IN2M; root.add(tagSrc(t, srcLayer, o.name.toLowerCase() + ' (countertop)')); }
+      const m = mk(body, srcMat(srcLayer, cabMat)); m.position.y = (lv + y0) * IN2M; root.add(tagSrc(m, srcLayer, o.name.toLowerCase()));
+      if (how === 'counter') { const t = mk(1.5, srcMat(srcLayer, topMat)); t.position.y = (lv + 34.5) * IN2M; root.add(tagSrc(t, srcLayer, o.name.toLowerCase() + ' (countertop)')); }
       if (y0 < 30) for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length];
         fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
       continue;
@@ -1056,7 +1129,7 @@ function buildRaw() {
     const tags = [...fixtureTags(o.name)].filter(t => t !== 'any' && t !== 'seating');   // most specific tag wins
     const asset = ASSET_LIST.find(a => a.tags && a.tags.some(t => tags.includes(t)));
     const key = `obj:${Math.round(R.cx)},${Math.round(R.cy)}`;
-    const grp = new THREE.Group(); grp.position.set(wx(R.cx), 0, wz(R.cy));
+    const grp = new THREE.Group(); grp.position.set(wx(R.cx), lv * IN2M, wz(R.cy));
     grp.rotation.y = Math.atan2(fx, -fy);                 // model +Z → plan front; world z = -plan y
     grp.userData.fixtureKey = key; grp.userData.fixtureName = o.name.toLowerCase(); grp.userData.src = { layer: srcLayer, what: o.name.toLowerCase() };
     root.add(grp);
@@ -1071,7 +1144,8 @@ function buildRaw() {
   }
   for (const { color, segs } of flat) {
     const pts = [];
-    for (const [a, b] of segs) pts.push(new THREE.Vector3(wx(a[0]), 0.02, wz(a[1])), new THREE.Vector3(wx(b[0]), 0.02, wz(b[1])));
+    for (const [a, b] of segs) { const y = levelAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) * IN2M + 0.02;
+      pts.push(new THREE.Vector3(wx(a[0]), y, wz(a[1])), new THREE.Vector3(wx(b[0]), y, wz(b[1]))); }
     if (pts.length) root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({ color: new THREE.Color(color).getHex() })));
   }
