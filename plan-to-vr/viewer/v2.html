@@ -9,7 +9,13 @@
   #panel { position:fixed; top:12px; left:12px; z-index:10; width:250px; max-width:64vw; max-height:82vh; overflow:auto;
     background:rgba(20,24,34,.9); border:1px solid #2f3850; border-radius:12px; padding:12px 14px;
     -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
-  #panel h1 { font-size:15px; margin:0 0 2px; }
+  #panel h1 { font-size:15px; margin:0 0 2px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+  #panel h1 .fold { margin-left:auto; background:none; border:none; color:#8b95ac; font-size:15px; cursor:pointer;
+    padding:2px 4px; line-height:1; transition:transform .15s; }
+  #panel.collapsed { width:auto; overflow:hidden; padding:8px 12px; }
+  #panel.collapsed h1 { margin:0; }
+  #panel.collapsed h1 .fold { transform:rotate(-90deg); }
+  #panel.collapsed > :not(h1) { display:none; }
   #panel .sub { color:#8b95ac; font-size:11px; margin-bottom:10px; }
   .layer { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:8px;
     cursor:pointer; user-select:none; border:1px solid transparent; }
@@ -52,7 +58,8 @@
 </style>
 <canvas id="c"></canvas>
 <div id="panel">
-  <h1>plan-to-vr <span style="color:#4a86c8">v2</span></h1>
+  <h1 id="panelHead" title="show / hide the layer panel">plan-to-vr <span style="color:#4a86c8">v2</span>
+    <button class="fold" id="panelFold" aria-label="collapse the layer panel" aria-expanded="true">▾</button></h1>
   <div class="sub">DXF layers built into 3D, in order. Toggle a layer to add/remove its stage.</div>
   <select id="planpick" style="width:100%;margin-bottom:10px;background:#232b3d;color:#dfe6f2;
     border:1px solid #2f3850;border-radius:7px;padding:6px 8px;font:13px system-ui;cursor:pointer"></select>
@@ -2059,6 +2066,16 @@ function srcAtScreen(clientX, clientY) {
     return true;
   }
   return false;
+}
+// layer panel folds to its title bar (remembered per device; phones start folded)
+{
+  const panel = document.getElementById('panel'), fold = document.getElementById('panelFold');
+  const set = c => { panel.classList.toggle('collapsed', c); fold.setAttribute('aria-expanded', String(!c));
+    fold.setAttribute('aria-label', c ? 'expand the layer panel' : 'collapse the layer panel');
+    try { localStorage.setItem('plan2vr-v2-panel-collapsed', c ? '1' : '0'); } catch (e) {} };
+  let saved = null; try { saved = localStorage.getItem('plan2vr-v2-panel-collapsed'); } catch (e) {}
+  set(saved === null ? matchMedia('(max-width:560px)').matches : saved === '1');
+  document.getElementById('panelHead').addEventListener('click', () => set(!panel.classList.contains('collapsed')));
 }
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
