@@ -153,7 +153,7 @@ const wz = y => -y * IN2M;
 
 // ---------------------------------------------------------------- three setup
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true, alpha: true });   // alpha: passthrough
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1078,7 +1078,7 @@ function buildRaw() {
     for (const c of stepSets) if (c.lo < -0.5) g.holes.push(toShape(c.pts, THREE.Path));
     for (const c of slabs) if (c.elev < -0.5 && !(parentOf(c) && parentOf(c).elev < -0.5)) g.holes.push(toShape(c.pts, THREE.Path));
     const fm = new THREE.Mesh(new THREE.ShapeGeometry(g), new THREE.MeshStandardMaterial({ color: 0x9aa886, roughness: 0.95 }));
-    fm.rotation.x = -Math.PI / 2; fm.position.y = -0.03; fm.receiveShadow = true;
+    fm.rotation.x = -Math.PI / 2; fm.position.y = -0.03; fm.receiveShadow = true; fm.userData.ground = true;
     root.add(fm); floors.push(fm);
   }
   // each level: a solid block up from the level it sits in (house on grade, landing in the
@@ -1165,9 +1165,25 @@ function buildRaw() {
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th, B, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
       colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, srcMat(c.layer, glassMat)), c.layer, 'window glass'));
-    } else if (c.kind === 'overhead') {                 // overhead garage door, shown closed
-      root.add(tagSrc(boxBetween(ax, az, bx, bz, 2, B, headY, srcMat(c.layer, garageMat)), c.layer, 'overhead garage door'));
-      colliders.push({ ax, az, bx, bz, hw: 1 * IN2M });
+    } else if (c.kind === 'overhead') {                 // overhead garage door: tap / click / trigger to open + close
+      // the panel hangs from the header and swings up and in to lie flat under the ceiling (where a
+      // sectional door ends up open); inside = the side that is within the building's floor outline
+      const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`, isOpen = !!doorState[key];
+      const inB = (x, y) => slabs.length ? slabs.some(l => pointIn(l.pts, x, y)) : false;
+      const nx = -o.uy, ny = o.ux, pr = o.thick / 2 + 8;
+      const inSide = inB(o.mid[0] + nx * pr, o.mid[1] + ny * pr) ? 1 : inB(o.mid[0] - nx * pr, o.mid[1] - ny * pr) ? -1 : 1;
+      const H = headY - B, W = Math.hypot(bx - ax, bz - az);
+      const outer = new THREE.Group(); outer.position.set((ax + bx) / 2, headY, (az + bz) / 2); outer.rotation.y = -Math.atan2(bz - az, bx - ax);
+      const pivot = new THREE.Group(); pivot.userData.doorKey = key; outer.add(pivot);
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(W, H, 2 * IN2M), srcMat(c.layer, garageMat));
+      panel.position.y = -H / 2; panel.castShadow = panel.receiveShadow = true; pivot.add(tagSrc(panel, c.layer, 'overhead garage door (tap to open / close)'));
+      for (let k = 1; k < 4; k++) { const g = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.6 * IN2M, 2.4 * IN2M), srcMat(c.layer, garageMat));
+        g.position.y = -H * k / 4; pivot.add(g); }                                          // section joints
+      root.add(outer);
+      const apply = a => { pivot.rotation.x = inSide * a * Math.PI / 2; };
+      apply(isOpen ? 1 : 0);
+      doors.push({ key, pivot, closedRot: 0, openAngle: 1, angle: isOpen ? 1 : 0, target: isOpen ? 1 : 0, open: isOpen, leaf: panel, apply,
+        cx: (ax + bx) / 2, cz: (az + bz) / 2, seg: { ax, az, bx, bz, hw: 1 * IN2M } });
     } else if (c.kind === 'door') {
       const P = t => [o.a[0] + o.ux * t, o.a[1] + o.uy * t];
       let covered = 0;
@@ -1362,6 +1378,7 @@ function buildRaw() {
     if (pts.length) root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({ color: new THREE.Color(color).getHex() })));
   }
+  if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
 }
 // ---- wall-connect editor: click two wall ends to bridge them; revisions persist + export ----
@@ -1859,7 +1876,7 @@ function doorTick(dt) {
   for (const d of doors) {
     if (Math.abs(d.angle - d.target) < 1e-3) continue;
     d.angle += (d.target - d.angle) * Math.min(1, dt * 8);
-    d.pivot.rotation.y = d.closedRot + d.angle;
+    if (d.apply) d.apply(d.angle); else d.pivot.rotation.y = d.closedRot + d.angle;
   }
 }
 function toggleDoor(key) {
@@ -2150,6 +2167,21 @@ addEventListener('keydown', e => {
 // and stairs behave identically in the headset. (Matches v1: no addon button,
 // controllers polled from session.inputSources each frame.)
 renderer.xr.enabled = true;
+const arSaved = new Map();
+function arGhost(on) {                                  // passthrough: hide sky + lawn, draw the house translucent
+  sky.visible = !on && !view2D; renderer.setClearAlpha(on ? 0 : 1);
+  if (!root) return;
+  root.traverse(o => {
+    if (o.userData && o.userData.ground) { o.visible = !on; return; }
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (on) { if (!arSaved.has(m)) arSaved.set(m, [m.transparent, m.opacity, m.depthWrite]); m.transparent = true; m.opacity = Math.min(m.opacity, 0.38); m.depthWrite = false; }
+      else if (arSaved.has(m)) { const [t, op, dw] = arSaved.get(m); m.transparent = t; m.opacity = op; m.depthWrite = dw; }
+      m.needsUpdate = true;
+    }
+  });
+  if (!on) arSaved.clear();
+}
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const dolly = new THREE.Group(); scene.add(dolly);
 const ctrlL = renderer.xr.getController(0);
@@ -2456,6 +2488,22 @@ renderer.xr.addEventListener('sessionend', () => {
     'background:#12303f;border:1px solid #3a6;border-radius:9px;padding:9px 15px;font:14px system-ui;cursor:pointer';
   b.textContent = xrmode ? '🥽 Enter VR' : '🥽 VR N/A';
   document.body.appendChild(b);
+  // see-through: the real room from the headset cameras with the house drawn translucent on top,
+  // to check (and do) the 1:1 alignment against real doors and windows
+  let arOK = false; try { arOK = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch (e) {}
+  if (arOK) {
+    const pb = document.createElement('button'); pb.style.cssText = b.style.cssText + ';right:150px'; pb.textContent = '👓 See-through';
+    document.body.appendChild(pb); let arS = null;
+    pb.onclick = async () => {
+      if (arS) { arS.end(); return; }
+      try {
+        arS = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+        window.__arMode = true; arGhost(true);
+        arS.addEventListener('end', () => { arS = null; window.__arMode = false; arGhost(false); pb.textContent = '👓 See-through'; });
+        await renderer.xr.setSession(arS); pb.textContent = '🚪 Exit see-through';
+      } catch (e) { pb.textContent = '👓 see-through failed'; arS = null; window.__arMode = false; arGhost(false); }
+    };
+  }
   if (!xrmode) { b.style.opacity = 0.5; return; }
   let session = null;
   b.onclick = async () => {
