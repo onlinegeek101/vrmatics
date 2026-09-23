@@ -317,14 +317,16 @@ const editMarkers = new THREE.Group(); editMarkers.renderOrder = 999;
 function editKey() { return 'plan2vr-v2-edits:' + DXF; }
 function loadEdits() { try { return JSON.parse(localStorage.getItem(editKey())) || []; } catch (e) { return []; } }
 function saveEdits() { try { localStorage.setItem(editKey(), JSON.stringify(edits)); } catch (e) {} }
-const RAW_CATS = ['walls', 'openings', 'stairs', 'structure', 'furniture', 'floor', 'linework', 'hidden'];
+const RAW_CATS = ['walls', 'openings', 'stairs', 'structure', 'beam', 'furniture', 'floor', 'linework', 'hidden'];
 function autoCat(name) {                             // assign a DXF layer to a category by its name
   const n = (name || '').toUpperCase();
   if (/WALL/.test(n)) return 'walls';
   if (/DRWDW|DOOR|WIN|GLAZ|OPEN/.test(n)) return 'openings';
   if (/STAIR|STEP|TREAD|RAIL/.test(n)) return 'stairs';
   if (/COLLINE|GRIDLINE|CENTERLINE|CENTRELINE/.test(n)) return 'hidden';   // reference grid, not walls
-  if (/COLUMN|BEAM|STRUCT|POST|PIER/.test(n)) return 'structure';
+  if (/COLUMN/.test(n)) return 'hidden';                               // structural grid reference, not rendered
+  if (/BEAM|HEADER|LINTEL/.test(n)) return 'beam';                    // overhead: a header across an open span
+  if (/STRUCT|POST|PIER/.test(n)) return 'structure';
   if (/FURN|FIXT|APPL|CASE|CAB/.test(n)) return 'furniture';
   if (/SLAB|FLOOR|TOPO/.test(n)) return 'floor';
   if (/RMNAME|NAME|NOTE|DIM|TEXT|LEAD|DEMO|FILL|HATCH/.test(n)) return 'hidden';
@@ -706,7 +708,7 @@ function buildRaw() {
   const structMat = new THREE.MeshStandardMaterial({ color: 0x9a86c8, roughness: 0.7 });
   const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 });
   const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, transparent: true, opacity: 0.35 });
-  let wallSegs = [], structSegs = [], openArcs = [], glazeSegs = [], openOn = false;
+  let wallSegs = [], structSegs = [], beamSegs = [], openArcs = [], glazeSegs = [], openOn = false;
   const flat = [];
   for (const L of rawLayers) {
     if (!L.on) continue;
@@ -721,6 +723,7 @@ function buildRaw() {
     }
     if (cat === 'walls') wallSegs.push(...segs);
     else if (cat === 'structure') structSegs.push(...segs);
+    else if (cat === 'beam') beamSegs.push(...segs);
     else if (cat === 'openings') { openOn = true; glazeSegs.push(...segs); }
     else flat.push({ color: L.color, segs });          // stairs / furniture / linework
   }
@@ -769,6 +772,13 @@ function buildRaw() {
       doors.push({ key, pivot, closedRot, angle: isOpen ? DOOR_OPEN : 0, target: isOpen ? DOOR_OPEN : 0,
         open: isOpen, leaf, cx: (ax + bx) / 2, cz: (az + bz) / 2, seg: { ax, az, bx, bz, hw: th / 2 * IN2M } });
     }
+  }
+  // beams: the drawn line pair → one member of measured width, hung from the ceiling down to door-head
+  // height — the same header a cased opening gets, spanning the open plan below it
+  for (const b of mergeDoubleWalls(beamSegs)) {
+    const ax = wx(b.a[0]), az = wz(b.a[1]), bx = wx(b.b[0]), bz = wz(b.b[1]);
+    if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
+    root.add(boxBetween(ax, az, bx, bz, b.thick, HEAD * IN2M, WALL_H * IN2M, wallMat));
   }
   // structure posts + flat reference linework
   for (const [a, b] of structSegs) {
