@@ -356,11 +356,11 @@ let pendingRebuild = false, pendingRawRebuild = false; // XR can't rebuild mid-f
 // tag catalog (assets.json) — which models a given fixture can wear (ported from v1)
 let ASSET_LIST = [];
 fetch('assets/assets.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
-  .then(l => { if (Array.isArray(l) && l.length) ASSET_LIST = l; }).catch(() => {});
+  .then(l => { if (Array.isArray(l) && l.length) { ASSET_LIST = l; if (rawMode && ENTS && !view2D) buildRaw(); } }).catch(() => {});
 function fixtureTags(name) {
   const n = (name || '').toUpperCase(), t = new Set(['any']), has = s => n.includes(s), add = (...xs) => xs.forEach(x => t.add(x));
   if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) add('sofa', 'seating');
-  if (has('CHAIR') || has('RECLIN')) add('chair', 'seating');
+  if (has('CHAIR') || has('RECLIN') || has('STOOL')) add('chair', 'seating');
   if (has('TABLE') || has('DESK') || has('COFFEE')) add('table', 'seating');
   if (has('BED')) add('bed');
   if (has('DRAWN')) add('seating', 'table');
@@ -628,106 +628,257 @@ function build2DRaw() {
   }
   window.__V2_READY = true;
 }
-// pair the DXF's double wall-lines into single centrelines with a measured thickness
-function mergeDoubleWalls(segs) {
-  const info = segs.map(([a, b]) => { const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
-    return { a, b, ux: dx / len, uy: dy / len, len, ang: Math.atan2(dy, dx) }; }).filter(s => s.len > 1);
-  const used = new Array(info.length).fill(false), out = [];
-  for (let i = 0; i < info.length; i++) {
-    if (used[i]) continue;
-    const A = info[i]; let best = -1, bestPerp = 1e9;
-    for (let j = i + 1; j < info.length; j++) {
-      if (used[j]) continue;
-      const B = info[j];
-      let da = Math.abs(A.ang - B.ang) % Math.PI; da = Math.min(da, Math.PI - da);
-      if (da > 0.09) continue;                         // ~5° → parallel
-      const perp = Math.abs((B.a[0] - A.a[0]) * -A.uy + (B.a[1] - A.a[1]) * A.ux);
-      if (perp < 1.5 || perp > 14) continue;           // 1.5–14" apart → a wall's two faces
-      const t1 = (B.a[0] - A.a[0]) * A.ux + (B.a[1] - A.a[1]) * A.uy;
-      const t2 = (B.b[0] - A.a[0]) * A.ux + (B.b[1] - A.a[1]) * A.uy;
-      const overlap = Math.min(Math.max(t1, t2), A.len) - Math.max(Math.min(t1, t2), 0);
-      if (overlap < A.len * 0.35) continue;
-      if (perp < bestPerp) { bestPerp = perp; best = j; }
+// ---- raw walls: the architect's wall layer is lines, not walls. Three passes turn them
+// into solid walls: (1) collapse duplicate face copies (faces are often drawn 2-3x, 0.5"
+// apart), (2) pair the two faces of each wall into a centreline over their OVERLAP only
+// (the unmatched remainder goes back in the pool, so a long face beside several short
+// ones — T-junctions — pairs piece by piece instead of skewing), (3) drop stray single
+// lines: short jamb returns / end caps / stop beads (they became the notches) and leftover
+// face lines hugging a real wall (they became the stacked double walls).
+const segInfo = (a, b, layer) => { const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+  return { a, b, layer, ux: dx / len, uy: dy / len, len, ang: Math.atan2(dy, dx) }; };
+const isParallel = (A, B, tol) => { let d = Math.abs(A.ang - B.ang) % Math.PI; return Math.min(d, Math.PI - d) <= tol; };
+const perpOff = (A, p) => (p[0] - A.a[0]) * -A.uy + (p[1] - A.a[1]) * A.ux;     // signed offset of p from A's line
+const alongOf = (A, p) => (p[0] - A.a[0]) * A.ux + (p[1] - A.a[1]) * A.uy;
+const spanOn = (A, B) => { const t1 = alongOf(A, B.a), t2 = alongOf(A, B.b); return [Math.min(t1, t2), Math.max(t1, t2)]; };
+const subSeg = (A, t0, t1) => segInfo([A.a[0] + A.ux * t0, A.a[1] + A.uy * t0], [A.a[0] + A.ux * t1, A.a[1] + A.uy * t1], A.layer);
+function dedupeFaces(segs) {                           // segs: [a, b, layer]
+  const S = segs.map(([a, b, l]) => segInfo(a, b, l)).filter(s => s.len > 0.5).sort((p, q) => q.len - p.len), keep = [];
+  for (const s of S) {
+    let dup = false;
+    for (const k of keep) {
+      if (!isParallel(k, s, 0.035) || Math.abs(perpOff(k, s.a)) > 1.25 || Math.abs(perpOff(k, s.b)) > 1.25) continue;
+      const [lo, hi] = spanOn(k, s);
+      if (Math.min(hi, k.len) - Math.max(lo, 0) >= 0.8 * s.len) { dup = true; break; }
     }
-    if (best >= 0) {
-      const B = info[best]; used[i] = used[best] = true;
-      const rev = A.ux * B.ux + A.uy * B.uy < 0;
-      const ba = rev ? B.b : B.a, bb = rev ? B.a : B.b;
-      out.push({ a: [(A.a[0] + ba[0]) / 2, (A.a[1] + ba[1]) / 2], b: [(A.b[0] + bb[0]) / 2, (A.b[1] + bb[1]) / 2], thick: Math.max(3, bestPerp) });
-    } else { used[i] = true; out.push({ a: A.a, b: A.b, thick: WALL_TH }); }   // unpaired → default thickness
+    if (!dup) keep.push(s);
+  }
+  return keep;
+}
+function mergeDoubleWalls(segsIn) {                    // accepts [a,b,layer] arrays or segInfo objects
+  const pool = segsIn.map(s => Array.isArray(s) ? segInfo(s[0], s[1], s[2]) : s).filter(s => s.len > 0.5), out = [];
+  for (let guard = 0; pool.length && guard < 50000; guard++) {
+    pool.sort((p, q) => q.len - p.len);
+    const A = pool.shift(); let best = -1, bestPerp = 1e9, bestOv = null;
+    for (let j = 0; j < pool.length; j++) {
+      const B = pool[j];
+      if (!isParallel(A, B, 0.06)) continue;
+      const pa = perpOff(A, B.a), pb = perpOff(A, B.b);
+      if (Math.sign(pa) !== Math.sign(pb)) continue;                       // B crosses A's line: not its other face
+      const perp = Math.abs((pa + pb) / 2);
+      if (perp < 1.5 || perp > 14) continue;                               // 1.5–14" apart → a wall's two faces
+      const [lo, hi] = spanOn(A, B), o0 = Math.max(lo, 0), o1 = Math.min(hi, A.len);
+      if (o1 - o0 < Math.min(6, 0.5 * Math.min(A.len, B.len))) continue;
+      if (perp < bestPerp - 0.25 || (Math.abs(perp - bestPerp) <= 0.25 && o1 - o0 > bestOv[1] - bestOv[0])) { best = j; bestPerp = perp; bestOv = [o0, o1]; }
+    }
+    if (best < 0) { out.push({ a: A.a, b: A.b, thick: WALL_TH, single: true, layer: A.layer, len: A.len }); continue; }
+    const B = pool.splice(best, 1)[0], [o0, o1] = bestOv;
+    const side = Math.sign(perpOff(A, B.a) + perpOff(A, B.b)), nx = -A.uy * side, ny = A.ux * side, h = bestPerp / 2;
+    out.push({ a: [A.a[0] + A.ux * o0 + nx * h, A.a[1] + A.uy * o0 + ny * h],
+               b: [A.a[0] + A.ux * o1 + nx * h, A.a[1] + A.uy * o1 + ny * h],
+               thick: Math.max(3, bestPerp), single: false, layer: A.layer, len: o1 - o0 });
+    if (o0 > 1) pool.push(subSeg(A, 0, o0));                               // A's unmatched ends
+    if (A.len - o1 > 1) pool.push(subSeg(A, o1, A.len));
+    const q = [alongOf(B, [A.a[0] + A.ux * o0, A.a[1] + A.uy * o0]), alongOf(B, [A.a[0] + A.ux * o1, A.a[1] + A.uy * o1])];
+    const q0 = Math.max(0, Math.min(...q)), q1 = Math.min(B.len, Math.max(...q));   // B's matched span, in B's frame
+    if (q0 > 1) pool.push(subSeg(B, 0, q0));
+    if (B.len - q1 > 1) pool.push(subSeg(B, q1, B.len));
   }
   return out;
 }
-// find the gaps in collinear wall runs — those are the openings
+function pruneSingles(walls) {
+  const paired = walls.filter(w => !w.single).map(w => ({ w, s: segInfo(w.a, w.b) }));
+  return walls.filter(w => {
+    if (!w.single) return true;
+    if (w.len < 10) return false;                        // jamb return / end cap / stop bead
+    const S = segInfo(w.a, w.b);
+    for (const { w: P, s: Pi } of paired) {              // a leftover face copy hugging a real wall
+      if (!isParallel(Pi, S, 0.06)) continue;
+      const lim = P.thick / 2 + 3;
+      if (Math.abs(perpOff(Pi, S.a)) > lim || Math.abs(perpOff(Pi, S.b)) > lim) continue;
+      const [lo, hi] = spanOn(Pi, S);
+      if (Math.min(hi, Pi.len) - Math.max(lo, 0) > 0.5 * S.len) return false;
+    }
+    return true;
+  });
+}
+// find the gaps in collinear wall runs — those are the openings (a gap wider than a door
+// only counts when the opening layers say what spans it: a window run or a garage door)
 function detectOpenings(walls) {
-  const lines = {};
+  // group collinear pieces by DISTANCE (same direction within 2°, same line within 2.5") —
+  // rounding offsets into buckets split one wall's pieces across a bucket edge and turned
+  // e.g. a window + a door into one 182" "gap"
+  const groups = [];
   for (const w of walls) {
-    const dx = w.b[0] - w.a[0], dy = w.b[1] - w.a[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
-    let ang = Math.atan2(uy, ux); if (ang < 0) ang += Math.PI;
-    const off = w.a[0] * -uy + w.a[1] * ux;            // perpendicular offset of the line
-    const key = Math.round(ang * 57.2958 / 2) + ':' + Math.round(off / 5);
-    (lines[key] = lines[key] || []).push(w);
+    if (w.single) continue;
+    let ang = Math.atan2(w.b[1] - w.a[1], w.b[0] - w.a[0]); if (ang < 0) ang += Math.PI; if (ang > Math.PI - 0.035) ang -= Math.PI;
+    const off = w.a[0] * -Math.sin(ang) + w.a[1] * Math.cos(ang);
+    let g = groups.find(g => Math.abs(g.ang - ang) < 0.035 && Math.abs(g.off - off) < 2.5);
+    if (!g) groups.push(g = { ang, off, ws: [] });
+    g.ws.push(w);
   }
   const gaps = [];
-  for (const key in lines) {
-    const grp = lines[key]; if (grp.length < 2) continue;
-    const dx = grp[0].b[0] - grp[0].a[0], dy = grp[0].b[1] - grp[0].a[1], len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len, ref = grp[0].a;
-    const spans = grp.map(w => { const t1 = (w.a[0] - ref[0]) * ux + (w.a[1] - ref[1]) * uy, t2 = (w.b[0] - ref[0]) * ux + (w.b[1] - ref[1]) * uy;
-      return { lo: Math.min(t1, t2), hi: Math.max(t1, t2), thick: w.thick }; }).sort((p, q) => p.lo - q.lo);
-    for (let i = 0; i + 1 < spans.length; i++) {
-      const gap = spans[i + 1].lo - spans[i].hi;
-      if (gap > 8 && gap < 130) gaps.push({ width: gap, ux, uy, thick: spans[i].thick,
-        a: [ref[0] + ux * spans[i].hi, ref[1] + uy * spans[i].hi], b: [ref[0] + ux * spans[i + 1].lo, ref[1] + uy * spans[i + 1].lo],
-        mid: [ref[0] + ux * (spans[i].hi + gap / 2), ref[1] + uy * (spans[i].hi + gap / 2)] });
+  for (const g of groups) {
+    if (g.ws.length < 2) continue;
+    const ux = Math.cos(g.ang), uy = Math.sin(g.ang), ref = g.ws[0].a;
+    const spans = g.ws.map(w => { const t1 = (w.a[0] - ref[0]) * ux + (w.a[1] - ref[1]) * uy, t2 = (w.b[0] - ref[0]) * ux + (w.b[1] - ref[1]) * uy;
+      return { lo: Math.min(t1, t2), hi: Math.max(t1, t2), thick: w.thick, layer: w.layer }; }).sort((p, q) => p.lo - q.lo);
+    let hi = spans[0].hi, last = spans[0];
+    for (let i = 1; i < spans.length; i++) {
+      const gap = spans[i].lo - hi;
+      if (gap > 8 && gap < 240) gaps.push({ width: gap, ux, uy, thick: Math.max(last.thick, spans[i].thick), layer: last.layer,
+        a: [ref[0] + ux * hi, ref[1] + uy * hi], b: [ref[0] + ux * spans[i].lo, ref[1] + uy * spans[i].lo],
+        mid: [ref[0] + ux * (hi + gap / 2), ref[1] + uy * (hi + gap / 2)] });
+      if (spans[i].hi > hi) { hi = spans[i].hi; last = spans[i]; }
     }
   }
   return gaps;
 }
-function classifyOpening(o, arcs, glaze) {
-  for (const arc of arcs) {                            // door swing arc near the gap → door
-    const d = Math.hypot(arc.cx - o.mid[0], arc.cy - o.mid[1]);
-    if (d < o.width * 1.1 && arc.r > o.width * 0.55 && arc.r < o.width * 1.7) return 'door';
+// what fills a gap — read from the layer the evidence is on (1.xDOORS arcs = door swings,
+// 1.xWINDOWS lines = glazing, 1.xGARAGEDOOR = overhead door). A plan still on one mixed
+// doors+windows layer (legacy) falls back to shape cues.
+function classifyOpening(o, ev) {
+  const nx = -o.uy, ny = o.ux, inGap = (p, slack) => {
+    const t = (p[0] - o.a[0]) * o.ux + (p[1] - o.a[1]) * o.uy, d = (p[0] - o.a[0]) * nx + (p[1] - o.a[1]) * ny;
+    return t > -slack && t < o.width + slack && Math.abs(d) < o.thick / 2 + 5; };
+  const alongGap = ([a, b]) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    return Math.abs((dx / L) * o.ux + (dy / L) * o.uy) > 0.85 ? L : 0; };
+  const cover = segs => segs.reduce((s, sg) => s + (inGap([(sg[0][0] + sg[1][0]) / 2, (sg[0][1] + sg[1][1]) / 2], 2) ? alongGap(sg) : 0), 0);
+  // door swings: arc centred on a jamb, radius = leaf, a real sweep (not a drafting curve)
+  const leaves = [];
+  for (const arc of ev.arcs) {
+    let sweep = ((arc.a1 ?? 360) - (arc.a0 ?? 0)); sweep = ((sweep % 360) + 360) % 360;
+    if (sweep < 25 || sweep > 100) continue;
+    const t = (arc.cx - o.a[0]) * o.ux + (arc.cy - o.a[1]) * o.uy, d = (arc.cx - o.a[0]) * nx + (arc.cy - o.a[1]) * ny;
+    if (Math.abs(d) > o.thick / 2 + 3 || t < -4 || t > o.width + 4) continue;
+    if (arc.r < 8 || arc.r > o.width + 4) continue;
+    const nearA = Math.abs(t) < 6, nearB = Math.abs(t - o.width) < 6;
+    let tt, dir;
+    if (nearA) { tt = 0; dir = 1; } else if (nearB) { tt = o.width; dir = -1; }
+    else if (ev.legacy) continue;                                      // mixed layer: a mid-gap arc may be a fixture
+    else {                                                             // doors layer: hinge between sidelights
+      tt = t; dir = t + arc.r <= o.width + 3 ? 1 : t - arc.r >= -3 ? -1 : 0; if (!dir) continue;
+    }
+    const am = ((arc.a0 ?? 0) + sweep / 2) * Math.PI / 180, mx = arc.cx + arc.r * Math.cos(am), my = arc.cy + arc.r * Math.sin(am);
+    const swingSide = Math.sign((mx - o.a[0]) * nx + (my - o.a[1]) * ny) || 1;
+    if (leaves.some(l => Math.abs(l.t - tt) < 3)) continue;
+    leaves.push({ t: tt, dir, r: Math.min(arc.r, o.width), swingSide, layer: arc.layer });
   }
-  const nx = -o.uy, ny = o.ux;
-  for (const [a, b] of glaze) {                        // line running along the wall inside the gap → window glazing
-    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-    if (Math.abs((mx - o.mid[0]) * o.ux + (my - o.mid[1]) * o.uy) > o.width / 2) continue;
-    if (Math.abs((mx - o.mid[0]) * nx + (my - o.mid[1]) * ny) > o.thick + 2) continue;
-    const sdx = b[0] - a[0], sdy = b[1] - a[1], slen = Math.hypot(sdx, sdy) || 1;
-    if (Math.abs((sdx / slen) * o.ux + (sdy / slen) * o.uy) > 0.85 && slen > o.width * 0.4) return 'window';
+  if (!ev.legacy && cover(ev.garage) > 0.4 * o.width) return { kind: 'overhead', layer: ev.garageLayer };
+  if (leaves.length) {
+    // the parts of the gap no leaf covers: glass when the windows layer draws it (sidelights)
+    const iv = leaves.map(l => [Math.min(l.t, l.t + l.dir * l.r), Math.max(l.t, l.t + l.dir * l.r)]).sort((p, q) => p[0] - q[0]);
+    const rest = []; let cur = 0;
+    for (const [a, b] of iv) { if (a - cur > 6) rest.push([cur, a]); cur = Math.max(cur, b); }
+    if (o.width - cur > 6) rest.push([cur, o.width]);
+    const restLen = rest.reduce((s, [a, b]) => s + b - a, 0);
+    const lite = restLen > 0 && cover(ev.win) > 0.5 * restLen;
+    return { kind: 'door', leaves, sidelights: lite ? rest : null, layer: leaves[0].layer };
   }
-  return 'opening';                                    // cased opening (pass-through)
+  if (!ev.legacy && cover(ev.doorSegs) > 0.4 * Math.min(o.width, 40)) return { kind: 'pocket', layer: ev.doorLayer };
+  const g = ev.legacy ? ev.glaze : ev.win;
+  if (cover(g) > 0.4 * o.width) return { kind: 'window', layer: ev.legacy ? ev.glazeLayer : ev.winLayer };
+  if (o.width <= 84) return { kind: 'opening', layer: o.layer };       // cased opening (pass-through)
+  return null;                                                        // wide gap with no evidence: leave open, no header
 }
-// raw 3D: layers render per assigned category; walls merge to solid walls with detected openings
+// source-colour debug view: every 3D part tinted by the DXF layer that produced it (the
+// layer panel's swatch colours); magenta = a wall guessed from a single line
+let srcColors = false, rawOps = [], rawObjs = [];
+const SINGLE_WALL_COLOR = '#ff2bd6';
+const srcMatCache = {};
+function srcMat(layer, normal, colorOverride) {
+  if (!srcColors) return normal;
+  const c = colorOverride || (rawLayers.find(L => L.name === layer) || {}).color || '#888888';
+  const k = c + (normal.transparent ? ':t' : '');
+  return srcMatCache[k] || (srcMatCache[k] = new THREE.MeshStandardMaterial({ color: new THREE.Color(c).getHex(), roughness: 0.8,
+    transparent: !!normal.transparent, opacity: normal.transparent ? 0.55 : 1 }));
+}
+function tagSrc(m, layer, what) { m.userData.src = { layer, what }; return m; }
+// labelled objects (1.xOBJNAMES: a closed footprint + a name) → what to build
+const OBJ_RULES = [                                   // [name test, how, base", top", source-layer suffix]
+  [n => /UPPER CAB/.test(n),                          'box', 54, 84, 'CASEWORK-UPPER'],
+  [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
+  [n => /BENCH/.test(n),                              'box', 0, 18, 'CASEWORK'],
+  [n => /ISLAND|COUNTER|COFFEE BAR/.test(n),          'counter', 0, 36, 'CASEWORK'],
+  [n => /REFRIG|FRIDGE/.test(n),                      'model', 0, 0, 'APPLIANCES'],
+  [n => /RANGE|DISHWASH|WASHER|DRYER/.test(n),        'model', 0, 0, 'APPLIANCES'],
+  [n => /APPLIANCE|FREEZER/.test(n),                  'box', 0, 34, 'APPLIANCES'],
+  [n => /TOILET|SHOWER|VANITY|TUB/.test(n),           'model', 0, 0, 'FIXTURES'],
+  [n => /STOOL|CHAIR/.test(n),                        'model', 0, 0, 'FURN'],
+];
+function rawObjects() {                               // pair each name with the footprint it sits in
+  const out = [];
+  for (const L of rawLayers) {
+    if (!/OBJNAMES$/.test(L.name)) continue;
+    const ents = byLayer(ENTS, L.name), polys = ents.filter(e => e.type === 'LWPOLYLINE' && e.pts.length >= 3);
+    for (const t of ents.filter(e => e.type === 'TEXT' && e.pts.length)) {
+      const [px, py] = t.pts[t.pts.length > 1 ? 1 : 0];
+      const poly = polys.find(p => pointIn(p.pts, px, py)); if (!poly) continue;
+      out.push({ name: (t.text || '').toUpperCase(), pts: poly.pts, prefix: L.name.replace(/OBJNAMES$/, '') });
+    }
+  }
+  return out;
+}
+function orientedRect(pts) {                          // long axis, centre, length, depth of a footprint
+  let best = null;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+    const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L;
+    let t0 = 1e9, t1 = -1e9, s0 = 1e9, s1 = -1e9;
+    for (const p of pts) { const t = p[0] * ux + p[1] * uy, s = -p[0] * uy + p[1] * ux; t0 = Math.min(t0, t); t1 = Math.max(t1, t); s0 = Math.min(s0, s); s1 = Math.max(s1, s); }
+    const area = (t1 - t0) * (s1 - s0);
+    if (!best || area < best.area - 1e-6) best = { area, ux, uy, t0, t1, s0, s1 };
+  }
+  let { ux, uy, t0, t1, s0, s1 } = best, len = t1 - t0, dep = s1 - s0;
+  if (dep > len) { [ux, uy] = [-uy, ux]; [len, dep] = [dep, len]; const [a0, a1, b0, b1] = [t0, t1, s0, s1];
+    t0 = b0; t1 = b1; s0 = -a1; s1 = -a0; }
+  const tc = (t0 + t1) / 2, sc = (s0 + s1) / 2;
+  return { cx: tc * ux - sc * uy, cy: tc * uy + sc * ux, ux, uy, len, dep };
+}
 function buildRaw() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
-  floors.length = 0; colliders.length = 0; doors = []; fixtures = []; fixtureColliders = []; planOpenings = [];
+  floors.length = 0; colliders.length = 0; doors = []; fixtures = []; fixtureColliders = []; planOpenings = []; rawOps = []; rawObjs = [];
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.92 });
   const structMat = new THREE.MeshStandardMaterial({ color: 0x9a86c8, roughness: 0.7 });
   const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 });
   const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, transparent: true, opacity: 0.35 });
-  let wallSegs = [], structSegs = [], beamSegs = [], openArcs = [], glazeSegs = [], openOn = false;
+  const garageMat = new THREE.MeshStandardMaterial({ color: 0xd9d6cc, roughness: 0.8 });
+  const cabMat = new THREE.MeshStandardMaterial({ color: 0xc9b89a, roughness: 0.75 });
+  const topMat = new THREE.MeshStandardMaterial({ color: 0x5b5752, roughness: 0.45 });
+  const objs = rawObjects(), objLayerSuffixes = new Set();
+  for (const o of objs) for (const r of OBJ_RULES) if (r[0](o.name)) { objLayerSuffixes.add(o.prefix + r[4]); break; }
+  let wallSegs = [], structSegs = [], structCircles = [], beamSegs = [], openOn = false;
+  const ev = { arcs: [], doorSegs: [], win: [], garage: [], glaze: [], legacy: true, doorLayer: null, winLayer: null, garageLayer: null, glazeLayer: null };
   const flat = [];
   for (const L of rawLayers) {
     if (!L.on) continue;
     const cat = layerCat[L.name] || 'linework';
     if (cat === 'hidden') continue;
+    const isGarage = /GARAGE/.test(L.name), isDoor = !isGarage && /DOOR/.test(L.name), isWin = /WIN|GLAZ/.test(L.name);
+    if (cat === 'openings' && (isGarage || isDoor || isWin)) ev.legacy = false;
     const segs = [];
     for (const e of byLayer(ENTS, L.name)) {
       if (e.type === 'HATCH' || e.type === 'WIPEOUT' || e.type === 'SOLID' || e.type === 'SECTION') continue;
-      if (cat === 'openings' && (e.type === 'ARC' || e.type === 'CIRCLE') && e.r) openArcs.push({ cx: e.cx, cy: e.cy, r: e.r });
+      if (cat === 'openings' && e.type === 'ARC' && e.r && (isDoor || !(isGarage || isWin)))
+        ev.arcs.push({ cx: e.cx, cy: e.cy, r: e.r, a0: e.a0, a1: e.a1, layer: L.name });
+      if (cat === 'structure' && e.type === 'CIRCLE' && e.r) { structCircles.push({ cx: e.cx, cy: e.cy, r: e.r, layer: L.name }); continue; }
       const p = e.pts; if (!p || p.length < 2) continue;
-      for (let i = 0; i + 1 < p.length; i++) segs.push([p[i], p[i + 1]]);
+      for (let i = 0; i + 1 < p.length; i++) segs.push([p[i], p[i + 1], L.name]);
     }
     if (cat === 'walls') wallSegs.push(...segs);
     else if (cat === 'structure') structSegs.push(...segs);
     else if (cat === 'beam') beamSegs.push(...segs);
-    else if (cat === 'openings') { openOn = true; glazeSegs.push(...segs); }
-    else flat.push({ color: L.color, segs });          // stairs / furniture / linework
+    else if (cat === 'openings') {
+      openOn = true;
+      if (isGarage) { ev.garage.push(...segs); ev.garageLayer = L.name; }
+      else if (isDoor) { ev.doorSegs.push(...segs); ev.doorLayer = L.name; }
+      else if (isWin) { ev.win.push(...segs); ev.winLayer = L.name; }
+      else { ev.glaze.push(...segs); ev.glazeLayer = L.name; }
+    }
+    else if (!(objs.length && objLayerSuffixes.has(L.name))) flat.push({ color: L.color, segs });   // objects rendered in 3D: skip their flat outline
   }
-  const merged = mergeDoubleWalls(wallSegs);
+  const merged = pruneSingles(mergeDoubleWalls(dedupeFaces(wallSegs)));
   applyMoveEdits(merged);                             // relocate walls the user pushed/pulled
   mergedWalls = merged;                               // live wall set (targets for the editor + export)
   // floor slab under the merged walls
@@ -745,32 +896,63 @@ function buildRaw() {
     const w = merged[wi];
     const ax = wx(w.a[0]), az = wz(w.a[1]), bx = wx(w.b[0]), bz = wz(w.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    const m = boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, wallMat);
+    const m = boxBetween(ax, az, bx, bz, w.thick, 0, WALL_H * IN2M, srcMat(w.layer, wallMat, w.single ? SINGLE_WALL_COLOR : null));
+    tagSrc(m, w.layer, w.single ? 'wall GUESSED from a single line (no second face found)' : `wall (two faces ${w.thick.toFixed(1)}" apart)`);
     m.userData.wallIndex = wi;                          // so a tap anywhere on the face grabs this wall
     root.add(m); wallMeshes.push(m);
     colliders.push({ ax, az, bx, bz, hw: w.thick / 2 * IN2M });
   }
-  // openings: header over each gap; door swing / window glazing / cased per classification
+  // openings: header over each gap; what fills it comes from the opening layers
+  // a gap with nothing drawn in it is only a cased opening if at least one side is a free
+  // wall end (a jamb). When BOTH ends are corners of other rooms, two unrelated walls just
+  // happen to line up across open floor (e.g. across a hallway) — no header there.
+  const solid = merged.filter(w => !w.single).map(w => ({ w, s: segInfo(w.a, w.b) }));
+  const isCorner = (p, o) => solid.some(({ w, s }) => {
+    if (Math.abs(s.ux * o.ux + s.uy * o.uy) > 0.5) return false;            // only walls crossing the gap line
+    const t = Math.max(0, Math.min(s.len, alongOf(s, p))), q = [s.a[0] + s.ux * t, s.a[1] + s.uy * t];
+    return Math.hypot(p[0] - q[0], p[1] - q[1]) <= w.thick / 2 + 3; });
   if (openOn) for (const o of detectOpenings(merged)) {
-    const kind = classifyOpening(o, openArcs, glazeSegs);
+    const c = classifyOpening(o, ev); if (!c) continue;
+    if (c.kind === 'opening' && isCorner(o.a, o) && isCorner(o.b, o)) continue;
+    rawOps.push({ ...o, kind: c.kind, leaves: c.leaves, layer: c.layer });
     const ax = wx(o.a[0]), az = wz(o.a[1]), bx = wx(o.b[0]), bz = wz(o.b[1]);
-    const th = o.thick, headY = HEAD * IN2M, top = WALL_H * IN2M;
-    if (headY < top) root.add(boxBetween(ax, az, bx, bz, th, headY, top, wallMat));   // header
-    if (kind === 'window') {
+    const th = o.thick, headY = HEAD * IN2M, top = WALL_H * IN2M, what = c.kind === 'opening' ? 'cased opening' : c.kind;
+    if (headY < top) root.add(tagSrc(boxBetween(ax, az, bx, bz, th, headY, top, srcMat(c.layer, wallMat)), c.layer, what + ' header'));
+    if (c.kind === 'window') {
       const sillY = SILL * IN2M;
-      root.add(boxBetween(ax, az, bx, bz, th, 0, sillY, wallMat));                     // apron
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, th, 0, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
       colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
-      root.add(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, glassMat));          // glazing
-    } else if (kind === 'door') {
-      const dl = Math.hypot(bx - ax, bz - az), closedRot = -Math.atan2(bz - az, bx - ax);
-      const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`, isOpen = !!doorState[key];
-      const pivot = new THREE.Group(); pivot.position.set(ax, 0, az);
-      pivot.rotation.y = closedRot + (isOpen ? DOOR_OPEN : 0); pivot.userData.doorKey = key;
-      const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, headY, WALL_TH * 0.5 * IN2M), leafMat);
-      leaf.position.set(dl / 2, headY / 2, 0); leaf.castShadow = true;
-      pivot.add(leaf); root.add(pivot);
-      doors.push({ key, pivot, closedRot, angle: isOpen ? DOOR_OPEN : 0, target: isOpen ? DOOR_OPEN : 0,
-        open: isOpen, leaf, cx: (ax + bx) / 2, cz: (az + bz) / 2, seg: { ax, az, bx, bz, hw: th / 2 * IN2M } });
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, srcMat(c.layer, glassMat)), c.layer, 'window glass'));
+    } else if (c.kind === 'overhead') {                 // overhead garage door, shown closed
+      root.add(tagSrc(boxBetween(ax, az, bx, bz, 2, 0, headY, srcMat(c.layer, garageMat)), c.layer, 'overhead garage door'));
+      colliders.push({ ax, az, bx, bz, hw: 1 * IN2M });
+    } else if (c.kind === 'door') {
+      const P = t => [o.a[0] + o.ux * t, o.a[1] + o.uy * t];
+      let covered = 0;
+      c.leaves.forEach((lf, li) => {
+        const h = P(lf.t), tip = P(lf.t + lf.dir * lf.r);        // hinge at the jamb, leaf = arc radius
+        covered += lf.r;
+        const hx = wx(h[0]), hz = wz(h[1]), tx = wx(tip[0]), tz = wz(tip[1]);
+        const dl = Math.hypot(tx - hx, tz - hz), closedRot = -Math.atan2(tz - hz, tx - hx);
+        // DOOR_OPEN swings the leaf to the plan-right of hinge→latch; open the way the arc sweeps
+        const dxp = lf.dir * o.ux, dyp = lf.dir * o.uy, right = [dyp, -dxp];
+        const swingN = [-o.uy * lf.swingSide, o.ux * lf.swingSide];
+        const openAngle = (right[0] * swingN[0] + right[1] * swingN[1]) > 0 ? DOOR_OPEN : -DOOR_OPEN;
+        const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}${c.leaves.length > 1 ? ':' + li : ''}`, isOpen = !!doorState[key];
+        const pivot = new THREE.Group(); pivot.position.set(hx, 0, hz);
+        pivot.rotation.y = closedRot + (isOpen ? openAngle : 0); pivot.userData.doorKey = key;
+        const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, headY, 1.75 * IN2M), srcMat(lf.layer, leafMat));
+        tagSrc(leaf, lf.layer, `door leaf ${Math.round(lf.r)}" (hinge + swing from the drawn arc)`);
+        leaf.position.set(dl / 2, headY / 2, 0); leaf.castShadow = true;
+        pivot.add(leaf); root.add(pivot);
+        doors.push({ key, pivot, closedRot, openAngle, angle: isOpen ? openAngle : 0, target: isOpen ? openAngle : 0,
+          open: isOpen, leaf, cx: (hx + tx) / 2, cz: (hz + tz) / 2, seg: { ax: hx, az: hz, bx: tx, bz: tz, hw: th / 2 * IN2M } });
+      });
+      for (const [t0, t1] of (c.sidelights || [])) {     // fixed glass beside the leaf (entry sidelights)
+        const s0 = P(t0), s1 = P(t1), X0 = wx(s0[0]), Z0 = wz(s0[1]), X1 = wx(s1[0]), Z1 = wz(s1[1]);
+        root.add(tagSrc(boxBetween(X0, Z0, X1, Z1, th * 0.4, 0, headY, srcMat(ev.winLayer, glassMat)), ev.winLayer, 'sidelight glass'));
+        colliders.push({ ax: X0, az: Z0, bx: X1, bz: Z1, hw: th * 0.2 * IN2M });
+      }
     }
   }
   // beams: the drawn line pair → one member of measured width, hung from the ceiling down to door-head
@@ -778,13 +960,60 @@ function buildRaw() {
   for (const b of mergeDoubleWalls(beamSegs)) {
     const ax = wx(b.a[0]), az = wz(b.a[1]), bx = wx(b.b[0]), bz = wz(b.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(boxBetween(ax, az, bx, bz, b.thick, HEAD * IN2M, WALL_H * IN2M, wallMat));
+    root.add(tagSrc(boxBetween(ax, az, bx, bz, b.thick, HEAD * IN2M, WALL_H * IN2M, srcMat(b.layer, wallMat)), b.layer, 'beam (overhead header)'));
   }
-  // structure posts + flat reference linework
-  for (const [a, b] of structSegs) {
+  // structure: posts drawn as circles become round columns; other linework as thin posts
+  for (const p of structCircles) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(p.r * IN2M, p.r * IN2M, WALL_H * IN2M, 20), srcMat(p.layer, wallMat));
+    m.position.set(wx(p.cx), WALL_H * IN2M / 2, wz(p.cy)); m.castShadow = true; root.add(tagSrc(m, p.layer, 'post'));
+    colliders.push({ ax: wx(p.cx), az: wz(p.cy), bx: wx(p.cx) + 1e-3, bz: wz(p.cy), hw: p.r * IN2M });
+  }
+  for (const [a, b, lay] of structSegs) {
     const ax = wx(a[0]), az = wz(a[1]), bx = wx(b[0]), bz = wz(b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
-    root.add(boxBetween(ax, az, bx, bz, 3, 0, WALL_H * IN2M, structMat));
+    root.add(tagSrc(boxBetween(ax, az, bx, bz, 3, 0, WALL_H * IN2M, srcMat(lay, structMat)), lay, 'structure'));
+  }
+  // labelled objects → GLB models / extruded casework (each follows its source layer's toggle)
+  for (const o of objs) {
+    const rule = OBJ_RULES.find(r => r[0](o.name)); if (!rule) continue;
+    const [, how, y0, y1, suffix] = rule, srcLayer = o.prefix + suffix, L = rawLayers.find(x => x.name === srcLayer);
+    if (L && !L.on) continue;
+    const R = orientedRect(o.pts);
+    rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep });
+    if (how === 'box' || how === 'counter') {             // extrude the footprint (handles L-shaped runs)
+      const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
+      const body = (how === 'counter' ? 34.5 : y1) - y0;
+      const mk = (h, mat) => { const g = new THREE.ExtrudeGeometry(shape, { depth: h * IN2M, bevelEnabled: false });
+        const m = new THREE.Mesh(g, mat); m.rotation.x = -Math.PI / 2; m.castShadow = m.receiveShadow = true; return m; };
+      const m = mk(body, srcMat(srcLayer, cabMat)); m.position.y = y0 * IN2M; root.add(tagSrc(m, srcLayer, o.name.toLowerCase()));
+      if (how === 'counter') { const t = mk(1.5, srcMat(srcLayer, topMat)); t.position.y = 34.5 * IN2M; root.add(tagSrc(t, srcLayer, o.name.toLowerCase() + ' (countertop)')); }
+      if (y0 < 30) for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length];
+        fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
+      continue;
+    }
+    // model: faces away from the nearest wall (its back to the wall it stands against)
+    let nx = -R.uy, ny = R.ux, bestD = 1e9;
+    for (const w of merged) { if (w.single) continue;
+      const S = segInfo(w.a, w.b), d = Math.abs(perpOff(S, [R.cx, R.cy]));
+      if (isParallel(S, segInfo([0, 0], [R.ux, R.uy]), 0.2) && d < bestD) {
+        const [lo, hi] = spanOn(S, segInfo([R.cx - R.ux * R.len / 2, R.cy - R.uy * R.len / 2], [R.cx + R.ux * R.len / 2, R.cy + R.uy * R.len / 2]));
+        if (Math.min(hi, S.len) - Math.max(lo, 0) > 0) { bestD = d; const s = perpOff(S, [R.cx, R.cy]) >= 0 ? 1 : -1; nx = -S.uy * s; ny = S.ux * s; } } }
+    // most specific tag wins: a stool is tagged chair+seating and must not wear the sofa
+    const tags = [...fixtureTags(o.name)].filter(t => t !== 'any' && t !== 'seating');
+    const asset = ASSET_LIST.find(a => a.tags && a.tags.some(t => tags.includes(t)));
+    const key = `obj:${Math.round(R.cx)},${Math.round(R.cy)}`;
+    const grp = new THREE.Group(); grp.position.set(wx(R.cx), 0, wz(R.cy));
+    grp.rotation.y = Math.atan2(nx, -ny);                 // model +Z → plan front (nx, ny); world z = -plan y
+    grp.userData.fixtureKey = key; grp.userData.fixtureName = o.name.toLowerCase(); grp.userData.src = { layer: srcLayer, what: o.name.toLowerCase() };
+    root.add(grp);
+    fixtures.push({ key, name: o.name.toLowerCase(), w: R.len * IN2M, d: R.dep * IN2M, cx: R.cx, cy: R.cy, group: grp });
+    const ov = perFixtureAssets[key], id = ov === '__none__' ? null : ov ? ov : asset ? asset.id : null;
+    if (srcColors) { const b = new THREE.Mesh(new THREE.BoxGeometry(R.len * IN2M, 0.9, R.dep * IN2M), srcMat(srcLayer, cabMat));
+      b.position.y = 0.45; grp.add(b); }
+    else loadFixtureModel(grp, id, R.len * IN2M, R.dep * IN2M);
+    const hx = R.len / 2, hz = R.dep / 2, cor = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) =>
+      [wx(R.cx + R.ux * u - R.uy * v), wz(R.cy + R.uy * u + R.ux * v)]);
+    for (let i = 0; i < 4; i++) { const a = cor[i], b = cor[(i + 1) % 4]; fixtureColliders.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], hw: 0.03 }); }
   }
   for (const { color, segs } of flat) {
     const pts = [];
@@ -1219,6 +1448,7 @@ function loadPlan(src) {
       if (!scene.getObjectById(editMarkers.id)) scene.add(editMarkers);
       buildRaw(); apply2DVisibility(); framePlan(null);
       if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
+      if (typeof srcBtn !== 'undefined') srcBtn.style.display = '';
     } else {
       const wasRaw = rawMode; rawMode = false;
       editMode = false; wallDrag = null; hoverWall = null; editMarkers.clear();
@@ -1229,6 +1459,7 @@ function loadPlan(src) {
       if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
       else { apply2DVisibility(); framePlan(planDef.spawn || null); }
       if (typeof twoDBtn !== 'undefined') twoDBtn.style.display = '';
+      if (typeof srcBtn !== 'undefined') { srcBtn.style.display = 'none'; srcColors = false; }
     }
     errEl.style.display = 'none';
   }).catch(e => {
@@ -1254,7 +1485,7 @@ canvas.addEventListener('click', (e) => {
   if (mode === 'walk') {
     if (document.pointerLockElement === canvas) toggleDoor((nearestDoor(walker.x, walker.z, 2.0) || {}).key);
     else canvas.requestPointerLock();
-  } else if (moved < 6 && !doorAtScreen(e.clientX, e.clientY)) fixtureAtScreen(e.clientX, e.clientY);  // orbit: click door or fixture
+  } else if (moved < 6 && !srcAtScreen(e.clientX, e.clientY) && !doorAtScreen(e.clientX, e.clientY)) fixtureAtScreen(e.clientX, e.clientY);  // orbit: source info / door / fixture
 });
 canvas.addEventListener('pointermove', e => {          // desktop hover: highlight the wall you'd grab
   if (editMode && mode === 'orbit' && !view2D && !wallDrag && e.pointerType !== 'touch') editHover(e.clientX, e.clientY);
@@ -1292,7 +1523,7 @@ function doorTick(dt) {
 }
 function toggleDoor(key) {
   const d = doors.find(x => x.key === key); if (!d) return false;
-  d.open = !d.open; d.target = d.open ? DOOR_OPEN : 0; doorState[key] = d.open; return true;
+  d.open = !d.open; d.target = d.open ? (d.openAngle ?? DOOR_OPEN) : 0; doorState[key] = d.open; return true;
 }
 const doorRay = new THREE.Raycaster();
 function doorAtScreen(clientX, clientY) {
@@ -1530,6 +1761,29 @@ twoDBtn.onclick = () => {
     apply2DVisibility(); place();
   }
 };
+// source colours — tint every 3D part by the DXF layer that produced it (debug aid)
+const srcBtn = document.createElement('button');
+srcBtn.textContent = '🎨 source'; srcBtn.className = 'hud-btn'; srcBtn.style.background = '#4a5568'; srcBtn.style.display = 'none';
+srcBtn.title = 'colour each 3D part by the DXF layer that built it (magenta = wall guessed from one line); tap a part to see its source';
+hud.appendChild(srcBtn);
+srcBtn.onclick = () => { srcColors = !srcColors; srcBtn.classList.toggle('on', srcColors);
+  srcBtn.style.background = srcColors ? '#b83280' : '#4a5568'; if (rawMode && !view2D) buildRaw(); };
+const srcRay = new THREE.Raycaster();
+function srcAtScreen(clientX, clientY) {
+  if (!srcColors || !root) return false;
+  const r = canvas.getBoundingClientRect();
+  srcRay.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera);
+  for (const h of srcRay.intersectObjects(root.children, true)) {
+    let n = h.object; while (n && !n.userData.src) n = n.parent;
+    if (!n) continue;
+    const L = rawLayers.find(x => x.name === n.userData.src.layer);
+    layerInfo.innerHTML = `<span class="sw" style="display:inline-block;width:10px;height:10px;background:${L ? L.color : '#888'};margin-right:6px"></span>`
+      + `<b>${n.userData.src.layer || '(no layer)'}</b><div style="color:#c9d1e0;margin-top:4px">${n.userData.src.what}</div>`;
+    layerInfo.style.left = Math.min(clientX, innerWidth - 260) + 'px'; layerInfo.style.top = clientY + 'px'; layerInfo.style.display = 'block';
+    return true;
+  }
+  return false;
+}
 addEventListener('keydown', e => {
   if (e.code === 'Escape') {
     if (editMode) { if (wallDrag) { wallDrag = null; refreshEditViz(); } else toggleWallEdit(); return; }
@@ -1952,6 +2206,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
+  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); },
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
