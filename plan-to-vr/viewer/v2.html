@@ -106,6 +106,8 @@ function parseDXF(text) {
     else if (code === '40') cur.h = parseFloat(val);
     else if (code === '50') cur.a0 = parseFloat(val);
     else if (code === '51') cur.a1 = parseFloat(val);
+    else if (code === '41') cur.p0 = parseFloat(val);
+    else if (code === '42') cur.p1 = parseFloat(val);
     else if (code === '10') cur._x = parseFloat(val);
     else if (code === '20') cur.pts.push([cur._x, parseFloat(val)]);
     else if (code === '11') cur._x2 = parseFloat(val);
@@ -120,6 +122,13 @@ function parseDXF(text) {
       const n = Math.max(4, Math.ceil((a1 - a0) / (Math.PI / 24))), p = [];
       for (let k = 0; k <= n; k++) { const a = a0 + (a1 - a0) * k / n; p.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
       e.pts = p;
+    } else if (e.type === 'ELLIPSE' && e.pts.length === 2) {   // was drawn as a line centre → axis tip
+      const [[cx, cy], [mx, my]] = e.pts, ratio = e.h || 1, R = Math.hypot(mx, my), rot = Math.atan2(my, mx);
+      let t0 = e.p0 || 0, t1 = e.p1 == null ? 2 * Math.PI : e.p1; if (t1 <= t0) t1 += 2 * Math.PI;
+      const n = Math.max(8, Math.ceil((t1 - t0) / (Math.PI / 24))), p = [];
+      for (let k = 0; k <= n; k++) { const t = t0 + (t1 - t0) * k / n, x = R * Math.cos(t), y = R * ratio * Math.sin(t);
+        p.push([cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]); }
+      e.cx = cx; e.cy = cy; e.pts = p;
     } else if (e.type === 'CIRCLE' && e.pts.length && e.h) {
       const [cx, cy] = e.pts[0], r = e.h, n = 40, p = [];
       e.cx = cx; e.cy = cy; e.r = r;
@@ -827,6 +836,7 @@ function srcMat(layer, normal, colorOverride) {
 function tagSrc(m, layer, what) { m.userData.src = { layer, what }; return m; }
 // labelled objects (1.xOBJNAMES: a closed footprint + a name) → what to build
 const OBJ_RULES = [                                   // [name test, how, base", top" (model: height"), source-layer suffix]
+  [n => /LOW WALL|HALF WALL|PONY WALL|KNEE WALL/.test(n), 'box', 0, 42, 'CASEWORK'],
   [n => /UPPER CAB/.test(n),                          'box', 54, 84, 'CASEWORK-UPPER'],
   [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
   [n => /BENCH/.test(n),                              'box', 0, 18, 'CASEWORK'],
@@ -838,9 +848,9 @@ const OBJ_RULES = [                                   // [name test, how, base",
   [n => /WASHER|DRYER/.test(n),                       'model', 0, 38, 'APPLIANCES'],
   [n => /APPLIANCE|FREEZER/.test(n),                  'box', 0, 34, 'APPLIANCES'],
   [n => /TOILET/.test(n),                             'model', 0, 30, 'FIXTURES'],
-  [n => /SHOWER/.test(n),                             'model', 0, 80, 'FIXTURES'],
+  [n => /TUB/.test(n),                                'model', 0, 22, 'FIXTURES'],    // a tub/shower is a tub (+ glass, below)
+  [n => /SHOWER/.test(n),                             'shower', 0, 78, 'FIXTURES'],   // pan + glass on the open sides + head
   [n => /VANITY/.test(n),                             'model', 0, 34, 'FIXTURES'],
-  [n => /TUB/.test(n),                                'model', 0, 22, 'FIXTURES'],
   [n => /STOOL|CHAIR/.test(n),                        'model', 0, 36, 'FURN'],
 ];
 function loadModelFit(grp, id, w, d, h) {            // stretch a GLB to exactly fill its footprint at a set height
@@ -890,7 +900,7 @@ function orientedRect(pts) {                          // long axis, centre, leng
 // wins, so a landing drawn inside the garage keeps its own height. An outline labelled
 // "STEPS nR" is a flight of n risers between whatever levels sit on either side of it.
 function rawLevels() {
-  const polys = [], texts = [];
+  const polys = [], texts = [], arrows = [];
   for (const L of rawLayers) {
     if (!L.on || layerCat[L.name] !== 'floor') continue;
     for (const e of byLayer(ENTS, L.name)) {
@@ -898,7 +908,8 @@ function rawLevels() {
         let a = 0; for (let i = 0; i < e.pts.length; i++) { const p = e.pts[i], q = e.pts[(i + 1) % e.pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
         polys.push({ pts: e.pts, elev: e.elev || 0, layer: L.name, area: Math.abs(a / 2), name: '', steps: null,
           c: [e.pts.reduce((s, p) => s + p[0], 0) / e.pts.length, e.pts.reduce((s, p) => s + p[1], 0) / e.pts.length] });
-      } else if (e.type === 'TEXT' && e.pts.length) texts.push(e);
+      } else if ((e.type === 'LWPOLYLINE' || e.type === 'LINE') && e.pts.length === 2) arrows.push(e.pts);
+      else if (e.type === 'TEXT' && e.pts.length) texts.push(e);
     }
   }
   polys.sort((a, b) => a.area - b.area);
@@ -910,6 +921,12 @@ function rawLevels() {
     P.steps = +((P.name.match(/(\d+)\s*R\b/) || [])[1]) || 0;
     const m = P.name.match(/(-?\d+(?:\.\d+)?)\s*(?:TO|->|→)\s*(-?\d+(?:\.\d+)?)/);   // "0 TO -77": explicit top → bottom
     if (m) P.span = [Math.max(+m[1], +m[2]), Math.min(+m[1], +m[2])];
+    P.dn = /\b(DN|DOWN)\b/.test(P.name) ? true : /\bUP\b/.test(P.name) ? false : null;
+  }
+  // the architect's stair arrow: starts where you step on, points the way you walk (label says DN/UP)
+  for (const [a, b] of arrows) {
+    const P = polys.find(p => p.steps !== null && pointIn(p.pts, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2));
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (P && L > 1) P.walk = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
   }
   return polys;
 }
@@ -924,6 +941,8 @@ function buildRaw() {
   const garageMat = new THREE.MeshStandardMaterial({ color: 0xd9d6cc, roughness: 0.8 });
   const cabMat = new THREE.MeshStandardMaterial({ color: 0xc9b89a, roughness: 0.75 });
   const topMat = new THREE.MeshStandardMaterial({ color: 0x5b5752, roughness: 0.45 });
+  const panMat = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.35 });
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.85, roughness: 0.25 });
   const objs = rawObjects(), objLayerSuffixes = new Set();
   for (const o of objs) for (const r of OBJ_RULES) if (r[0](o.name)) { objLayerSuffixes.add(o.prefix + r[4]); break; }
   let wallSegs = [], structSegs = [], structCircles = [], beamSegs = [], openOn = false;
@@ -969,7 +988,12 @@ function buildRaw() {
     const S = [[R.ux, R.uy, R.len, R.dep], [-R.ux, -R.uy, R.len, R.dep], [nx, ny, R.dep, R.len], [-nx, -ny, R.dep, R.len]]
       .map(([dx, dy, run, width]) => ({ dx, dy, run, width, lv: at(dx, dy, run / 2 + 3) }));
     let k;
-    if (l.span) { [l.hi, l.lo] = l.span; k = S.reduce((b, s, i) => Math.abs(s.lv - l.hi) < Math.abs(S[b].lv - l.hi) ? i : b, 0); }
+    if (l.walk && l.dn !== null) {                     // arrow + DN/UP: the high side is where a descent starts
+      const down = l.dn ? l.walk : [-l.walk[0], -l.walk[1]];                  // high → low
+      k = S.reduce((b, s, i) => (-(s.dx * down[0] + s.dy * down[1])) > (-(S[b].dx * down[0] + S[b].dy * down[1])) ? i : b, 0);
+      const lvHi = S[k].lv, lvLo = S[k ^ 1].lv;
+      [l.hi, l.lo] = l.span || [Math.max(lvHi, lvLo), Math.min(lvHi, lvLo)];
+    } else if (l.span) { [l.hi, l.lo] = l.span; k = S.reduce((b, s, i) => Math.abs(s.lv - l.hi) < Math.abs(S[b].lv - l.hi) ? i : b, 0); }
     else { const dAl = Math.abs(S[0].lv - S[1].lv), dAc = Math.abs(S[2].lv - S[3].lv), a = dAl >= dAc ? 0 : 2;
       k = S[a].lv >= S[a + 1].lv ? a : a + 1; l.hi = S[k].lv; l.lo = S[k ^ 1].lv; }
     Object.assign(l, { R, r: [-S[k].dx, -S[k].dy], run: S[k].run, width: S[k].width });   // run: high side → low side
@@ -1124,6 +1148,42 @@ function buildRaw() {
     if (L && !L.on) continue;
     const R = orientedRect(o.pts), lv = levelAt(R.cx, R.cy);
     rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep });
+    if (how === 'shower' || (/SHOWER/.test(o.name) && /TUB/.test(o.name))) {
+      // glass on every footprint side that isn't against a wall; the head on the shortest walled side
+      const pts = o.pts, n = pts.length, ccx = pts.reduce((a, p) => a + p[0], 0) / n, ccy = pts.reduce((a, p) => a + p[1], 0) / n;
+      const glassFrom = how === 'shower' ? 4 : 22, headAt = 78;
+      let headEdge = null;
+      for (let i = 0; i < n; i++) {
+        const a = pts[i], b = pts[(i + 1) % n], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 6) continue;
+        const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        let nx = -uy, ny = ux; if ((m[0] - ccx) * nx + (m[1] - ccy) * ny < 0) { nx = -nx; ny = -ny; }   // outward
+        const q = [m[0] + nx * 1.5, m[1] + ny * 1.5];
+        const walled = merged.some(w => { if (w.single) return false; const S = segInfo(w.a, w.b), t = alongOf(S, q);
+          if (t < -2 || t > S.len + 2) return false;
+          return Math.hypot(q[0] - (S.a[0] + S.ux * t), q[1] - (S.a[1] + S.uy * t)) <= w.thick / 2 + 3; });
+        if (walled) { if (!headEdge || L < headEdge.L) headEdge = { m, nx, ny, L }; continue; }
+        const onLow = objs.some(x => /LOW WALL|HALF WALL|PONY WALL/.test(x.name) && pointIn(x.pts, q[0], q[1]));   // glass sits on the half wall
+        const g = boxBetween(wx(a[0] - nx * 0.4), wz(a[1] - ny * 0.4), wx(b[0] - nx * 0.4), wz(b[1] - ny * 0.4), 0.4,
+          (lv + (onLow ? 42 : glassFrom)) * IN2M, (lv + headAt) * IN2M, srcMat(srcLayer, glassMat));
+        root.add(tagSrc(g, srcLayer, o.name.toLowerCase() + ' — glass (open side)'));
+        fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 });
+      }
+      if (how === 'shower') {
+        const shape = new THREE.Shape(pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
+        const pan = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 4 * IN2M, bevelEnabled: false }), srcMat(srcLayer, panMat));
+        pan.rotation.x = -Math.PI / 2; pan.position.y = lv * IN2M; pan.receiveShadow = true;
+        root.add(tagSrc(pan, srcLayer, o.name.toLowerCase() + ' — pan'));
+        const drain = new THREE.Mesh(new THREE.CylinderGeometry(1.5 * IN2M, 1.5 * IN2M, 0.2 * IN2M, 16), chromeMat);
+        drain.position.set(wx(R.cx), (lv + 4.1) * IN2M, wz(R.cy)); root.add(drain);
+      }
+      if (headEdge) {                                     // arm out of the wall + a round head
+        const { m, nx, ny } = headEdge, hx = m[0] - nx * 6, hy = m[1] - ny * 6;
+        const arm = boxBetween(wx(m[0]), wz(m[1]), wx(hx), wz(hy), 0.8, (lv + headAt + 1) * IN2M, (lv + headAt + 1.8) * IN2M, chromeMat);
+        const head = new THREE.Mesh(new THREE.CylinderGeometry(3 * IN2M, 2 * IN2M, 1 * IN2M, 20), chromeMat);
+        head.position.set(wx(hx), (lv + headAt) * IN2M, wz(hy)); root.add(arm, tagSrc(head, srcLayer, o.name.toLowerCase() + ' — head'));
+      }
+      if (how === 'shower') continue;                     // a tub/shower still gets its tub model below
+    }
     if (how === 'box' || how === 'counter') {             // extrude the footprint (handles L-shaped runs)
       const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
       const body = (how === 'counter' ? 34.5 : y1) - y0;
@@ -2356,7 +2416,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); },
+  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
