@@ -781,6 +781,37 @@ function classifyOpening(o, ev) {
   if (o.width <= 84) return { kind: 'opening', layer: o.layer };       // cased opening (pass-through)
   return null;                                                        // wide gap with no evidence: leave open, no header
 }
+// wall ends: a wall only runs as far as its two drawn faces overlap, so at an L-corner
+// both walls stop short of the outer corner (an empty square) and a partition stops shy
+// of the wall it meets. Extend each end that reaches a crossing wall to that wall's
+// centreline + half its thickness: corners close, T-junctions tuck in. Ends only grow,
+// and only toward CROSSING walls — door gaps (between collinear pieces) are untouched.
+function extendEnds(walls) {
+  const W = walls.map(w => ({ w, s: segInfo(w.a, w.b) }));
+  for (const A of W) {
+    if (A.w.single) continue;
+    for (const end of ['a', 'b']) {
+      const E = A.w[end], ux = end === 'b' ? A.s.ux : -A.s.ux, uy = end === 'b' ? A.s.uy : -A.s.uy;   // outward
+      let best = null;
+      for (const B of W) {
+        if (B === A || B.w.single) continue;
+        const cross = ux * B.s.uy - uy * B.s.ux; if (Math.abs(cross) < 0.5) continue;      // crossing walls only (>30°)
+        // intersection of A's line (E + u·s) with B's line
+        const s = ((B.s.a[0] - E[0]) * B.s.uy - (B.s.a[1] - E[1]) * B.s.ux) / cross;
+        const reach = B.w.thick / 2 + A.w.thick / 2 + 4;
+        if (s < -B.w.thick || s > reach) continue;
+        const P = [E[0] + ux * s, E[1] + uy * s], t = alongOf(B.s, P);
+        if (t < -(A.w.thick / 2 + 4) || t > B.s.len + A.w.thick / 2 + 4) continue;           // B must reach the junction
+        if (!best || Math.abs(s) < Math.abs(best.s)) best = { s, P, B };
+      }
+      if (!best) continue;
+      const ext = best.s + best.B.w.thick / 2 / Math.abs(ux * best.B.s.uy - uy * best.B.s.ux);  // to B's far face
+      if (ext > 0.05) A.w[end] = [E[0] + ux * ext, E[1] + uy * ext];
+    }
+    A.s = segInfo(A.w.a, A.w.b);
+  }
+  return walls;
+}
 // source-colour debug view: every 3D part tinted by the DXF layer that produced it (the
 // layer panel's swatch colours); magenta = a wall guessed from a single line
 let srcColors = false, rawOps = [], rawObjs = [];
@@ -795,17 +826,36 @@ function srcMat(layer, normal, colorOverride) {
 }
 function tagSrc(m, layer, what) { m.userData.src = { layer, what }; return m; }
 // labelled objects (1.xOBJNAMES: a closed footprint + a name) → what to build
-const OBJ_RULES = [                                   // [name test, how, base", top", source-layer suffix]
+const OBJ_RULES = [                                   // [name test, how, base", top" (model: height"), source-layer suffix]
   [n => /UPPER CAB/.test(n),                          'box', 54, 84, 'CASEWORK-UPPER'],
   [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
   [n => /BENCH/.test(n),                              'box', 0, 18, 'CASEWORK'],
-  [n => /ISLAND|COUNTER|COFFEE BAR/.test(n),          'counter', 0, 36, 'CASEWORK'],
-  [n => /REFRIG|FRIDGE/.test(n),                      'model', 0, 0, 'APPLIANCES'],
-  [n => /RANGE|DISHWASH|WASHER|DRYER/.test(n),        'model', 0, 0, 'APPLIANCES'],
+  [n => /COFFEE/.test(n),                             'model', 0, 34, 'FURN'],        // a furniture piece (table), per owner
+  [n => /ISLAND|COUNTER/.test(n),                     'counter', 0, 36, 'CASEWORK'],
+  [n => /REFRIG|FRIDGE/.test(n),                      'model', 0, 70, 'APPLIANCES'],  // full height
+  [n => /RANGE/.test(n),                              'model', 0, 36, 'APPLIANCES'],
+  [n => /DISHWASH/.test(n),                           'model', 0, 34.5, 'APPLIANCES'],
+  [n => /WASHER|DRYER/.test(n),                       'model', 0, 38, 'APPLIANCES'],
   [n => /APPLIANCE|FREEZER/.test(n),                  'box', 0, 34, 'APPLIANCES'],
-  [n => /TOILET|SHOWER|VANITY|TUB/.test(n),           'model', 0, 0, 'FIXTURES'],
-  [n => /STOOL|CHAIR/.test(n),                        'model', 0, 0, 'FURN'],
+  [n => /TOILET/.test(n),                             'model', 0, 30, 'FIXTURES'],
+  [n => /SHOWER/.test(n),                             'model', 0, 80, 'FIXTURES'],
+  [n => /VANITY/.test(n),                             'model', 0, 34, 'FIXTURES'],
+  [n => /TUB/.test(n),                                'model', 0, 22, 'FIXTURES'],
+  [n => /STOOL|CHAIR/.test(n),                        'model', 0, 36, 'FURN'],
 ];
+function loadModelFit(grp, id, w, d, h) {            // stretch a GLB to exactly fill its footprint at a set height
+  const stand = () => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.8 }));
+    m.position.y = h / 2; m.castShadow = true; grp.add(m); };
+  if (!id) return stand();
+  gltf.load('./' + id.replace(/^\.?\//, ''), g => {
+    const model = g.scene; let bb = new THREE.Box3().setFromObject(model); const sz = bb.getSize(new THREE.Vector3());
+    model.scale.set(w / (sz.x || 1), h / (sz.y || 1), d / (sz.z || 1));
+    bb = new THREE.Box3().setFromObject(model); const c = bb.getCenter(new THREE.Vector3());
+    model.position.set(-c.x, -bb.min.y, -c.z);
+    model.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    grp.add(model);
+  }, undefined, stand);
+}
 function rawObjects() {                               // pair each name with the footprint it sits in
   const out = [];
   for (const L of rawLayers) {
@@ -880,6 +930,7 @@ function buildRaw() {
   }
   const merged = pruneSingles(mergeDoubleWalls(dedupeFaces(wallSegs)));
   applyMoveEdits(merged);                             // relocate walls the user pushed/pulled
+  extendEnds(merged);                                 // close L-corners, tuck T-junctions in
   mergedWalls = merged;                               // live wall set (targets for the editor + export)
   // floor slab under the merged walls
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
@@ -991,26 +1042,29 @@ function buildRaw() {
         fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
       continue;
     }
-    // model: faces away from the nearest wall (its back to the wall it stands against)
-    let nx = -R.uy, ny = R.ux, bestD = 1e9;
-    for (const w of merged) { if (w.single) continue;
-      const S = segInfo(w.a, w.b), d = Math.abs(perpOff(S, [R.cx, R.cy]));
-      if (isParallel(S, segInfo([0, 0], [R.ux, R.uy]), 0.2) && d < bestD) {
-        const [lo, hi] = spanOn(S, segInfo([R.cx - R.ux * R.len / 2, R.cy - R.uy * R.len / 2], [R.cx + R.ux * R.len / 2, R.cy + R.uy * R.len / 2]));
-        if (Math.min(hi, S.len) - Math.max(lo, 0) > 0) { bestD = d; const s = perpOff(S, [R.cx, R.cy]) >= 0 ? 1 : -1; nx = -S.uy * s; ny = S.ux * s; } } }
-    // most specific tag wins: a stool is tagged chair+seating and must not wear the sofa
-    const tags = [...fixtureTags(o.name)].filter(t => t !== 'any' && t !== 'seating');
+    // model: its BACK is whichever footprint side sits nearest a wall (a fridge's long side,
+    // a toilet's tank end); width = that side, depth = the other, front faces the room
+    const sides = [[-R.uy, R.ux, R.dep / 2, R.len], [R.uy, -R.ux, R.dep / 2, R.len], [R.ux, R.uy, R.len / 2, R.dep], [-R.ux, -R.uy, R.len / 2, R.dep]];
+    let back = sides[0], bestD = 1e9;
+    for (const sd of sides) {
+      const m = [R.cx + sd[0] * sd[2], R.cy + sd[1] * sd[2]];
+      for (const w of merged) { if (w.single) continue;
+        const S = segInfo(w.a, w.b), t = Math.max(0, Math.min(S.len, alongOf(S, m)));
+        const dd = Math.hypot(m[0] - (S.a[0] + S.ux * t), m[1] - (S.a[1] + S.uy * t)) - w.thick / 2;
+        if (dd < bestD) { bestD = dd; back = sd; } } }
+    const fx = -back[0], fy = -back[1], mw = back[3], md = back === sides[0] || back === sides[1] ? R.dep : R.len;
+    const tags = [...fixtureTags(o.name)].filter(t => t !== 'any' && t !== 'seating');   // most specific tag wins
     const asset = ASSET_LIST.find(a => a.tags && a.tags.some(t => tags.includes(t)));
     const key = `obj:${Math.round(R.cx)},${Math.round(R.cy)}`;
     const grp = new THREE.Group(); grp.position.set(wx(R.cx), 0, wz(R.cy));
-    grp.rotation.y = Math.atan2(nx, -ny);                 // model +Z → plan front (nx, ny); world z = -plan y
+    grp.rotation.y = Math.atan2(fx, -fy);                 // model +Z → plan front; world z = -plan y
     grp.userData.fixtureKey = key; grp.userData.fixtureName = o.name.toLowerCase(); grp.userData.src = { layer: srcLayer, what: o.name.toLowerCase() };
     root.add(grp);
-    fixtures.push({ key, name: o.name.toLowerCase(), w: R.len * IN2M, d: R.dep * IN2M, cx: R.cx, cy: R.cy, group: grp });
+    fixtures.push({ key, name: o.name.toLowerCase(), w: mw * IN2M, d: md * IN2M, cx: R.cx, cy: R.cy, group: grp });
     const ov = perFixtureAssets[key], id = ov === '__none__' ? null : ov ? ov : asset ? asset.id : null;
-    if (srcColors) { const b = new THREE.Mesh(new THREE.BoxGeometry(R.len * IN2M, 0.9, R.dep * IN2M), srcMat(srcLayer, cabMat));
-      b.position.y = 0.45; grp.add(b); }
-    else loadFixtureModel(grp, id, R.len * IN2M, R.dep * IN2M);
+    if (srcColors) { const bx = new THREE.Mesh(new THREE.BoxGeometry(mw * IN2M, y1 * IN2M, md * IN2M), srcMat(srcLayer, cabMat));
+      bx.position.y = y1 * IN2M / 2; grp.add(bx); }
+    else loadModelFit(grp, id, mw * IN2M, md * IN2M, y1 * IN2M);
     const hx = R.len / 2, hz = R.dep / 2, cor = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) =>
       [wx(R.cx + R.ux * u - R.uy * v), wz(R.cy + R.uy * u + R.ux * v)]);
     for (let i = 0; i < 4; i++) { const a = cor[i], b = cor[(i + 1) % 4]; fixtureColliders.push({ ax: a[0], az: a[1], bx: b[0], bz: b[1], hw: 0.03 }); }
