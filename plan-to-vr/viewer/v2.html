@@ -2167,6 +2167,69 @@ addEventListener('keydown', e => {
 // and stairs behave identically in the headset. (Matches v1: no addon button,
 // controllers polled from session.inputSources each frame.)
 renderer.xr.enabled = true;
+// see-through start: tap where you stand on the plan, then the way you face; that spot + heading are
+// put at your feet when the headset starts (remembered per plan). In the headset: left stick slides
+// the house, right stick turns it, to line it up with the real walls; right B traces an edge exactly.
+function arStartKey() { return 'plan2vr-v2-arstart:' + DXF; }
+function arPick(go) {
+  let pts = [], saved = null; try { saved = JSON.parse(localStorage.getItem(arStartKey())); } catch (e) {}
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:45;cursor:crosshair;touch-action:none';
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:46;background:#181c24ee;color:#dfe6f2;' +
+    'border:1px solid #3a6;border-radius:10px;padding:10px 14px;font:15px system-ui;text-align:center;max-width:92vw';
+  document.body.append(ov, bar);
+  const marks = new THREE.Group(); scene.add(marks);
+  const ray = new THREE.Raycaster();
+  let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;          // look straight down on the whole plan
+  for (const w of (mergedWalls || [])) for (const q of [w.a, w.b]) { minx = Math.min(minx, wx(q[0])); maxx = Math.max(maxx, wx(q[0])); minz = Math.min(minz, wz(q[1])); maxz = Math.max(maxz, wz(q[1])); }
+  const cx = (minx + maxx) / 2, cz = (minz + maxz) / 2, ext = Math.max(maxx - minx, (maxz - minz) * camera.aspect, 4) / Math.min(1, camera.aspect);
+  const camWas = { p: camera.position.clone(), q: camera.quaternion.clone() };
+  camera.position.set(cx, ext / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.08, cz + 0.001); camera.lookAt(cx, 0, cz);
+  const btn = (t, f) => { const b = document.createElement('button'); b.textContent = t;
+    b.style.cssText = 'margin:8px 4px 0;background:#2b6cb0;color:#fff;border:none;border-radius:8px;padding:8px 12px;font:14px system-ui;cursor:pointer';
+    b.onclick = e => { e.stopPropagation(); f(); }; return b; };
+  const close = () => { ov.remove(); bar.remove(); scene.remove(marks); camera.position.copy(camWas.p); camera.quaternion.copy(camWas.q); };
+  const launch = st => { try { localStorage.setItem(arStartKey(), JSON.stringify(st)); } catch (e) {} close();
+    window.__arStart = { P: [wx(st.px), wz(st.py)], F: [wx(st.fx), wz(st.fy)], pending: true }; go(); };
+  const draw = () => {
+    marks.clear();
+    if (pts[0]) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 28), new THREE.MeshBasicMaterial({ color: 0x21c55d, depthTest: false }));
+      m.position.set(pts[0].x, pts[0].y + 0.03, pts[0].z); m.renderOrder = 998; marks.add(m); }
+    if (pts[1]) { const d = new THREE.Vector3(pts[1].x - pts[0].x, 0, pts[1].z - pts[0].z), L = d.length(); if (L > 0.01) {
+      const a = new THREE.ArrowHelper(d.normalize(), new THREE.Vector3(pts[0].x, pts[0].y + 0.06, pts[0].z), Math.max(1, Math.min(L, 2.5)), 0x21c55d, 0.45, 0.3);
+      a.traverse(o => { if (o.material) { o.material.depthTest = false; o.renderOrder = 999; } }); marks.add(a); } }
+  };
+  const msg = () => {
+    bar.innerHTML = !pts.length ? '👓 <b>Tap where you are standing</b> on the plan' : pts.length === 1 ? '<b>Now tap the direction you are facing</b>' : 'Start here, facing the arrow?';
+    if (pts.length === 2) bar.append(document.createElement('br'), btn('▶ Start see-through', () => {
+      const P = pts[0], F = pts[1]; launch({ px: P.x / IN2M, py: -P.z / IN2M, fx: F.x / IN2M, fy: -F.z / IN2M }); }),
+      btn('↺ Redo', () => { pts = []; draw(); msg(); }));
+    else if (!pts.length && saved) bar.append(document.createElement('br'), btn('↩ Same start as last time', () => launch(saved)));
+    bar.append(btn('✕ Cancel', close));
+  };
+  ov.addEventListener('pointerup', e => {
+    if (pts.length >= 2) return;
+    const r = canvas.getBoundingClientRect();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    const h = ray.intersectObjects(floors, false)[0]; if (!h) return;
+    pts.push(h.point.clone()); draw(); msg();
+  });
+  msg();
+}
+function arPlaceStart() {                               // first XR frame with a head pose: the picked spot goes at your feet
+  const st = window.__arStart; if (!st || !st.pending) return;
+  if (camera.position.lengthSq() < 1e-8) return;         // no pose yet
+  st.pending = false;
+  const fr = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); fr.y = 0; if (fr.lengthSq() < 1e-6) fr.set(0, 0, -1); fr.normalize();
+  const fw = [st.F[0] - st.P[0], st.F[1] - st.P[1]], ang = v => Math.atan2(v[0], v[1]);
+  const a = ang(fw) - ang([fr.x, fr.z]), c = Math.cos(a), sn = Math.sin(a), hx = camera.position.x, hz = camera.position.z;
+  dolly.rotation.set(0, a, 0);
+  const fy = groundAt(st.P[0], st.P[1]);
+  dolly.position.set(st.P[0] - (hx * c + hz * sn), fy, st.P[1] - (-hx * sn + hz * c));
+  calib.locked = true; calib.floorY = fy;
+  vrToast('placed at your start · left stick slides the house, right stick turns it — line it up with the real walls · right B: trace a door edge to lock it exactly');
+}
 const arSaved = new Map();
 function arGhost(on) {                                  // passthrough: hide sky + lawn, draw the house translucent
   sky.visible = !on && !view2D; renderer.setClearAlpha(on ? 0 : 1);
@@ -2397,6 +2460,7 @@ function handleCalib(gp, ctrl) {                        // right B (buttons[5]) 
 const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE.Vector3();
 function vrTick(dt) {
   const session = renderer.xr.getSession(); if (!session) return;
+  if (window.__arStart && window.__arStart.pending) arPlaceStart();
   camera.getWorldPosition(_head);
   for (const src of session.inputSources) {
     const gp = src.gamepad; if (!gp) continue;
@@ -2413,6 +2477,14 @@ function vrTick(dt) {
       calib.yPrev = yNow;
     }
     if (calib.mode) continue;                          // calibration pauses locomotion + normal actions
+    if (window.__arMode && calib.locked) {             // see-through: sticks NUDGE the house onto the real room (slow)
+      const ndx = Math.abs(sx) > 0.15 ? sx : 0, ndy = Math.abs(sy) > 0.15 ? sy : 0;
+      if (src.handedness === 'left' && (ndx || ndy)) {
+        camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize(); _side.set(-_fwd.z, 0, _fwd.x);
+        const sp = 0.25 * dt; dolly.position.x += (_fwd.x * -ndy + _side.x * ndx) * sp; dolly.position.z += (_fwd.z * -ndy + _side.z * ndx) * sp;
+      }
+      if (src.handedness === 'right' && ndx) rotatePlayerVR(_head, -ndx * 0.35 * dt);
+    }
     if (src.handedness === 'left' && !calib.locked) {  // smooth head-relative walking (off while locked 1:1)
       const dx = Math.abs(sx) > 0.15 ? sx : 0, dy = Math.abs(sy) > 0.15 ? sy : 0;
       if (dx || dy) {
@@ -2494,15 +2566,15 @@ renderer.xr.addEventListener('sessionend', () => {
   if (arOK) {
     const pb = document.createElement('button'); pb.style.cssText = b.style.cssText + ';right:150px'; pb.textContent = '👓 See-through';
     document.body.appendChild(pb); let arS = null;
-    pb.onclick = async () => {
-      if (arS) { arS.end(); return; }
+    const startAR = async () => {
       try {
         arS = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local-floor', 'bounded-floor'] });
         window.__arMode = true; arGhost(true);
         arS.addEventListener('end', () => { arS = null; window.__arMode = false; arGhost(false); pb.textContent = '👓 See-through'; });
         await renderer.xr.setSession(arS); pb.textContent = '🚪 Exit see-through';
-      } catch (e) { pb.textContent = '👓 see-through failed'; arS = null; window.__arMode = false; arGhost(false); }
+      } catch (e) { pb.textContent = '👓 see-through failed'; arS = null; window.__arMode = false; arGhost(false); window.__arStart = null; }
     };
+    pb.onclick = () => { if (arS) { arS.end(); return; } arPick(startAR); };
   }
   if (!xrmode) { b.style.opacity = 0.5; return; }
   let session = null;
@@ -2631,7 +2703,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE,
+  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
