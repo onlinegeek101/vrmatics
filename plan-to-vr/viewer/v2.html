@@ -859,6 +859,9 @@ const SINGLE_WALL_COLOR = '#ff2bd6';
 // the floor plan laid on the floor in the headset (VR menu toggles it; remembered)
 let floorPlanGroup = null;
 let floorPlanOn = (() => { try { return localStorage.getItem('plan2vr-v2-floorplan') !== '0'; } catch (e) { return true; } })();
+let dimGroup = null;
+let dimsOn = (() => { try { return localStorage.getItem('plan2vr-v2-dims') !== '0'; } catch (e) { return true; } })();
+const dimsShown = () => dimsOn && !!(renderer.xr && renderer.xr.isPresenting) || !!window.__dimsDesk || !!window.__floorPlanPreview;
 const floorPlanShown = () => floorPlanOn && !!(renderer.xr && renderer.xr.isPresenting) || !!window.__floorPlanPreview;
 // a wall layer named KNEE / HALF / PONY / LOW (e.g. 1.1WALL-KNEE) is a knee wall: 42in tall unless
 // the name ends in its height in inches (1.1WALL-KNEE-36)
@@ -1443,6 +1446,68 @@ function buildRaw() {
   }
   floorPlanGroup.visible = floorPlanShown();
   root.add(floorPlanGroup);
+  // DIMENSIONS on the floor: each room's width and depth, wall face to wall face through its name,
+  // and each doorway's width. The drawing carries no dimension entities, so they are measured from
+  // the walls v2 built (and follow any wall the editor pushes).
+  dimGroup = new THREE.Group(); dimGroup.name = 'dimensions';
+  const boxes = [...merged, ...rawOps].map(w => { const S = segInfo(w.a, w.b), h = (w.thick || 4) / 2, nx = -S.uy * h, ny = S.ux * h;
+    return [[w.a[0] + nx, w.a[1] + ny], [w.b[0] + nx, w.b[1] + ny], [w.b[0] - nx, w.b[1] - ny], [w.a[0] - nx, w.a[1] - ny]]; });
+  const cast = (px, py, dx, dy) => { let best = Infinity;             // distance to the first wall face (or doorway) along a ray
+    for (const R of boxes) for (let i = 0; i < 4; i++) { const a = R[i], b = R[(i + 1) % 4], ex = b[0] - a[0], ey = b[1] - a[1], den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((a[0] - px) * ey - (a[1] - py) * ex) / den, u = ((a[0] - px) * dy - (a[1] - py) * dx) / den;
+      if (t > 0.5 && u >= 0 && u <= 1 && t < best) best = t; }
+    return best; };
+  const inWall = (px, py) => boxes.some(R => pointIn(R, px, py));
+  const ftIn = v => { const h = Math.round(v * 2) / 2; let f = Math.floor(h / 12), i = h - f * 12; if (i >= 12) { f++; i -= 12; }
+    const ip = Math.floor(i), half = i - ip >= 0.5 ? '½' : ''; return f ? `${f}' ${ip}${half}"` : `${ip}${half}"`; };
+  const dimPts = [], dimText = (t, x, y, ang, lv, big) => {
+    const cv = document.createElement('canvas'), c2 = cv.getContext('2d'), F = 'bold 60px system-ui'; c2.font = F;
+    cv.width = Math.ceil(c2.measureText(t).width) + 36; cv.height = 80; c2.font = F;
+    c2.fillStyle = 'rgba(255,255,255,0.88)'; c2.beginPath(); c2.roundRect ? c2.roundRect(2, 2, cv.width - 4, 76, 30) : c2.rect(2, 2, cv.width - 4, 76); c2.fill();
+    c2.fillStyle = '#123a78'; c2.textBaseline = 'middle'; c2.fillText(t, 18, 42);
+    const H = (big ? 6 : 4.5) * IN2M, W = H * cv.width / cv.height, tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+    let a = ang; if (a > Math.PI / 2) a -= Math.PI; if (a <= -Math.PI / 2) a += Math.PI;   // keep the text upright-ish
+    m.rotation.set(-Math.PI / 2, 0, a); m.position.set(wx(x), lv * IN2M + 0.009, wz(y)); m.userData.dimLabel = true; dimGroup.add(m); };
+  const dimLine = (A, B, lv, avoid) => {
+    const y = lv * IN2M + 0.007, dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, k = 3;
+    dimPts.push(new THREE.Vector3(wx(A[0]), y, wz(A[1])), new THREE.Vector3(wx(B[0]), y, wz(B[1])));
+    for (const P of [A, B]) {                           // architectural slash ticks at the faces
+      const tx = (ux - uy) * k, ty = (uy + ux) * k;
+      dimPts.push(new THREE.Vector3(wx(P[0] - tx), y, wz(P[1] - ty)), new THREE.Vector3(wx(P[0] + tx), y, wz(P[1] + ty)));
+    }
+    let t = 0.5; const mx = A[0] + dx * t, my = A[1] + dy * t;
+    if (avoid && Math.hypot(mx - avoid[0], my - avoid[1]) < 22) t = 0.5 + Math.min(0.3, 26 / L) * (alongOf({ a: A, ux, uy }, avoid) > L / 2 ? -1 : 1);
+    dimText(ftIn(L), A[0] + dx * t - uy * 4, A[1] + dy * t + ux * 4, Math.atan2(-dy, dx), lv, true);
+  };
+  const seen = [], spans = [];
+  for (const L of rawLayers) {                          // rooms: through each room name, both ways
+    if (!/RMNAME|ROOM/i.test(L.name)) continue;
+    for (const e of byLayer(ENTS, L.name)) {
+      if (!(e.type === 'TEXT' || e.type === 'MTEXT') || !e.text || !e.pts.length) continue;
+      if (!/[A-Za-z]{3}/.test(e.text.replace(/\\[A-Za-z][^;]*;/g, ''))) continue;             // a name, not a size note like 11'-8" x 15'-4"
+      const P = e.pts[1] && e.type === 'TEXT' ? e.pts[1] : e.pts[0]; if (inWall(P[0], P[1])) continue;
+      if (seen.some(q => Math.hypot(q[0] - P[0], q[1] - P[1]) < 12)) continue; seen.push(P);
+      const lv = slabAt(P[0], P[1]);
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const t1 = cast(P[0], P[1], dx, dy), t0 = cast(P[0], P[1], -dx, -dy); if (!isFinite(t0 + t1) || t0 + t1 < 24 || t0 + t1 > 600) continue;
+        const A = [P[0] - dx * t0, P[1] - dy * t0], B = [P[0] + dx * t1, P[1] + dy * t1];
+        // one line per span: a second label in the room (its size note, a sub-label) measures the same faces
+        const ax = dx ? 0 : 1, px = 1 - ax;             // measured axis / across it
+        if (spans.some(q => q.dx === dx && Math.abs(q.A[ax] - A[ax]) < 3 && Math.abs(q.B[ax] - B[ax]) < 3 && Math.abs(q.A[px] - A[px]) < 48)) continue;
+        spans.push({ dx, A, B }); dimLine(A, B, lv, P);
+      }
+    }
+  }
+  for (const o of rawOps) {                             // doorways: the clear width, in the opening
+    if (!/door|opening|pocket|overhead/.test(o.kind)) continue;
+    dimText(ftIn(o.width), o.mid[0], o.mid[1], Math.atan2(-o.uy, o.ux), levelAt(o.mid[0], o.mid[1], 'open'), false);
+  }
+  if (dimPts.length) { const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(dimPts), new THREE.LineBasicMaterial({ color: window.__arMode ? 0xffd24a : 0x1f4e9a }));
+    ls.userData.vrCol = new THREE.Color(0x1f4e9a); ls.userData.arCol = new THREE.Color(0xffd24a); dimGroup.add(ls); }
+  dimGroup.visible = dimsShown();
+  root.add(dimGroup);
   if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
 }
@@ -2189,6 +2254,13 @@ const srcBtn = document.createElement('button');
 srcBtn.textContent = '🎨 source'; srcBtn.className = 'hud-btn'; srcBtn.style.background = '#4a5568'; srcBtn.style.display = 'none';
 srcBtn.title = 'colour each 3D part by the DXF layer that built it (magenta = wall guessed from one line); tap a part to see its source';
 hud.appendChild(srcBtn);
+// dimensions on the floor (desktop; in the headset the VR menu toggles them)
+const dimBtn = document.createElement('button');
+dimBtn.textContent = '📏 dims'; dimBtn.className = 'hud-btn'; dimBtn.style.background = '#4a5568';
+dimBtn.title = 'room widths + depths (wall face to face) and doorway widths, drawn on the floor';
+hud.appendChild(dimBtn);
+dimBtn.onclick = () => { window.__dimsDesk = !window.__dimsDesk; dimBtn.classList.toggle('on', window.__dimsDesk);
+  dimBtn.style.background = window.__dimsDesk ? '#2b6cb0' : '#4a5568'; if (dimGroup) dimGroup.visible = dimsShown(); };
 srcBtn.onclick = () => { srcColors = !srcColors; srcBtn.classList.toggle('on', srcColors);
   srcBtn.style.background = srcColors ? '#b83280' : '#4a5568'; if (rawMode && !view2D) buildRaw(); };
 const srcRay = new THREE.Raycaster();
@@ -2308,7 +2380,7 @@ function arGhost(on) {                                  // passthrough: hide sky
       m.needsUpdate = true;
     }
   });
-  if (floorPlanGroup) floorPlanGroup.traverse(o => { if (o.userData.vrCol) o.material.color.copy(on ? o.userData.arCol : o.userData.vrCol); });   // bright over a real floor
+  for (const G of [floorPlanGroup, dimGroup]) if (G) G.traverse(o => { if (o.userData.vrCol) o.material.color.copy(on ? o.userData.arCol : o.userData.vrCol); });   // bright over a real floor
   if (!on) arSaved.clear();
 }
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -2623,11 +2695,11 @@ renderer.xr.addEventListener('sessionstart', () => {
   document.getElementById('panel').style.display = 'none';
   setVrRayEdit(editMode && rawMode);                   // reflect any edit mode armed before entering VR
   calib.locked = false; loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment (re-locks 1:1)
-  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();   // the floor plan lies on the floor in the headset
+  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();   // the floor plan lies on the floor in the headset
   if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu — floor plan on the floor · see-through · switch floors'); }, 2500);
 });
 renderer.xr.addEventListener('sessionend', () => {
-  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();
+  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();
   scene.add(camera); document.getElementById('panel').style.display = '';
   mode = 'orbit'; place();
 });
@@ -2697,7 +2769,8 @@ function xrToSeeThrough(on) {                          // from the headset menu
 // the 1:1 lock, exit.
 const vrMenu = { open: false, group: null, cards: [], items: [], sel: -1, stickSel: false, aPrev: false, planSwitch: null };
 function vrMenuItems() {
-  const it = [{ id: 'fp', label: '🗺 Floor plan', sub: floorPlanOn ? 'on the floor · ON' : 'on the floor · OFF' }];
+  const it = [{ id: 'fp', label: '🗺 Floor plan', sub: floorPlanOn ? 'on the floor · ON' : 'on the floor · OFF' },
+    { id: 'dims', label: '📏 Dimensions', sub: dimsOn ? 'rooms + doors · ON' : 'rooms + doors · OFF' }];
   if (xrs.kind === 'ar') it.push({ id: 'mode', label: window.__arMode ? '🥽 Full VR' : '👓 See-through', sub: window.__arMode ? 'hide the real room' : 'show the real room' });
   else if (xrs.arOK) it.push({ id: 'mode', label: '👓 See-through', sub: 'real room + house' });
   PLANS.forEach((p, i) => {
@@ -2765,6 +2838,10 @@ function vrMenuSelect(e) {                              // the trigger ('select'
     floorPlanOn = !floorPlanOn; try { localStorage.setItem('plan2vr-v2-floorplan', floorPlanOn ? '1' : '0'); } catch (err) {}
     if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();
     vrToast('floor plan on the floor ' + (floorPlanOn ? 'ON' : 'OFF'));
+  } else if (it.id === 'dims') {
+    dimsOn = !dimsOn; try { localStorage.setItem('plan2vr-v2-dims', dimsOn ? '1' : '0'); } catch (err) {}
+    if (dimGroup) dimGroup.visible = dimsShown();
+    vrToast('dimensions on the floor ' + (dimsOn ? 'ON' : 'OFF'));
   } else if (it.id === 'mode') xrToSeeThrough(xrs.kind === 'ar' ? !window.__arMode : true);
   else if (it.id === 'plan') {
     if (PLANS[it.i].src === DXF) { vrToast('you are on ' + it.label.slice(3)); return; }
