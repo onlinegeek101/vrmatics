@@ -856,6 +856,10 @@ function extendEnds(walls) {
 // layer panel's swatch colours); magenta = a wall guessed from a single line
 let srcColors = false, rawOps = [], rawObjs = [];
 const SINGLE_WALL_COLOR = '#ff2bd6';
+// the floor plan laid on the floor in the headset (VR menu toggles it; remembered)
+let floorPlanGroup = null;
+let floorPlanOn = (() => { try { return localStorage.getItem('plan2vr-v2-floorplan') !== '0'; } catch (e) { return true; } })();
+const floorPlanShown = () => floorPlanOn && !!(renderer.xr && renderer.xr.isPresenting) || !!window.__floorPlanPreview;
 // a wall layer named KNEE / HALF / PONY / LOW (e.g. 1.1WALL-KNEE) is a knee wall: 42in tall unless
 // the name ends in its height in inches (1.1WALL-KNEE-36)
 function kneeHeight(layer) {
@@ -1396,6 +1400,49 @@ function buildRaw() {
     if (pts.length) root.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({ color: new THREE.Color(color).getHex() })));
   }
+  // FLOOR PLAN: the drawing itself laid on each floor (every line of the building's layers: wall
+  // faces, door swings, fixtures, stair nosings, room names) — shown in the headset, toggled from
+  // the VR menu. Lines are drawn on top of the floor, so in see-through they sit on the real floor.
+  floorPlanGroup = new THREE.Group(); floorPlanGroup.name = 'floor plan';
+  const FP_SKIP = /^(TEXT|MTEXT|INSERT|POINT|DIMENSION|HATCH|WIPEOUT|SOLID|SECTION|ATTRIB|ATTDEF)$/;
+  for (const L of rawLayers) {
+    if (!L.on) continue;
+    const cat = layerCat[L.name] || 'linework';
+    if (cat === 'hidden' || cat === 'floor') continue;
+    const pts = [];
+    for (const e of byLayer(ENTS, L.name)) {
+      if (FP_SKIP.test(e.type)) continue;
+      const p = e.pts; if (!p || p.length < 2) continue;
+      const q = e.type === 'LWPOLYLINE' && p.length > 2 ? p.concat([p[0]]) : p;       // closed outlines
+      for (let i = 0; i + 1 < q.length; i++) { const a = q[i], b = q[i + 1];
+        const y = slabAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) * IN2M + 0.006;
+        pts.push(new THREE.Vector3(wx(a[0]), y, wz(a[1])), new THREE.Vector3(wx(b[0]), y, wz(b[1]))); }
+    }
+    if (!pts.length) continue;
+    // dark ink on the wood floor in VR; bright lines over the real floor in see-through (arGhost swaps them)
+    const vrCol = new THREE.Color(cat === 'walls' ? '#1b2330' : L.color); if (cat !== 'walls') vrCol.lerp(new THREE.Color('#10141c'), 0.35);
+    const arCol = new THREE.Color(cat === 'walls' ? '#53d0ff' : L.color);
+    const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: window.__arMode ? arCol : vrCol }));
+    ls.userData.vrCol = vrCol; ls.userData.arCol = arCol; floorPlanGroup.add(ls);
+  }
+  for (const L of rawLayers) {                          // room names, printed flat on the floor
+    if (!/RMNAME|ROOM/i.test(L.name)) continue;
+    for (const e of byLayer(ENTS, L.name)) {
+      if (!(e.type === 'TEXT' || e.type === 'MTEXT') || !e.text || !e.pts.length) continue;
+      const t = e.text.replace(/\\P/g, ' ').replace(/\\[A-Za-z][^;]*;/g, '').replace(/[{}]/g, '').trim(); if (!t || t.length > 40) continue;
+      const at = e.pts[1] && e.type === 'TEXT' ? e.pts[1] : e.pts[0];
+      const cv = document.createElement('canvas'), x = cv.getContext('2d'); x.font = 'bold 64px system-ui';
+      cv.width = Math.ceil(x.measureText(t).width) + 24; cv.height = 84;
+      x.font = 'bold 64px system-ui'; x.fillStyle = '#10141c'; x.textBaseline = 'middle'; x.fillText(t, 12, 44);
+      const H = Math.max(5, e.h || 6) * 1.3 * IN2M, W = H * cv.width / cv.height;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, toneMapped: false }));
+      m.rotation.x = -Math.PI / 2; m.rotation.z = (e.a0 || 0) * Math.PI / 180;
+      m.position.set(wx(at[0]) + (e.pts[1] ? 0 : W / 2), slabAt(at[0], at[1]) * IN2M + 0.008, wz(at[1]));
+      m.userData.floorPlanLabel = true; floorPlanGroup.add(m);
+    }
+  }
+  floorPlanGroup.visible = floorPlanShown();
+  root.add(floorPlanGroup);
   if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
 }
@@ -2261,6 +2308,7 @@ function arGhost(on) {                                  // passthrough: hide sky
       m.needsUpdate = true;
     }
   });
+  if (floorPlanGroup) floorPlanGroup.traverse(o => { if (o.userData.vrCol) o.material.color.copy(on ? o.userData.arCol : o.userData.vrCol); });   // bright over a real floor
   if (!on) arSaved.clear();
 }
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -2479,6 +2527,11 @@ const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE
 function vrTick(dt) {
   const session = renderer.xr.getSession(); if (!session) return;
   if (window.__arStart && window.__arStart.pending) arPlaceStart();
+  if (vrMenu.planSwitch && window.__V2_READY) {        // switched plans from the menu: same spot, this plan's floor
+    camera.getWorldPosition(_head);
+    if (calib.locked) { calib.floorY = groundAt(_head.x, _head.z); dolly.position.y = calib.floorY; }
+    vrToast('now on the ' + vrMenu.planSwitch); vrMenu.planSwitch = null;
+  }
   camera.getWorldPosition(_head);
   for (const src of session.inputSources) {
     const gp = src.gamepad; if (!gp) continue;
@@ -2493,6 +2546,12 @@ function vrTick(dt) {
         else applyAlignment();
       }
       calib.yPrev = yNow;
+    }
+    if (src.handedness === 'right') {                  // right A: the VR menu
+      const aNow = !!(gp.buttons[4] && gp.buttons[4].pressed);
+      if (aNow && !vrMenu.aPrev && !calib.mode) vrMenuOpen(!vrMenu.open);
+      vrMenu.aPrev = aNow;
+      if (vrMenu.open) { vrMenuHover(ctrl, sx, sy); continue; }
     }
     if (calib.mode) continue;                          // calibration pauses locomotion + normal actions
     if (window.__arMode && calib.locked) {             // see-through: sticks NUDGE the house onto the real room (slow)
@@ -2517,6 +2576,7 @@ function vrTick(dt) {
       if (Math.abs(sx) > 0.7 && vrSnapReady) { rotatePlayerVR(_head, sx > 0 ? -Math.PI / 4 : Math.PI / 4); vrSnapReady = false; }
       else if (Math.abs(sx) < 0.3) vrSnapReady = true;
     }
+    if (vrMenu.open) continue;                         // menu up: triggers pick cards, not doors
     const trig = !!(gp.buttons[0] && gp.buttons[0].value > 0.6);
     if (src.handedness === 'right' && editMode && rawMode) {   // right = wall push/pull tool while editing
       ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
@@ -2563,49 +2623,156 @@ renderer.xr.addEventListener('sessionstart', () => {
   document.getElementById('panel').style.display = 'none';
   setVrRayEdit(editMode && rawMode);                   // reflect any edit mode armed before entering VR
   calib.locked = false; loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment (re-locks 1:1)
+  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();   // the floor plan lies on the floor in the headset
+  if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu — floor plan on the floor · see-through · switch floors'); }, 2500);
 });
 renderer.xr.addEventListener('sessionend', () => {
+  vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();
   scene.add(camera); document.getElementById('panel').style.display = '';
   mode = 'orbit'; place();
 });
-(async () => {
-  let xrmode = null;
-  if (navigator.xr && navigator.xr.isSessionSupported) {
-    try { if (await navigator.xr.isSessionSupported('immersive-vr')) xrmode = 'immersive-vr'; } catch (e) {}
+// ---- headset sessions. VR draws the whole model; see-through (passthrough) draws the real room with
+// the house translucent over it. Both start here, so the page buttons and the headset menu agree.
+// Inside a see-through session the real room just turns on / off (instant); from a VR session the
+// menu ends it and starts a see-through one, keeping where you stand and the way you face.
+const xrs = { vrOK: false, arOK: false, session: null, kind: null, next: null, vrBtn: null, arBtn: null, retryAR: null };
+function xrButtons() {
+  if (xrs.vrBtn) xrs.vrBtn.textContent = xrs.kind === 'vr' ? '🚪 Exit VR' : xrs.vrOK ? '🥽 Enter VR' : '🥽 VR N/A';
+  if (xrs.arBtn) xrs.arBtn.textContent = xrs.kind === 'ar' ? '🚪 Exit see-through' : xrs.retryAR ? '👓 tap to continue in see-through' : '👓 See-through';
+}
+function setSeeThrough(on) { window.__arMode = !!on; arGhost(!!on); }
+async function xrStart(kind) {                         // 'vr' | 'ar' — needs a user gesture (a click, or the trigger in the headset)
+  try {
+    const s = await navigator.xr.requestSession(kind === 'ar' ? 'immersive-ar' : 'immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+    xrs.session = s; xrs.kind = kind; xrs.retryAR = null; setSeeThrough(kind === 'ar');
+    s.addEventListener('end', () => {
+      if (xrs.session !== s) return;
+      xrs.session = null; xrs.kind = null; setSeeThrough(false); xrButtons();
+      const n = xrs.next; xrs.next = null; if (n) n();
+    });
+    s.addEventListener('select', e => vrMenuSelect(e));   // the trigger: picks a menu card (and counts as a gesture)
+    await renderer.xr.setSession(s); xrButtons(); return true;
+  } catch (e) {
+    console.warn('headset session failed', e); setSeeThrough(false);
+    if (!renderer.xr.isPresenting) { xrs.session = null; xrs.kind = null; } xrButtons(); return false;
   }
-  const b = document.createElement('button');
+}
+function xrToSeeThrough(on) {                          // from the headset menu
+  if (xrs.kind === 'ar') { setSeeThrough(on); vrToast(on ? 'see-through: your real room, the house drawn over it' : 'full VR: the whole house · the menu switches back'); return; }
+  if (!on || !xrs.session) return;
+  camera.getWorldPosition(_head);
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion())); f.y = 0;
+  if (f.lengthSq() < 1e-6) f.set(0, 0, -1); f.normalize();
+  const st = { P: [_head.x, _head.z], F: [_head.x + f.x, _head.z + f.z], pending: true };
+  window.__arStart = st;
+  xrs.next = () => xrStart('ar').then(ok => { if (!ok) { xrs.retryAR = { ...st }; xrButtons(); } });   // the browser wanted a fresh tap
+  xrs.session.end();
+}
+(async () => {
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    try { xrs.vrOK = !!(await navigator.xr.isSessionSupported('immersive-vr')); } catch (e) {}
+    // see-through: the real room from the headset cameras with the house drawn translucent on top,
+    // to check (and do) the 1:1 alignment against real doors and windows
+    try { xrs.arOK = !!(await navigator.xr.isSessionSupported('immersive-ar')); } catch (e) {}
+  }
+  const b = document.createElement('button'); xrs.vrBtn = b;
   b.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:10;color:#cfe;' +
     'background:#12303f;border:1px solid #3a6;border-radius:9px;padding:9px 15px;font:14px system-ui;cursor:pointer';
-  b.textContent = xrmode ? '🥽 Enter VR' : '🥽 VR N/A';
   document.body.appendChild(b);
-  // see-through: the real room from the headset cameras with the house drawn translucent on top,
-  // to check (and do) the 1:1 alignment against real doors and windows
-  let arOK = false; try { arOK = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch (e) {}
-  if (arOK) {
-    const pb = document.createElement('button'); pb.style.cssText = b.style.cssText + ';right:150px'; pb.textContent = '👓 See-through';
-    document.body.appendChild(pb); let arS = null;
-    const startAR = async () => {
-      try {
-        arS = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local-floor', 'bounded-floor'] });
-        window.__arMode = true; arGhost(true);
-        arS.addEventListener('end', () => { arS = null; window.__arMode = false; arGhost(false); pb.textContent = '👓 See-through'; });
-        await renderer.xr.setSession(arS); pb.textContent = '🚪 Exit see-through';
-      } catch (e) { pb.textContent = '👓 see-through failed'; arS = null; window.__arMode = false; arGhost(false); window.__arStart = null; }
+  if (xrs.arOK) {
+    const pb = document.createElement('button'); pb.style.cssText = b.style.cssText + ';right:150px'; xrs.arBtn = pb;
+    document.body.appendChild(pb);
+    pb.onclick = () => {
+      if (xrs.session) { xrs.session.end(); return; }
+      if (xrs.retryAR) { window.__arStart = { ...xrs.retryAR, pending: true }; xrStart('ar'); return; }   // same spot as the VR you just left
+      arPick(() => xrStart('ar'));
     };
-    pb.onclick = () => { if (arS) { arS.end(); return; } arPick(startAR); };
   }
-  if (!xrmode) { b.style.opacity = 0.5; return; }
-  let session = null;
-  b.onclick = async () => {
-    if (session) { session.end(); return; }
-    try {
-      session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
-      session.addEventListener('end', () => { session = null; b.textContent = '🥽 Enter VR'; });
-      await renderer.xr.setSession(session);
-      b.textContent = '🚪 Exit VR';
-    } catch (e) { b.textContent = '🥽 VR failed'; session = null; }
-  };
+  xrButtons();
+  if (!xrs.vrOK) { b.style.opacity = 0.5; return; }
+  b.onclick = () => { if (xrs.session) { xrs.session.end(); return; } xrStart('vr'); };
 })();
+// ---- VR menu (right A): a ring of cards in front of you. Tilt the right stick or point at one and
+// pull the trigger; A again closes it. Floor plan on the floor, see-through / full VR, which floor,
+// the 1:1 lock, exit.
+const vrMenu = { open: false, group: null, cards: [], items: [], sel: -1, stickSel: false, aPrev: false, planSwitch: null };
+function vrMenuItems() {
+  const it = [{ id: 'fp', label: '🗺 Floor plan', sub: floorPlanOn ? 'on the floor · ON' : 'on the floor · OFF' }];
+  if (xrs.kind === 'ar') it.push({ id: 'mode', label: window.__arMode ? '🥽 Full VR' : '👓 See-through', sub: window.__arMode ? 'hide the real room' : 'show the real room' });
+  else if (xrs.arOK) it.push({ id: 'mode', label: '👓 See-through', sub: 'real room + house' });
+  PLANS.forEach((p, i) => {
+    if (!/Home Reno/.test(p.name)) return;
+    const nm = (p.name.split('—')[1] || p.name).trim();
+    it.push({ id: 'plan', i, label: '🏠 ' + nm[0].toUpperCase() + nm.slice(1), sub: p.src === DXF ? 'you are here' : 'switch to it' });
+  });
+  if (calib.anchors.length) it.push({ id: 'lock', label: calib.locked ? '🔓 Unlock 1:1' : '🔒 Lock 1:1', sub: calib.locked ? 'walk with the stick' : 'back onto your room' });
+  it.push({ id: 'exit', label: '🚪 Exit', sub: xrs.kind === 'ar' ? 'leave see-through' : 'leave VR' });
+  return it;
+}
+function vrCardTex(it, hi) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 240; const x = c.getContext('2d');
+  x.fillStyle = hi ? 'rgba(30,118,188,0.97)' : 'rgba(16,22,34,0.92)';
+  x.beginPath(); x.roundRect ? x.roundRect(6, 6, 500, 228, 36) : x.rect(6, 6, 500, 228); x.fill();
+  x.lineWidth = hi ? 10 : 5; x.strokeStyle = hi ? '#d6f3ff' : '#53d0ff'; x.stroke();
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = '#eef3fb'; x.font = 'bold 58px system-ui'; x.fillText(it.label, 256, 100, 470);
+  x.fillStyle = hi ? '#e3f4ff' : '#9fb0ca'; x.font = '36px system-ui'; x.fillText(it.sub || '', 256, 172, 470);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function vrMenuOpen(on) {
+  if (vrMenu.group) {
+    vrMenu.group.parent && vrMenu.group.parent.remove(vrMenu.group);
+    vrMenu.group.traverse(o => { if (o.userData.tex) o.userData.tex.forEach(t => t.dispose()); if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+  }
+  vrMenu.group = null; vrMenu.cards = []; vrMenu.sel = -1; vrMenu.stickSel = false; vrMenu.open = !!on;
+  if (!on) return;
+  vrMenu.items = vrMenuItems();
+  camera.getWorldPosition(_head);
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion())); f.y = 0;
+  if (f.lengthSq() < 1e-6) f.set(0, 0, -1); f.normalize();
+  const g = new THREE.Group(); g.position.copy(_head).addScaledVector(f, 0.62); g.position.y -= 0.12;
+  g.lookAt(_head.x, g.position.y, _head.z);               // faces you, upright
+  const n = vrMenu.items.length, R = n > 6 ? 0.24 : 0.21;
+  vrMenu.items.forEach((it, k) => {
+    const a = k / n * Math.PI * 2, tex = [vrCardTex(it, false), vrCardTex(it, true)];   // clockwise from the top
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.08), new THREE.MeshBasicMaterial({ map: tex[0], transparent: true, depthTest: false, toneMapped: false }));
+    m.position.set(Math.sin(a) * R, Math.cos(a) * R, 0); m.renderOrder = 997; m.userData.k = k; m.userData.tex = tex;
+    g.add(m); vrMenu.cards.push(m);
+  });
+  const hub = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.07), new THREE.MeshBasicMaterial({ map: vrCardTex({ label: 'menu', sub: 'stick / point · trigger' }, false), transparent: true, depthTest: false, toneMapped: false }));
+  hub.renderOrder = 996; hub.userData.tex = [hub.material.map]; g.add(hub);
+  dolly.updateMatrixWorld(true); g.applyMatrix4(dolly.matrixWorld.clone().invert());   // ride along in the rig
+  dolly.add(g); vrMenu.group = g;
+}
+function vrMenuHover(ctrl, sx, sy) {
+  let k = vrMenu.stickSel ? vrMenu.sel : -1;
+  if (Math.hypot(sx, sy) > 0.55) {                     // stick: the card in that direction
+    const n = vrMenu.cards.length, a = (Math.atan2(sx, -sy) + Math.PI * 2) % (Math.PI * 2);
+    k = Math.round(a / (Math.PI * 2) * n) % n; vrMenu.stickSel = true;
+  } else {                                             // or point the right controller at one
+    ctrl.getWorldPosition(_o); ctrl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
+    vrRay.set(_o, _d); vrRay.far = 3; const h = vrRay.intersectObjects(vrMenu.cards, false)[0];
+    if (h) { k = h.object.userData.k; vrMenu.stickSel = false; }
+  }
+  if (k === vrMenu.sel) return;
+  for (const m of vrMenu.cards) { const on = m.userData.k === k; m.material.map = m.userData.tex[on ? 1 : 0]; m.scale.setScalar(on ? 1.12 : 1); m.material.needsUpdate = true; }
+  vrMenu.sel = k;
+}
+function vrMenuSelect(e) {                              // the trigger ('select' event: counts as a user gesture)
+  if (!vrMenu.open || vrMenu.sel < 0) return;
+  const it = vrMenu.items[vrMenu.sel]; vrMenuOpen(false);
+  if (it.id === 'fp') {
+    floorPlanOn = !floorPlanOn; try { localStorage.setItem('plan2vr-v2-floorplan', floorPlanOn ? '1' : '0'); } catch (err) {}
+    if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();
+    vrToast('floor plan on the floor ' + (floorPlanOn ? 'ON' : 'OFF'));
+  } else if (it.id === 'mode') xrToSeeThrough(xrs.kind === 'ar' ? !window.__arMode : true);
+  else if (it.id === 'plan') {
+    if (PLANS[it.i].src === DXF) { vrToast('you are on ' + it.label.slice(3)); return; }
+    window.__V2_READY = false; vrMenu.planSwitch = it.label.slice(3);
+    pick.selectedIndex = it.i; loadPlan(PLANS[it.i].src); vrToast('loading ' + vrMenu.planSwitch + '…');
+  } else if (it.id === 'lock') { if (calib.locked) { calib.locked = false; vrToast('1:1 lock OFF — joystick walking on'); } else applyAlignment(); }
+  else if (it.id === 'exit' && xrs.session) xrs.session.end();
+}
 
 // ---------------------------------------------------------------- GitHub issue button
 // Connect with #feedback=TOKEN@owner/repo[@branch] in the URL; then ⚑ files an issue
@@ -2722,6 +2889,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly,
+  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, floorPlan: () => floorPlanGroup, setSeeThrough,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
