@@ -859,8 +859,8 @@ const SINGLE_WALL_COLOR = '#ff2bd6';
 // the floor plan laid on the floor in the headset (VR menu toggles it; remembered)
 let floorPlanGroup = null;
 let floorPlanOn = (() => { try { return localStorage.getItem('plan2vr-v2-floorplan') !== '0'; } catch (e) { return true; } })();
-let dimGroup = null;
-let dimsOn = (() => { try { return localStorage.getItem('plan2vr-v2-dims') !== '0'; } catch (e) { return true; } })();
+let dimGroup = null, rawMeasure = null;
+let dimsOn = (() => { try { return localStorage.getItem('plan2vr-v2-roomdims') === '1'; } catch (e) { return false; } })();
 const dimsShown = () => dimsOn && !!(renderer.xr && renderer.xr.isPresenting) || !!window.__dimsDesk || !!window.__floorPlanPreview;
 const floorPlanShown = () => floorPlanOn && !!(renderer.xr && renderer.xr.isPresenting) || !!window.__floorPlanPreview;
 // a wall layer named KNEE / HALF / PONY / LOW (e.g. 1.1WALL-KNEE) is a knee wall: 42in tall unless
@@ -1264,7 +1264,7 @@ function buildRaw() {
     const [, how, y0, y1, suffix] = rule, srcLayer = o.prefix + suffix, L = rawLayers.find(x => x.name === srcLayer);
     if (L && !L.on) continue;
     const R = orientedRect(o.pts), lv = levelAt(R.cx, R.cy);
-    rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep });
+    rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep, ux: R.ux, uy: R.uy, key: `obj:${Math.round(R.cx)},${Math.round(R.cy)}` });
     if (how === 'shower' || (/SHOWER/.test(o.name) && /TUB/.test(o.name))) {
       // glass on every footprint side that isn't against a wall; the head on the shortest walled side
       const pts = o.pts, n = pts.length, ccx = pts.reduce((a, p) => a + p[0], 0) / n, ccy = pts.reduce((a, p) => a + p[1], 0) / n;
@@ -1508,6 +1508,65 @@ function buildRaw() {
     ls.userData.vrCol = new THREE.Color(0x1f4e9a); ls.userData.arCol = new THREE.Color(0xffd24a); dimGroup.add(ls); }
   dimGroup.visible = dimsShown();
   root.add(dimGroup);
+  // MEASURE: what a pointer hit on the model measures (VR: point at it + click the right stick).
+  // Walls: the face you point at, between the walls it meets; openings: width × height; fixtures:
+  // their footprint and height; the floor: the room's width × depth through that spot.
+  rawMeasure = hit => {
+    const P = hit.point, hp = [P.x / IN2M, -P.z / IN2M], hy = P.y / IN2M, V = (x, y, h) => new THREE.Vector3(wx(x), h * IN2M, wz(y));
+    let wi = null, src = null, door = null, fix = null;
+    for (let q = hit.object; q && q !== root; q = q.parent) {
+      if (wi == null && q.userData.wallIndex != null) wi = q.userData.wallIndex;
+      if (!src && q.userData.src) src = q.userData.src;
+      if (!door) door = doors.find(d => d.leaf === q || d.pivot === q) || null;
+      if (!fix) fix = fixtures.find(f => f.group === q) || null;
+    }
+    const what = src ? src.what : '', bb = new THREE.Box3().setFromObject(hit.object);
+    const opNear = () => { let best = null, bd = 1e9;
+      for (const o of rawOps) { const S = segInfo(o.a, o.b), t = Math.max(0, Math.min(S.len, alongOf(S, hp))), d = Math.hypot(hp[0] - (o.a[0] + S.ux * t), hp[1] - (o.a[1] + S.uy * t)); if (d < bd) { bd = d; best = o; } }
+      return bd < 40 ? best : null; };
+    if (door || (wi == null && /header|window|apron|glass|below the upper floor|door|pocket|overhead|opening/.test(what))) {
+      const dk = door && door.key.split(':')[0];
+      const o = (dk && rawOps.find(o => `${Math.round(o.mid[0])},${Math.round(o.mid[1])}` === dk)) || opNear();
+      if (o) {
+        const base = Math.max(...sidesOf(o.a, o.ux, o.uy, o.width, o.thick, 'open')), isWin = o.kind === 'window';
+        const lo = base + (isWin ? SILL : 0), hi = base + HEAD, y = Math.min(hi - 2, Math.max(lo + 2, hy));
+        const name = { door: 'door', window: 'window', opening: 'cased opening', pocket: 'pocket door', overhead: 'garage door' }[o.kind] || o.kind;
+        return { segs: [[V(o.a[0], o.a[1], y), V(o.b[0], o.b[1], y)], [V(o.a[0], o.a[1], lo), V(o.a[0], o.a[1], hi)], [V(o.b[0], o.b[1], lo), V(o.b[0], o.b[1], hi)]],
+          text: `${name} ${ftIn(o.width)} wide × ${ftIn(hi - lo)} high` + (isWin ? `\nsill ${ftIn(SILL)} off the floor` : ''), at: V(o.mid[0], o.mid[1], y + 7) };
+      }
+    }
+    if (wi != null && merged[wi]) {
+      const w = merged[wi], S = segInfo(w.a, w.b), side = Math.sign(perpOff(S, hp)) || 1, nx = -S.uy * side, ny = S.ux * side;
+      const tq = Math.max(0, Math.min(S.len, alongOf(S, hp))), off = w.thick / 2 + 1;
+      const Q = [w.a[0] + S.ux * tq + nx * off, w.a[1] + S.uy * tq + ny * off];
+      const t1 = Math.min(cast(Q[0], Q[1], S.ux, S.uy), S.len - tq), t0 = Math.min(cast(Q[0], Q[1], -S.ux, -S.uy), tq);
+      const A = [Q[0] - S.ux * t0, Q[1] - S.uy * t0], B = [Q[0] + S.ux * t1, Q[1] + S.uy * t1];
+      const fl = levelAt(Q[0] + nx * 4, Q[1] + ny * 4, 'open'), top = bb.max.y / IN2M, kh = kneeHeight(w.layer);
+      return { segs: [[V(A[0], A[1], hy), V(B[0], B[1], hy)], [V(A[0], A[1], hy - 3), V(A[0], A[1], hy + 3)], [V(B[0], B[1], hy - 3), V(B[0], B[1], hy + 3)], [V(Q[0], Q[1], fl), V(Q[0], Q[1], top)]],
+        text: `${kh ? 'knee wall' : 'wall'} ${ftIn(t0 + t1)} long (this side)\n${ftIn(w.thick)} thick · ${ftIn(top - fl)} high`, at: V(Q[0] + nx * 5, Q[1] + ny * 5, hy + 7) };
+    }
+    const ob = rawObjs.find(o => o.ux != null && (fix ? o.key === fix.key : true) &&
+      Math.abs((hp[0] - o.cx) * o.ux + (hp[1] - o.cy) * o.uy) <= o.len / 2 + 2 && Math.abs(-(hp[0] - o.cx) * o.uy + (hp[1] - o.cy) * o.ux) <= o.dep / 2 + 2);
+    if (ob && !floors.includes(hit.object)) {
+      const gb = fix ? new THREE.Box3().setFromObject(fix.group) : bb, top = gb.max.y / IN2M, fl = slabAt(ob.cx, ob.cy);
+      const C = (u, v) => [ob.cx + ob.ux * u - ob.uy * v, ob.cy + ob.uy * u + ob.ux * v], L = ob.len / 2, D = ob.dep / 2;
+      const a = C(-L, -D), b = C(L, -D), c = C(L, D);
+      return { segs: [[V(a[0], a[1], top + 0.5), V(b[0], b[1], top + 0.5)], [V(b[0], b[1], top + 0.5), V(c[0], c[1], top + 0.5)], [V(b[0], b[1], fl), V(b[0], b[1], top)]],
+        text: `${ob.name.toLowerCase()}\n${ftIn(ob.len)} × ${ftIn(ob.dep)} · ${ftIn(top - fl)} high`, at: V(ob.cx, ob.cy, top + 9) };
+    }
+    if (/^stair/.test(what)) return { segs: [], text: what, at: P.clone().add(new THREE.Vector3(0, 0.2, 0)) };
+    if (floors.includes(hit.object) || /floor|winder|landing/i.test(what)) {       // the room through this spot
+      const segs = [], parts = [];
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const t1 = cast(hp[0], hp[1], dx, dy), t0 = cast(hp[0], hp[1], -dx, -dy); if (!isFinite(t0 + t1) || t0 + t1 > 900) continue;
+        const A = [hp[0] - dx * t0, hp[1] - dy * t0], B = [hp[0] + dx * t1, hp[1] + dy * t1];
+        segs.push([V(A[0], A[1], hy + 0.5), V(B[0], B[1], hy + 0.5)]); parts.push(ftIn(t0 + t1));
+      }
+      if (parts.length) return { segs, text: 'room ' + parts.join(' × '), at: V(hp[0], hp[1], hy + 14) };
+    }
+    const sz = bb.getSize(new THREE.Vector3());
+    return { segs: [], text: `${what || 'part'}\n${ftIn(sz.x / IN2M)} × ${ftIn(sz.z / IN2M)} × ${ftIn(sz.y / IN2M)}`, at: P.clone().add(new THREE.Vector3(0, 0.2, 0)) };
+  };
   if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
 }
@@ -2373,7 +2432,7 @@ function arGhost(on) {                                  // passthrough: hide sky
   if (!root) return;
   root.traverse(o => {
     if (o.userData && o.userData.ground) { o.visible = !on; return; }
-    if (!o.isMesh) return;
+    if (!o.isMesh || o.userData.keepOpaque) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
       if (on) { if (!arSaved.has(m)) arSaved.set(m, [m.transparent, m.opacity, m.depthWrite]); m.transparent = true; m.opacity = Math.min(m.opacity, 0.38); m.depthWrite = false; }
       else if (arSaved.has(m)) { const [t, op, dw] = arSaved.get(m); m.transparent = t; m.opacity = op; m.depthWrite = dw; }
@@ -2624,6 +2683,9 @@ function vrTick(dt) {
       if (aNow && !vrMenu.aPrev && !calib.mode) vrMenuOpen(!vrMenu.open);
       vrMenu.aPrev = aNow;
       if (vrMenu.open) { vrMenuHover(ctrl, sx, sy); continue; }
+      const kNow = !!(gp.buttons[3] && gp.buttons[3].pressed);   // right stick click: measure what you point at
+      if (kNow && !vrMenu.kPrev && !calib.mode) vrMeasure(ctrl);
+      vrMenu.kPrev = kNow;
     }
     if (calib.mode) continue;                          // calibration pauses locomotion + normal actions
     if (window.__arMode && calib.locked) {             // see-through: sticks NUDGE the house onto the real room (slow)
@@ -2696,7 +2758,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   setVrRayEdit(editMode && rawMode);                   // reflect any edit mode armed before entering VR
   calib.locked = false; loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment (re-locks 1:1)
   vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();   // the floor plan lies on the floor in the headset
-  if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu — floor plan on the floor · see-through · switch floors'); }, 2500);
+  if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu (floor plan · see-through · floors) · right stick click: measure what you point at'); }, 2500);
 });
 renderer.xr.addEventListener('sessionend', () => {
   vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();
@@ -2770,7 +2832,8 @@ function xrToSeeThrough(on) {                          // from the headset menu
 const vrMenu = { open: false, group: null, cards: [], items: [], sel: -1, stickSel: false, aPrev: false, planSwitch: null };
 function vrMenuItems() {
   const it = [{ id: 'fp', label: '🗺 Floor plan', sub: floorPlanOn ? 'on the floor · ON' : 'on the floor · OFF' },
-    { id: 'dims', label: '📏 Dimensions', sub: dimsOn ? 'rooms + doors · ON' : 'rooms + doors · OFF' }];
+    { id: 'dims', label: '📏 Room dims', sub: dimsOn ? 'all rooms + doors · ON' : 'all rooms + doors · OFF' }];
+  if (measureGroup && measureGroup.children.length) it.push({ id: 'clear', label: '🧹 Clear', sub: `${measureGroup.children.length} measurement${measureGroup.children.length > 1 ? 's' : ''}` });
   if (xrs.kind === 'ar') it.push({ id: 'mode', label: window.__arMode ? '🥽 Full VR' : '👓 See-through', sub: window.__arMode ? 'hide the real room' : 'show the real room' });
   else if (xrs.arOK) it.push({ id: 'mode', label: '👓 See-through', sub: 'real room + house' });
   PLANS.forEach((p, i) => {
@@ -2839,9 +2902,9 @@ function vrMenuSelect(e) {                              // the trigger ('select'
     if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown();
     vrToast('floor plan on the floor ' + (floorPlanOn ? 'ON' : 'OFF'));
   } else if (it.id === 'dims') {
-    dimsOn = !dimsOn; try { localStorage.setItem('plan2vr-v2-dims', dimsOn ? '1' : '0'); } catch (err) {}
+    dimsOn = !dimsOn; try { localStorage.setItem('plan2vr-v2-roomdims', dimsOn ? '1' : '0'); } catch (err) {}
     if (dimGroup) dimGroup.visible = dimsShown();
-    vrToast('dimensions on the floor ' + (dimsOn ? 'ON' : 'OFF'));
+    vrToast('room dimensions on the floor ' + (dimsOn ? 'ON' : 'OFF') + ' · right stick click measures what you point at');
   } else if (it.id === 'mode') xrToSeeThrough(xrs.kind === 'ar' ? !window.__arMode : true);
   else if (it.id === 'plan') {
     if (PLANS[it.i].src === DXF) { vrToast('you are on ' + it.label.slice(3)); return; }
@@ -2849,6 +2912,47 @@ function vrMenuSelect(e) {                              // the trigger ('select'
     pick.selectedIndex = it.i; loadPlan(PLANS[it.i].src); vrToast('loading ' + vrMenu.planSwitch + '…');
   } else if (it.id === 'lock') { if (calib.locked) { calib.locked = false; vrToast('1:1 lock OFF — joystick walking on'); } else applyAlignment(); }
   else if (it.id === 'exit' && xrs.session) xrs.session.end();
+  else if (it.id === 'clear') { if (measureGroup) measureGroup.clear(); vrToast('measurements cleared'); }
+}
+// ---- measure (right stick click): point at a wall, door, window, fixture or the floor; its size is
+// drawn right there (yellow, seen through walls) and stays until you clear it from the menu
+let measureGroup = null;
+const _mo = new THREE.Vector3(), _md = new THREE.Vector3();
+function visibleChain(o) { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; }
+function measureRay(o, d) {
+  if (!rawMode || !rawMeasure || !root) return null;
+  vrRay.set(o, d); vrRay.far = 15;
+  const hit = vrRay.intersectObject(root, true).find(h => h.object.isMesh && visibleChain(h.object) &&
+    !h.object.userData.dimLabel && !h.object.userData.floorPlanLabel && !h.object.userData.measure);
+  if (!hit) return null;
+  const M = rawMeasure(hit); if (M) drawMeasure(M);
+  return M;
+}
+function vrMeasure(ctrl) {
+  ctrl.getWorldPosition(_mo); ctrl.getWorldQuaternion(_q); _md.set(0, 0, -1).applyQuaternion(_q);
+  const M = measureRay(_mo, _md);
+  if (!M) vrToast(rawMode ? 'nothing to measure there — point at a wall, door, window, fixture or the floor' : 'measuring works on the raw plans');
+}
+function drawMeasure(M) {
+  if (!measureGroup || measureGroup.parent !== root) { measureGroup = new THREE.Group(); measureGroup.name = 'measurements'; root.add(measureGroup); }
+  const g = new THREE.Group();
+  if (M.segs.length) {
+    const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(M.segs.flat()), new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, transparent: true }));
+    ls.renderOrder = 995; ls.userData.measure = true; g.add(ls);
+  }
+  const lines = M.text.split('\n'), c = document.createElement('canvas'), x = c.getContext('2d'), F0 = 'bold 54px system-ui', F1 = '40px system-ui';
+  x.font = F0; let w = x.measureText(lines[0]).width; x.font = F1; for (const l of lines.slice(1)) w = Math.max(w, x.measureText(l).width);
+  c.width = Math.ceil(w) + 60; c.height = 40 + 64 + (lines.length - 1) * 52;
+  x.fillStyle = 'rgba(20,24,32,0.9)'; x.beginPath(); x.roundRect ? x.roundRect(3, 3, c.width - 6, c.height - 6, 28) : x.rect(3, 3, c.width - 6, c.height - 6); x.fill();
+  x.lineWidth = 5; x.strokeStyle = '#ffd24a'; x.stroke(); x.textBaseline = 'middle';
+  x.font = F0; x.fillStyle = '#ffe9a8'; x.fillText(lines[0], 30, 20 + 32);
+  x.font = F1; x.fillStyle = '#e8eefb'; lines.slice(1).forEach((l, i) => x.fillText(l, 30, 20 + 64 + 26 + i * 52));
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const H = 0.055 * c.height / 104, m = new THREE.Mesh(new THREE.PlaneGeometry(H * c.width / c.height, H), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthTest: false, toneMapped: false }));
+  m.position.copy(M.at); camera.getWorldPosition(_head); m.lookAt(_head); m.renderOrder = 996;
+  m.userData.measure = true; m.userData.keepOpaque = true; g.add(m); g.userData.measure = true;
+  measureGroup.add(g);
+  while (measureGroup.children.length > 12) measureGroup.remove(measureGroup.children[0]);
 }
 
 // ---------------------------------------------------------------- GitHub issue button
@@ -2966,7 +3070,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly,
-  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, floorPlan: () => floorPlanGroup, setSeeThrough,
+  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, floorPlan: () => floorPlanGroup, setSeeThrough, measureRay, measures: () => measureGroup,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
