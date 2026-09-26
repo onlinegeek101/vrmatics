@@ -743,7 +743,7 @@ function detectOpenings(walls) {
     let hi = spans[0].hi, last = spans[0];
     for (let i = 1; i < spans.length; i++) {
       const gap = spans[i].lo - hi;
-      if (gap > 8 && gap < 240) gaps.push({ width: gap, ux, uy, thick: Math.max(last.thick, spans[i].thick), layer: last.layer,
+      if (gap > 8 && gap < 240) gaps.push({ width: gap, ux, uy, thick: Math.max(last.thick, spans[i].thick), layer: last.layer, layerB: spans[i].layer,
         a: [ref[0] + ux * hi, ref[1] + uy * hi], b: [ref[0] + ux * spans[i].lo, ref[1] + uy * spans[i].lo],
         mid: [ref[0] + ux * (hi + gap / 2), ref[1] + uy * (hi + gap / 2)] });
       if (spans[i].hi > hi) { hi = spans[i].hi; last = spans[i]; }
@@ -856,6 +856,12 @@ function extendEnds(walls) {
 // layer panel's swatch colours); magenta = a wall guessed from a single line
 let srcColors = false, rawOps = [], rawObjs = [];
 const SINGLE_WALL_COLOR = '#ff2bd6';
+// a wall layer named KNEE / HALF / PONY / LOW (e.g. 1.1WALL-KNEE) is a knee wall: 42in tall unless
+// the name ends in its height in inches (1.1WALL-KNEE-36)
+function kneeHeight(layer) {
+  const n = (layer || '').toUpperCase(); if (!/KNEE|HALF|PONY|(^|[^A-Z])LOW/.test(n)) return 0;
+  const m = n.match(/(\d{2})\s*(IN|")?\s*$/); return m && !/^\d\.\d/.test(m[0]) ? +m[1] : 42;
+}
 const srcMatCache = {};
 function srcMat(layer, normal, colorOverride) {
   if (!srcColors) return normal;
@@ -1060,7 +1066,8 @@ function buildRaw() {
     Object.assign(l, { R, r: [-S[k].dx, -S[k].dy], run: S[k].run, width: S[k].width });   // run: high side → low side
   }
   // level at a point; mode 'wall' reads a flight as its bottom (walls go down a stair well), 'open' as its top
-  const levelAt = (x, y, mode) => { if (mode) for (const l of stepSets) if (pointIn(l.pts, x, y)) return mode === 'wall' ? l.lo : l.hi; return slabAt(x, y); };
+  // (an upper run's bottom is in the air: a wall under it still stands on the floor below)
+  const levelAt = (x, y, mode) => { if (mode) for (const l of stepSets) if (pointIn(l.pts, x, y)) return mode === 'wall' ? Math.min(l.lo, slabAt(x, y)) : l.hi; return slabAt(x, y); };
   const parentOf = l => slabs.find(p => p !== l && p.area > l.area && pointIn(p.pts, l.c[0], l.c[1]));
   const TOP = Math.max(0, ...slabs.filter(l => l.area >= 20000).map(l => l.elev)) + WALL_H;   // one ceiling plate over the floors (not landings / winders)
   // pushed back in depth: where a floor block's edge is flush with a wall face the wall wins (no flicker)
@@ -1108,6 +1115,7 @@ function buildRaw() {
     prof.push([run, lo]);
     const open = hi - base > 48;                        // short flights (porch, garage steps) stay solid
     const under = s2 => open ? Math.max(base, (hi - rise - D) + (lo - (hi - rise - D)) * s2 / run) : base;   // stringer, high → low
+    if (open) { l.under = under; l.H = H; }            // walls crossing under an open run stop at its stringer
     const bot = [[run, Math.max(base, lo)]];
     for (let q = 15; q >= 0; q--) bot.push([run * q / 16, under(run * q / 16)]);
     const pts2 = [[0, hi - rise], ...prof.slice(1), ...bot];
@@ -1131,8 +1139,17 @@ function buildRaw() {
     const ax = wx(w.a[0]), az = wz(w.a[1]), bx = wx(w.b[0]), bz = wz(w.b[1]);
     if (Math.hypot(bx - ax, bz - az) < 0.02) continue;
     const ws = segInfo(w.a, w.b), base = slabs.length ? Math.min(...sidesOf(w.a, ws.ux, ws.uy, ws.len, w.thick, 'wall')) : 0;
-    const m = boxBetween(ax, az, bx, bz, w.thick, base * IN2M, TOP * IN2M, srcMat(w.layer, wallMat, w.single ? SINGLE_WALL_COLOR : null));
-    tagSrc(m, w.layer, w.single ? 'wall GUESSED from a single line (no second face found)' : `wall (two faces ${w.thick.toFixed(1)}" apart)`);
+    const kh = kneeHeight(w.layer);                     // a knee wall stops short: kh above the higher floor beside it
+    let top = kh ? (slabs.length ? Math.max(...sidesOf(w.a, ws.ux, ws.uy, ws.len, w.thick, 'open')) : 0) + kh : TOP;
+    // a wall across the underside of an open (walk-under) run closes the space under the stair: floor up to the stringer
+    const mx = (w.a[0] + w.b[0]) / 2, my = (w.a[1] + w.b[1]) / 2;
+    for (const l of stepSets) {
+      if (!l.under || Math.abs(ws.ux * l.r[0] + ws.uy * l.r[1]) > 0.3 || !pointIn(l.pts, mx, my)) continue;
+      const sM = (mx - l.H[0]) * l.r[0] + (my - l.H[1]) * l.r[1], hs = w.thick / 2 * Math.abs(-ws.uy * l.r[0] + ws.ux * l.r[1]);
+      top = Math.min(top, l.under(Math.max(0, sM - hs)));   // the higher face's stringer height: tucked into the stair
+    }
+    const m = boxBetween(ax, az, bx, bz, w.thick, base * IN2M, top * IN2M, srcMat(w.layer, wallMat, w.single ? SINGLE_WALL_COLOR : null));
+    tagSrc(m, w.layer, (kh ? `knee wall ${kh}" · ` : top < TOP - 0.5 && !kh ? `under the stair (to ${top.toFixed(0)}") · ` : '') + (w.single ? 'wall GUESSED from a single line (no second face found)' : `wall (two faces ${w.thick.toFixed(1)}" apart)`));
     m.userData.wallIndex = wi;                          // so a tap anywhere on the face grabs this wall
     root.add(m); wallMeshes.push(m);
     colliders.push({ ax, az, bx, bz, hw: w.thick / 2 * IN2M });
@@ -1159,7 +1176,8 @@ function buildRaw() {
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th, lvBot * IN2M, B, srcMat(c.layer, wallMat)), c.layer, what + ' — wall below the upper floor'));
       if (lvHi - lvLo > 10) colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
     }
-    if (headY < top) root.add(tagSrc(boxBetween(ax, az, bx, bz, th, headY, top, srcMat(c.layer, wallMat)), c.layer, what + ' header'));
+    const kneeJamb = c.kind === 'opening' && (kneeHeight(o.layer) || kneeHeight(o.layerB));   // open above a knee wall: no header to hang
+    if (headY < top && !kneeJamb) root.add(tagSrc(boxBetween(ax, az, bx, bz, th, headY, top, srcMat(c.layer, wallMat)), c.layer, what + ' header'));
     if (c.kind === 'window') {
       const sillY = B + SILL * IN2M;
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th, B, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
