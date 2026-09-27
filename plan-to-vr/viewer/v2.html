@@ -2430,7 +2430,7 @@ function arPlaceStart() {                               // first XR frame with a
   st.pending = false;
   const fr = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); fr.y = 0; if (fr.lengthSq() < 1e-6) fr.set(0, 0, -1); fr.normalize();
   const fw = [st.F[0] - st.P[0], st.F[1] - st.P[1]], ang = v => Math.atan2(v[0], v[1]);
-  const a = ang(fw) - ang([fr.x, fr.z]), c = Math.cos(a), sn = Math.sin(a), hx = camera.position.x, hz = camera.position.z;
+  const a = ang(fw) - ang([fr.x, fr.z]), c = Math.cos(a), sn = Math.sin(a), hx = camera.position.x * dolly.scale.x, hz = camera.position.z * dolly.scale.x;
   dolly.rotation.set(0, a, 0);
   const fy = groundAt(st.P[0], st.P[1]);
   dolly.position.set(st.P[0] - (hx * c + hz * sn), fy, st.P[1] - (-hx * sn + hz * c));
@@ -2594,7 +2594,8 @@ function solveAlignment(anchors) {                      // rigid real→plan (Ka
     T.resid = Math.sqrt(resid / n); return T;
   };
   const apply = (T, p) => { const c = Math.cos(T.phi), s = Math.sin(T.phi); return [c * p[0] - s * p[1] + T.tx, s * p[0] + c * p[1] + T.tz]; };
-  const ordered = (an, flip) => flip ? [[an.realA, an.planB], [an.realB, an.planA]] : [[an.realA, an.planA], [an.realB, an.planB]];
+  const k = dolly.scale.x, K = p => [p[0] * k, p[1] * k];   // world scale: tracked metres → house metres
+  const ordered = (an, flip) => flip ? [[K(an.realA), an.planB], [K(an.realB), an.planA]] : [[K(an.realA), an.planA], [K(an.realB), an.planB]];
   let best = null;
   for (const seed of [false, true]) {
     let T = fitPairs(ordered(anchors[0], seed));
@@ -2618,7 +2619,7 @@ function applyAlignment() {
   dolly.position.set(T.tx, calib.floorY, T.tz); dolly.rotation.set(0, T.theta, 0); calib.locked = true;
   const off = Math.abs(T.scale - 1) * 100;
   vrToast(`aligned to ${calib.anchors.length} edge${calib.anchors.length > 1 ? 's' : ''} · fit ±${T.residIn.toFixed(1)}in · room/plan scale ${T.scale.toFixed(3)}` +
-    (calib.anchors.length < 2 ? ' · trace a 2nd edge far from this one' : off > 1 ? ' · SCALE OFF ' + off.toFixed(1) + '% — check the plan units' : '') + ' · 1:1 lock ON (left Y)');
+    (calib.anchors.length < 2 ? ' · trace a 2nd edge far from this one' : off > 1 ? ' · SCALE OFF ' + off.toFixed(1) + '% — check the plan units' : '') + ' · 1:1 lock ON (menu: unlock)');
   return T;
 }
 let vrToastMesh = null, vrToastT = null;
@@ -2641,7 +2642,7 @@ function finishTrace() {
   if (!op) return;
   const an = { key: op.key, planA: op.planA, planB: op.planB, realA: seg.a, realB: seg.b, headReal: [camera.position.x, camera.position.z], floorY: dolly.position.y };
   calib.anchors = calib.anchors.filter(x => x.key !== an.key); calib.anchors.push(an);
-  saveAnchors(); applyAlignment();
+  saveAnchors(); if (applyAlignment()) roomPin.want = 'auto';   // lined up exactly: pin it to the room
   calib.stage = 'off'; calib.mode = false;
 }
 function handleCalib(gp, ctrl) {                        // right B (buttons[5]) hold = select, release = trace
@@ -2669,6 +2670,8 @@ const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE
 function vrTick(dt) {
   const session = renderer.xr.getSession(); if (!session) return;
   if (window.__arStart && window.__arStart.pending) arPlaceStart();
+  roomPinTick();
+  if (window.__scaleCalibPending && xrs.kind === 'ar' && !(window.__arStart && window.__arStart.pending)) { window.__scaleCalibPending = false; scaleCalibEnter(); }
   if (vrMenu.planSwitch && window.__V2_READY) {        // switched plans from the menu: same spot, this plan's floor
     camera.getWorldPosition(_head);
     if (calib.locked) { calib.floorY = groundAt(_head.x, _head.z); dolly.position.y = calib.floorY; }
@@ -2680,15 +2683,13 @@ function vrTick(dt) {
     const ax = gp.axes;
     const sx = ax.length >= 4 ? ax[2] : ax[0], sy = ax.length >= 4 ? ax[3] : ax[1];
     const ctrl = src.handedness === 'left' ? ctrlL : ctrlR;
-    if (src.handedness === 'right') handleCalib(gp, ctrl);   // right B: room calibration
-    if (src.handedness === 'left') {                   // left Y: toggle the 1:1 lock (only once aligned)
+    if (src.handedness === 'right' && !scal.on) handleCalib(gp, ctrl);   // right B: room calibration
+    if (src.handedness === 'left') {                   // left Y: show / hide every control (the 1:1 lock is in the menu)
       const yNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
-      if (yNow && !calib.yPrev && calib.anchors.length) {
-        if (calib.locked) { calib.locked = false; vrToast('1:1 lock OFF — joystick walking on; the model no longer sits on your real room'); }
-        else applyAlignment();
-      }
+      if (yNow && !calib.yPrev) help.on = !help.on;
       calib.yPrev = yNow;
     }
+    if (scal.on) { scaleCalibInput(src, gp, ctrl, sx, sy, dt); continue; }   // scale calibration owns the controllers
     if (src.handedness === 'right') {                  // right A: the VR menu
       const aNow = !!(gp.buttons[4] && gp.buttons[4].pressed);
       if (aNow && !vrMenu.aPrev && !calib.mode) vrMenuOpen(!vrMenu.open);
@@ -2758,6 +2759,8 @@ function vrTick(dt) {
       prevTrig.left = trig;
     }
   }
+  if (scal.on) calFrame();
+  helpRefresh();
   camera.getWorldPosition(_head);                      // follow the floor / step up + down
   dolly.position.y = calib.locked ? calib.floorY : groundAt(_head.x, _head.z, dolly.position.y + 0.6);   // locked: real stairs move you
 }
@@ -2767,11 +2770,14 @@ renderer.xr.addEventListener('sessionstart', () => {
   dolly.rotation.set(0, walker.yaw, 0);
   document.getElementById('panel').style.display = 'none';
   setVrRayEdit(editMode && rawMode);                   // reflect any edit mode armed before entering VR
+  applyWorldScale(); roomPin.tried = false; roomPin.anchor = null; roomPin.applied = false; roomPin.want = null;
+  roomPin.skip = !!(window.__arStart && window.__arStart.pending);   // a picked start spot wins over the pin
   calib.locked = false; loadAnchors(); if (calib.anchors.length) applyAlignment();   // restore room alignment (re-locks 1:1)
   vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();   // the floor plan lies on the floor in the headset
-  if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu (floor plan · see-through · floors) · right stick click: measure what you point at'); }, 2500);
+  if (!window.__arStart) setTimeout(() => { if (!vrToastMesh) vrToast('right A: menu (floor plan · see-through · floors · scale) · right stick click: measure · left Y: all controls'); }, 2500);
 });
 renderer.xr.addEventListener('sessionend', () => {
+  if (scal.on) scaleCalibExit(false); window.__scaleCalibPending = false; help.on = false; helpRefresh();
   vrMenuOpen(false); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); if (dimGroup) dimGroup.visible = dimsShown();
   scene.add(camera); document.getElementById('panel').style.display = '';
   mode = 'orbit'; place();
@@ -2788,7 +2794,7 @@ function xrButtons() {
 function setSeeThrough(on) { window.__arMode = !!on; arGhost(!!on); }
 async function xrStart(kind) {                         // 'vr' | 'ar' — needs a user gesture (a click, or the trigger in the headset)
   try {
-    const s = await navigator.xr.requestSession(kind === 'ar' ? 'immersive-ar' : 'immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
+    const s = await navigator.xr.requestSession(kind === 'ar' ? 'immersive-ar' : 'immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'anchors'] });
     xrs.session = s; xrs.kind = kind; xrs.retryAR = null; setSeeThrough(kind === 'ar');
     s.addEventListener('end', () => {
       if (xrs.session !== s) return;
@@ -2840,6 +2846,256 @@ function xrToSeeThrough(on) {                          // from the headset menu
 // ---- VR menu (right A): a ring of cards in front of you. Tilt the right stick or point at one and
 // pull the trigger; A again closes it. Floor plan on the floor, see-through / full VR, which floor,
 // the 1:1 lock, exit.
+// ---- world scale: how much bigger the house must be drawn to match your real room (1 = as tracked).
+// Set in scale calibration, kept in this browser, applied to the headset rig in VR and see-through:
+// the rig is scaled by 1/scale, so the whole world (house, floor plan, measurements) grows by `scale`.
+let worldScale = (() => { try { const v = parseFloat(localStorage.getItem('plan2vr-v2-scale')); return v > 0.8 && v < 1.25 ? v : 1; } catch (e) { return 1; } })();
+function applyWorldScale() { dolly.scale.setScalar(1 / worldScale); }
+applyWorldScale();
+// ---- scale calibration (VR menu → 📐 Calibrate scale): real-size reference items in see-through.
+// Carry one onto the real thing (right trigger), then resize it until they match (right stick ↑↓),
+// or touch the real thing's two ends with the controller tip (right A, twice) to measure it exactly.
+const CAL_ITEMS = [
+  { id: 'usd', name: 'US dollar bill', w: 6.14, d: 2.61 },
+  { id: 'card', name: 'credit card', w: 3.370, d: 2.125 },
+  { id: 'ruler', name: '12 in ruler', w: 12, d: 1.25 },
+  { id: 'tape', name: 'tape measure out to 4 ft', w: 48, d: 1 },
+  { id: 'paper', name: 'letter paper (long side)', w: 11, d: 8.5 },
+  { id: 'quarter', name: 'US quarter', w: 0.955, d: 0.955, round: true },
+  { id: 'door', name: '36 in door opening', w: 36, d: 1.75 },
+];
+function calTexture(it) {
+  const ppi = Math.min(96, Math.floor(2040 / it.w)), W = Math.round(it.w * ppi), H = Math.max(8, Math.round(it.d * ppi));
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  const ticks = (col, every, lab) => {                 // inch ticks down from the top edge (1/8, 1/4, 1/2, 1)
+    for (let k = 0; k <= it.w * 8 + 1e-6; k++) {
+      const X = Math.round(k * ppi / 8), f = k % 8 === 0 ? 0.42 : k % 4 === 0 ? 0.3 : k % 2 === 0 ? 0.22 : 0.14;
+      x.fillStyle = col; x.fillRect(Math.min(W - 2, X), 0, Math.max(1, ppi / 48), H * f);
+      if (k % 8 === 0 && k > 0 && k < it.w * 8 && (k / 8) % every === 0) { x.font = `bold ${Math.round(H * 0.3)}px system-ui`; x.textAlign = 'center'; x.fillText(lab(k / 8), X, H * 0.72); }
+    }
+  };
+  if (it.round) {
+    x.fillStyle = '#c9ccd1'; x.beginPath(); x.arc(W / 2, H / 2, W / 2 - 1, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#8b8f96'; x.lineWidth = Math.max(2, W / 30); x.stroke();
+    x.fillStyle = '#6d7178'; x.font = `bold ${Math.round(H * 0.3)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('25¢', W / 2, H / 2);
+  } else if (it.id === 'usd') {
+    x.fillStyle = '#d7dfc9'; x.fillRect(0, 0, W, H); x.strokeStyle = '#4d6b3c'; x.lineWidth = ppi * 0.12; x.strokeRect(ppi * 0.12, ppi * 0.12, W - ppi * 0.24, H - ppi * 0.24);
+    x.fillStyle = '#4d6b3c'; x.beginPath(); x.ellipse(W / 2, H / 2, ppi * 0.75, ppi * 0.95, 0, 0, Math.PI * 2); x.fill();
+    x.font = `bold ${Math.round(ppi * 0.55)}px serif`; x.textBaseline = 'middle';
+    for (const [px, py] of [[0.4, 0.4], [W / ppi - 0.4, 0.4], [0.4, H / ppi - 0.4], [W / ppi - 0.4, H / ppi - 0.4]]) { x.textAlign = 'center'; x.fillText('1', px * ppi, py * ppi); }
+    x.font = `bold ${Math.round(ppi * 0.32)}px serif`; x.fillText('ONE DOLLAR', W / 2, H - ppi * 0.42);
+  } else if (it.id === 'card') {
+    x.fillStyle = '#2b5fa8'; x.fillRect(0, 0, W, H); x.fillStyle = '#d4b35c'; x.fillRect(ppi * 0.4, ppi * 0.7, ppi * 0.5, ppi * 0.4);
+    x.fillStyle = '#e8eefb'; x.font = `${Math.round(ppi * 0.28)}px monospace`; x.fillText('0000 0000 0000 0000', ppi * 0.35, ppi * 1.55);
+  } else if (it.id === 'paper') {
+    x.fillStyle = '#fbfbf8'; x.fillRect(0, 0, W, H); x.strokeStyle = '#9aa3b2'; x.lineWidth = 3; x.strokeRect(1.5, 1.5, W - 3, H - 3);
+    x.fillStyle = '#5b6576'; x.font = `bold ${Math.round(ppi * 0.9)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('8½ × 11 in', W / 2, H / 2);
+  } else if (it.id === 'door') {
+    x.fillStyle = '#9a6b3f'; x.fillRect(0, 0, W, H); x.fillStyle = '#fff'; x.font = `bold ${Math.round(H * 0.5)}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('36 in door opening (jamb to jamb)', W / 2, H / 2);
+  } else if (it.id === 'ruler') {
+    x.fillStyle = '#f2c94c'; x.fillRect(0, 0, W, H); ticks('#1b2330', 1, n => String(n));
+  } else if (it.id === 'tape') {
+    x.fillStyle = '#f5d000'; x.fillRect(0, 0, W, H);
+    for (let f = 1; f < 4; f++) { x.fillStyle = '#d7263d'; x.fillRect(f * 12 * ppi - ppi * 0.35, H * 0.5, ppi * 0.7, H * 0.45); }
+    ticks('#1b2330', 2, n => n % 12 === 0 ? `${n / 12} ft` : String(n));
+    x.fillStyle = '#333'; x.fillRect(0, 0, Math.max(3, ppi * 0.06), H);   // the hook end
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+}
+const scal = { on: false, idx: 2, item: null, info: null, infoTex: null, loc: new THREE.Vector3(), yaw: 0, stickReady: true,
+  aPrev: true, bPrev: true, xPrev: true, pts: [], marks: null, saved: 1, rootWas: true, seeWas: false, infoKey: '', tip: null };
+function calBuildItem() {
+  if (scal.item) { dolly.remove(scal.item); scal.item.traverse(o => { if (o.material) { o.material.map && o.material.map.dispose(); o.material.dispose(); } if (o.geometry) o.geometry.dispose(); }); }
+  const it = CAL_ITEMS[scal.idx], w = it.w * IN2M, d = it.d * IN2M, g = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: calTexture(it), transparent: true, opacity: 0.72, side: THREE.DoubleSide, toneMapped: false, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.position.x = w / 2; g.add(m);                    // its 0 end sits at the group origin
+  const pts = it.round ? Array.from({ length: 49 }, (_, k) => new THREE.Vector3(w / 2 + Math.cos(k / 48 * Math.PI * 2) * w / 2, 0.001, Math.sin(k / 48 * Math.PI * 2) * w / 2))
+    : [[0, -d / 2], [w, -d / 2], [w, d / 2], [0, d / 2], [0, -d / 2]].map(([a, b]) => new THREE.Vector3(a, 0.001, b));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xff2bd6, toneMapped: false })));   // crisp edge to line up
+  scal.info = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.069), new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, toneMapped: false }));
+  scal.info.renderOrder = 996; scal.info.userData.keepOpaque = true; g.add(scal.info); scal.infoKey = '';
+  scal.item = g; dolly.add(g); calFrame();
+}
+function calInfoTex() {
+  const it = CAL_ITEMS[scal.idx], key = `${scal.idx}|${worldScale.toFixed(4)}|${scal.pts.length}|${scal.meas || ''}`;
+  if (key === scal.infoKey) return; scal.infoKey = key;
+  const c = document.createElement('canvas'); c.width = 780; c.height = 270; const x = c.getContext('2d');
+  x.fillStyle = 'rgba(20,24,32,0.92)'; x.beginPath(); x.roundRect ? x.roundRect(3, 3, 774, 264, 26) : x.rect(3, 3, 774, 264); x.fill();
+  x.lineWidth = 5; x.strokeStyle = '#ff2bd6'; x.stroke(); x.textBaseline = 'middle';
+  x.fillStyle = '#ffffff'; x.font = 'bold 50px system-ui'; x.fillText(`${it.name}`, 26, 52);
+  x.fillStyle = '#c9d4e8'; x.font = '38px system-ui'; x.fillText(it.round ? `${it.w} in across` : `${it.w} × ${it.d} in`, 26, 110);
+  x.fillStyle = '#ffd24a'; x.font = 'bold 46px system-ui'; x.fillText(`scale ${(worldScale * 100).toFixed(1)}%`, 26, 170);
+  x.fillStyle = '#9fb0ca'; x.font = '32px system-ui';
+  x.fillText(scal.pts.length === 1 ? 'A again at the other end' : scal.meas ? scal.meas : `saved ${(scal.saved * 100).toFixed(1)}% · B saves · Y: controls`, 26, 228);
+  if (scal.info.material.map) scal.info.material.map.dispose();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scal.info.material.map = t; scal.info.material.needsUpdate = true;
+}
+function calFrame() {                                    // the item stays on its real spot while the scale changes
+  if (!scal.item) return;
+  scal.item.position.copy(scal.loc); scal.item.rotation.set(0, scal.yaw, 0); scal.item.scale.setScalar(worldScale);
+  const it = CAL_ITEMS[scal.idx], half = it.w * IN2M * worldScale / 2;   // its card: just past the item's middle, a bit up
+  const c = new THREE.Vector3(Math.cos(scal.yaw), 0, -Math.sin(scal.yaw)).multiplyScalar(half).add(scal.loc);
+  const d = c.clone().sub(camera.position); d.y = 0; if (d.lengthSq() < 1e-6) d.set(0, 0, -1); d.normalize();
+  const P = c.addScaledVector(d, 0.05 + it.d * IN2M / 2); P.y += 0.08;
+  scal.item.updateMatrixWorld(true); scal.info.position.copy(scal.item.worldToLocal(dolly.localToWorld(P)));
+  camera.getWorldPosition(_head); scal.info.lookAt(_head); calInfoTex();
+}
+function scaleCalibEnter(force) {
+  if (!force && !xrs.session) return;
+  if (!force && xrs.kind !== 'ar') {
+    if (xrs.arOK) { window.__scaleCalibPending = true; xrToSeeThrough(true); }
+    else vrToast('scale calibration needs see-through (passthrough) — this headset / browser doesn’t offer it');
+    return;
+  }
+  scal.seeWas = !!window.__arMode; if (!force && !window.__arMode) setSeeThrough(true);
+  scal.on = true; scal.saved = worldScale; scal.pts = []; scal.meas = ''; scal.rootWas = root ? root.visible : true; if (root) root.visible = false;
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); f.y = 0; if (f.lengthSq() < 1e-6) f.set(0, 0, -1); f.normalize();
+  scal.loc.copy(camera.position).addScaledVector(f, 0.45); scal.loc.y = camera.position.y - 0.45;
+  scal.yaw = Math.atan2(-f.x, -f.z);   // lying across in front of you, 0 end on the left scal.loc.addScaledVector(new THREE.Vector3(Math.cos(scal.yaw), 0, -Math.sin(scal.yaw)), -CAL_ITEMS[scal.idx].w * IN2M / 2);
+  scal.marks = new THREE.Group(); dolly.add(scal.marks);
+  scal.tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2bd6, depthTest: false, toneMapped: false }));
+  scal.tip.renderOrder = 997; scal.tip.userData.keepOpaque = true; ctrlR.add(scal.tip);
+  scal.aPrev = scal.bPrev = scal.xPrev = true;           // the button that opened it doesn't count
+  calBuildItem();
+  vrToast('scale calibration: put the real item down · right trigger carries the virtual one onto it · right stick ↑↓ resizes · A, A touches its two ends · B saves · X cancels');
+}
+function scaleCalibExit(save) {
+  if (!scal.on) return;
+  if (save) { try { localStorage.setItem('plan2vr-v2-scale', String(worldScale)); } catch (e) {} }
+  else { worldScale = scal.saved; applyWorldScale(); }
+  if (scal.item) { dolly.remove(scal.item); scal.item = null; }
+  if (scal.marks) { dolly.remove(scal.marks); scal.marks = null; }
+  if (scal.tip) { ctrlR.remove(scal.tip); scal.tip = null; }
+  if (root) root.visible = scal.rootWas;
+  if (!scal.seeWas && xrs.kind === 'ar') setSeeThrough(false);
+  scal.on = false;
+  vrToast(save ? `scale ${(worldScale * 100).toFixed(1)}% saved — used in VR and see-through from now on (this browser)` : 'scale calibration cancelled — back to ' + (worldScale * 100).toFixed(1) + '%');
+}
+function setWorldScale(v) {                            // resize about your head: you stay on the same spot in the house
+  camera.getWorldPosition(_head); const hx = _head.x, hz = _head.z;
+  worldScale = Math.max(0.8, Math.min(1.25, v)); applyWorldScale(); dolly.updateMatrixWorld(true);
+  camera.getWorldPosition(_head); dolly.position.x += hx - _head.x; dolly.position.z += hz - _head.z;
+}
+function scaleCalibInput(src, gp, ctrl, sx, sy, dt) {
+  const B = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.6));
+  if (src.handedness === 'left') {                       // left X: leave without saving
+    const xNow = B(4); if (xNow && !scal.xPrev) scaleCalibExit(false); scal.xPrev = xNow; return;
+  }
+  if (B(0)) {                                            // right trigger: carry — the item's 0 end at the controller tip, pointing where you point
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrl.quaternion); f.y = 0;
+    if (f.lengthSq() > 1e-6) { f.normalize(); scal.yaw = Math.atan2(-f.z, f.x); }
+    scal.loc.copy(ctrl.position);
+  }
+  if (Math.abs(sy) > 0.15) setWorldScale(worldScale * (1 - sy * 0.02 * dt));   // up = bigger, ~2%/s at full tilt
+  if (Math.abs(sx) > 0.7 && scal.stickReady) {           // next / previous item
+    scal.idx = (scal.idx + (sx > 0 ? 1 : CAL_ITEMS.length - 1)) % CAL_ITEMS.length; scal.stickReady = false; scal.pts = []; scal.meas = '';
+    if (scal.marks) scal.marks.clear(); calBuildItem();
+  } else if (Math.abs(sx) < 0.3) scal.stickReady = true;
+  const aNow = B(4);                                     // A: touch one end, then the other — the tracked distance sets the scale
+  if (aNow && !scal.aPrev) {
+    if (scal.pts.length >= 2) { scal.pts = []; scal.marks.clear(); scal.meas = ''; }
+    const p = ctrl.position.clone(); scal.pts.push(p);
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.007, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffd24a, depthTest: false, toneMapped: false }));
+    dot.position.copy(p); dot.renderOrder = 997; dot.userData.keepOpaque = true; scal.marks.add(dot);
+    if (scal.pts.length === 2) {
+      const L = scal.pts[0].distanceTo(scal.pts[1]), it = CAL_ITEMS[scal.idx], trueL = it.w * IN2M;
+      scal.marks.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(scal.pts), new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, toneMapped: false })));
+      if (L < trueL * 0.5 || L > trueL * 1.5) { scal.meas = `touched ${(L / IN2M).toFixed(2)} in apart — not a ${it.w} in ${it.name}? try again`; }
+      else { setWorldScale(L / trueL); scal.meas = `measured ${(L / IN2M).toFixed(2)} in for ${it.w} in → ${(worldScale * 100).toFixed(1)}% · B saves`; }
+    }
+  }
+  scal.aPrev = aNow;
+  const bNow = B(5); if (bNow && !scal.bPrev) scaleCalibExit(true); scal.bPrev = bNow;   // B: save
+}
+// ---- all controls (left Y): a card on the left controller listing what every button does right now
+const help = { on: false, mesh: null, mode: '' };
+function helpLines() {
+  if (scal.on) return [['Scale calibration', ''],
+    ['right trigger', 'hold: carry the item (its 0 end at the tip)'], ['right stick ↑ ↓', 'bigger / smaller'], ['right stick ← →', 'other item'],
+    ['right A', 'touch one end, A again at the other: measures it'], ['right B', 'save the scale + leave'], ['left X', 'leave without saving'], ['left Y', 'hide this']];
+  const locked = calib.locked, ar = !!window.__arMode;
+  return [[ar ? 'See-through controls' : 'VR controls', ''],
+    ['right A', 'menu: floor plan · dims · see-through · floors · scale · pin · lock · exit'],
+    ['right stick click', 'measure what you point at (on the floor)'],
+    ['right trigger', 'open / close a door · hold on a fixture: swap its model'],
+    ['right grip', 'draw in the air'],
+    ['right B', 'hold + point at a door/window, let go, trace its edge with the trigger: lines the house up with your room'],
+    ['left trigger', 'open / close a door'],
+    locked ? (ar ? ['left stick', 'slide the house onto the real walls'] : ['left stick', 'off while locked 1:1 (you walk for real)'])
+           : ['left stick', 'walk · left grip: faster'],
+    locked ? (ar ? ['right stick ← →', 'turn the house'] : ['right stick ← →', 'off while locked 1:1']) : ['right stick ← →', 'snap turn'],
+    ['left X', 'wall push / pull editor'], ['left Y', 'hide this']];
+}
+function helpRefresh() {
+  const mode = help.on ? (scal.on ? 'cal' : 'main') + (window.__arMode ? 'A' : 'V') + (calib.locked ? 'L' : '') : '';
+  if (mode === help.mode) return; help.mode = mode;
+  if (help.mesh) { ctrlL.remove(help.mesh); help.mesh.material.map && help.mesh.material.map.dispose(); help.mesh.material.dispose(); help.mesh.geometry.dispose(); help.mesh = null; }
+  if (!help.on) return;
+  const L = helpLines(), c = document.createElement('canvas'), W = 1000, x = c.getContext('2d');
+  x.font = '30px system-ui';
+  const wrapped = L.map(([k, v]) => { if (!v) return []; const lines = ['']; for (const w of v.split(' ')) { const t = (lines[lines.length - 1] + ' ' + w).trim(); if (x.measureText(t).width > W - 360) lines.push(w); else lines[lines.length - 1] = t; } return lines; });
+  const rowH = wrapped.map(l => Math.max(74, 18 + l.length * 32)); c.width = W; c.height = 40 + rowH.reduce((a, b) => a + b, 0);
+  x.fillStyle = 'rgba(16,22,34,0.94)'; x.beginPath(); x.roundRect ? x.roundRect(3, 3, W - 6, c.height - 6, 30) : x.rect(3, 3, W - 6, c.height - 6); x.fill();
+  x.lineWidth = 5; x.strokeStyle = '#53d0ff'; x.stroke(); x.textBaseline = 'middle';
+  let y0 = 20;
+  L.forEach(([k, v], i) => {
+    const y = y0 + rowH[i] / 2; y0 += rowH[i];
+    if (!v) { x.fillStyle = '#ffffff'; x.font = 'bold 46px system-ui'; x.fillText(k, 30, y); return; }
+    x.fillStyle = '#ffd24a'; x.font = 'bold 32px system-ui'; x.fillText(k, 30, y, 290);
+    x.fillStyle = '#e8eefb'; x.font = '30px system-ui';
+    wrapped[i].forEach((l, j, a) => x.fillText(l, 330, y + (j - (a.length - 1) / 2) * 32));
+  });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const Hm = 0.26 * c.height / W;
+  help.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.26, Hm), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthTest: false, toneMapped: false }));
+  help.mesh.position.set(0.02, 0.06 + Hm / 2, -0.06); help.mesh.rotation.x = -0.55; help.mesh.renderOrder = 998; help.mesh.userData.keepOpaque = true;
+  ctrlL.add(help.mesh);
+}
+// ---- room pin: the headset has no GPS or compass, so "which way is north / where is the house"
+// comes from the room itself — a persistent WebXR anchor the headset keeps in its map of your space.
+// Pinned once lined up; the next session puts the house back there whichever way you happen to face.
+const PIN_KEY = 'plan2vr-v2-roompin';
+const roomPin = { saved: (() => { try { const v = JSON.parse(localStorage.getItem(PIN_KEY)); return v && v.W ? v : null; } catch (e) { return null; } })(),
+  anchor: null, tried: false, applied: false, skip: false, want: null };
+function roomPinTick() {
+  const s = renderer.xr.getSession(), f = renderer.xr.getFrame && renderer.xr.getFrame(), ref = renderer.xr.getReferenceSpace();
+  if (!s || !f || !ref) return;
+  if (roomPin.want) { const why = roomPin.want; roomPin.want = null; roomPinCreate(s, f, ref, why); }
+  if (roomPin.saved && !roomPin.tried && !roomPin.skip && typeof s.restorePersistentAnchor === 'function') {
+    roomPin.tried = true;
+    s.restorePersistentAnchor(roomPin.saved.uuid).then(a => { roomPin.anchor = a; })
+      .catch(() => vrToast('your room pin isn’t in this headset’s map — line the house up, then menu → 📌 Pin to this room'));
+  }
+  if (roomPin.anchor && !roomPin.applied) {
+    const p = f.getPose(roomPin.anchor.anchorSpace, ref); if (!p) return;
+    roomPin.applied = true;
+    // the anchor's spot in the house (W) + the house's heading were saved; today's scale is used as is
+    const sv = roomPin.saved, k = dolly.scale.x, Pinv = new THREE.Matrix4().fromArray(p.transform.matrix).invert();
+    const M = new THREE.Matrix4().compose(new THREE.Vector3(sv.W[0], 0, sv.W[1]), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, sv.yaw, 0)), new THREE.Vector3(k, k, k)).multiply(Pinv);
+    const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); M.decompose(pos, q, sc);
+    dolly.rotation.set(0, new THREE.Euler().setFromQuaternion(q, 'YXZ').y, 0); dolly.position.x = pos.x; dolly.position.z = pos.z;
+    dolly.updateMatrixWorld(true); camera.getWorldPosition(_head);
+    calib.locked = true; calib.floorY = groundAt(_head.x, _head.z); dolly.position.y = calib.floorY;
+    vrToast('📌 back on your room pin — the house sits where you lined it up, whichever way you face');
+  }
+}
+function roomPinCreate(s, f, ref, why) {
+  if (typeof f.createAnchor !== 'function' || typeof XRRigidTransform === 'undefined') {
+    if (why !== 'auto') vrToast('this browser can’t pin to the room (no WebXR anchors) — the placement lasts for this session only');
+    return;
+  }
+  const a = [camera.position.x, camera.position.z]; dolly.updateMatrixWorld(true);
+  const w = new THREE.Vector3(a[0], 0, a[1]).applyMatrix4(dolly.matrixWorld), snap = { W: [w.x, w.z], yaw: dolly.rotation.y };
+  f.createAnchor(new XRRigidTransform({ x: a[0], y: 0, z: a[1] }, { x: 0, y: 0, z: 0, w: 1 }), ref).then(an => {
+    if (!an || typeof an.requestPersistentHandle !== 'function') throw new Error('anchors here don’t persist');
+    return an.requestPersistentHandle();
+  }).then(uuid => {
+    const old = roomPin.saved; roomPin.saved = { uuid, ...snap, t: Date.now() }; roomPin.applied = true;
+    try { localStorage.setItem(PIN_KEY, JSON.stringify(roomPin.saved)); } catch (e) {}
+    if (old && old.uuid && old.uuid !== uuid && typeof s.deletePersistentAnchor === 'function') s.deletePersistentAnchor(old.uuid).catch(() => {});
+    vrToast('📌 pinned to your room — next time the house goes straight back here, whichever way you face');
+  }).catch(e => { if (why !== 'auto') vrToast('couldn’t pin to the room: ' + ((e && e.message) || e)); });
+}
 const vrMenu = { open: false, group: null, cards: [], items: [], sel: -1, stickSel: false, aPrev: false, planSwitch: null };
 function vrMenuItems() {
   const it = [{ id: 'fp', label: '🗺 Floor plan', sub: floorPlanOn ? 'on the floor · ON' : 'on the floor · OFF' },
@@ -2852,6 +3108,9 @@ function vrMenuItems() {
     const nm = (p.name.split('—')[1] || p.name).trim();
     it.push({ id: 'plan', i, label: '🏠 ' + nm[0].toUpperCase() + nm.slice(1), sub: p.src === DXF ? 'you are here' : 'switch to it' });
   });
+  if (xrs.arOK || xrs.kind === 'ar') it.push({ id: 'scal', label: '📐 Calibrate scale', sub: `now ${(worldScale * 100).toFixed(1)}%` });
+  if (calib.locked) it.push({ id: 'pin', label: '📌 Pin to room', sub: roomPin.saved ? 'replace the saved pin' : 'come back to this spot' });
+  if (roomPin.saved && !roomPin.applied) it.push({ id: 'pingo', label: '📌 Use room pin', sub: 'put the house back' });
   if (calib.anchors.length) it.push({ id: 'lock', label: calib.locked ? '🔓 Unlock 1:1' : '🔒 Lock 1:1', sub: calib.locked ? 'walk with the stick' : 'back onto your room' });
   it.push({ id: 'exit', label: '🚪 Exit', sub: xrs.kind === 'ar' ? 'leave see-through' : 'leave VR' });
   return it;
@@ -2879,7 +3138,7 @@ function vrMenuOpen(on) {
   if (f.lengthSq() < 1e-6) f.set(0, 0, -1); f.normalize();
   const g = new THREE.Group(); g.position.copy(_head).addScaledVector(f, 0.62); g.position.y -= 0.12;
   g.lookAt(_head.x, g.position.y, _head.z);               // faces you, upright
-  const n = vrMenu.items.length, R = n > 6 ? 0.24 : 0.21;
+  const n = vrMenu.items.length, R = n > 9 ? 0.33 : n > 7 ? 0.28 : n > 6 ? 0.24 : 0.21;
   vrMenu.items.forEach((it, k) => {
     const a = k / n * Math.PI * 2, tex = [vrCardTex(it, false), vrCardTex(it, true)];   // clockwise from the top
     const m = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.08), new THREE.MeshBasicMaterial({ map: tex[0], transparent: true, depthTest: false, toneMapped: false }));
@@ -2924,6 +3183,9 @@ function vrMenuSelect(e) {                              // the trigger ('select'
   } else if (it.id === 'lock') { if (calib.locked) { calib.locked = false; vrToast('1:1 lock OFF — joystick walking on'); } else applyAlignment(); }
   else if (it.id === 'exit' && xrs.session) xrs.session.end();
   else if (it.id === 'clear') { if (measureGroup) measureGroup.clear(); vrToast('measurements cleared'); }
+  else if (it.id === 'scal') scaleCalibEnter();
+  else if (it.id === 'pin') roomPin.want = 'menu';
+  else if (it.id === 'pingo') { roomPin.tried = false; roomPin.skip = false; roomPin.anchor = null; if (typeof renderer.xr.getSession().restorePersistentAnchor !== 'function') vrToast('this browser can’t restore room pins'); }
 }
 // ---- measure (right stick click): point at a wall, door, window, fixture or the floor; its size is
 // drawn right there (yellow, seen through walls) and stays until you clear it from the menu
@@ -3093,7 +3355,8 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly,
-  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, floorPlan: () => floorPlanGroup, setSeeThrough, measureRay, measures: () => measureGroup,
+  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, scaleCalibEnter, scaleCalibExit, scal, CAL_ITEMS, calTexture, calFrame, setWorldScale,
+  worldScale: () => worldScale, help, helpRefresh, roomPin, solveAlignment, floorPlan: () => floorPlanGroup, setSeeThrough, measureRay, measures: () => measureGroup,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
     for (const w of document.querySelectorAll('.wedit')) w.classList.toggle('on', editMode); refreshEditViz(); updateEditBar(); },
