@@ -1511,8 +1511,8 @@ function buildRaw() {
   // MEASURE: what a pointer hit on the model measures (VR: point at it + click the right stick).
   // Walls: the face you point at, between the walls it meets; openings: width × height; fixtures:
   // their footprint and height; the floor: the room's width × depth through that spot.
-  rawMeasure = hit => {
-    const P = hit.point, hp = [P.x / IN2M, -P.z / IN2M], hy = P.y / IN2M, V = (x, y, h) => new THREE.Vector3(wx(x), h * IN2M, wz(y));
+  rawMeasure = hit => {                                 // → { segs: [[V,V]…] on the floor, labels: [{ text, x, y, lv, ang }] } (plan inches)
+    const P = hit.point, hp = [P.x / IN2M, -P.z / IN2M], hy = P.y / IN2M, V = (x, y, h) => new THREE.Vector3(wx(x), h * IN2M + 0.01, wz(y));
     let wi = null, src = null, door = null, fix = null;
     for (let q = hit.object; q && q !== root; q = q.parent) {
       if (wi == null && q.userData.wallIndex != null) wi = q.userData.wallIndex;
@@ -1521,51 +1521,62 @@ function buildRaw() {
       if (!fix) fix = fixtures.find(f => f.group === q) || null;
     }
     const what = src ? src.what : '', bb = new THREE.Box3().setFromObject(hit.object);
+    const dim = (A, B, lv, segs) => { const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, k = 3;
+      segs.push([V(A[0], A[1], lv), V(B[0], B[1], lv)]);
+      for (const Q of [A, B]) segs.push([V(Q[0] - (ux - uy) * k, Q[1] - (uy + ux) * k, lv), V(Q[0] + (ux - uy) * k, Q[1] + (uy + ux) * k, lv)]);   // slash ticks
+      return Math.atan2(dy, dx); };
     const opNear = () => { let best = null, bd = 1e9;
       for (const o of rawOps) { const S = segInfo(o.a, o.b), t = Math.max(0, Math.min(S.len, alongOf(S, hp))), d = Math.hypot(hp[0] - (o.a[0] + S.ux * t), hp[1] - (o.a[1] + S.uy * t)); if (d < bd) { bd = d; best = o; } }
       return bd < 40 ? best : null; };
     if (door || (wi == null && /header|window|apron|glass|below the upper floor|door|pocket|overhead|opening/.test(what))) {
       const dk = door && door.key.split(':')[0];
       const o = (dk && rawOps.find(o => `${Math.round(o.mid[0])},${Math.round(o.mid[1])}` === dk)) || opNear();
-      if (o) {
+      if (o) {                                          // across the threshold, the label on the floor in front of it
         const base = Math.max(...sidesOf(o.a, o.ux, o.uy, o.width, o.thick, 'open')), isWin = o.kind === 'window';
-        const lo = base + (isWin ? SILL : 0), hi = base + HEAD, y = Math.min(hi - 2, Math.max(lo + 2, hy));
         const name = { door: 'door', window: 'window', opening: 'cased opening', pocket: 'pocket door', overhead: 'garage door' }[o.kind] || o.kind;
-        return { segs: [[V(o.a[0], o.a[1], y), V(o.b[0], o.b[1], y)], [V(o.a[0], o.a[1], lo), V(o.a[0], o.a[1], hi)], [V(o.b[0], o.b[1], lo), V(o.b[0], o.b[1], hi)]],
-          text: `${name} ${ftIn(o.width)} wide × ${ftIn(hi - lo)} high` + (isWin ? `\nsill ${ftIn(SILL)} off the floor` : ''), at: V(o.mid[0], o.mid[1], y + 7) };
+        const segs = [], nx = -o.uy, ny = o.ux, sd = Math.sign((hp[0] - o.mid[0]) * nx + (hp[1] - o.mid[1]) * ny) || 1, off = o.thick / 2 + 8;
+        const lv = levelAt(o.mid[0] + nx * sd * off, o.mid[1] + ny * sd * off, 'open');
+        const a = dim([o.a[0] + nx * sd * (o.thick / 2 + 2), o.a[1] + ny * sd * (o.thick / 2 + 2)], [o.b[0] + nx * sd * (o.thick / 2 + 2), o.b[1] + ny * sd * (o.thick / 2 + 2)], lv, segs);
+        return { segs, labels: [{ text: `${name} ${ftIn(o.width)}\n${ftIn(HEAD - (isWin ? SILL : 0))} high` + (isWin ? ` · sill ${ftIn(SILL)}` : ''),
+          x: o.mid[0] + nx * sd * off, y: o.mid[1] + ny * sd * off, lv, ang: a }] };
       }
     }
-    if (wi != null && merged[wi]) {
+    if (wi != null && merged[wi]) {                     // along the foot of the face you point at, between the walls it meets
       const w = merged[wi], S = segInfo(w.a, w.b), side = Math.sign(perpOff(S, hp)) || 1, nx = -S.uy * side, ny = S.ux * side;
       const tq = Math.max(0, Math.min(S.len, alongOf(S, hp))), off = w.thick / 2 + 1;
       const Q = [w.a[0] + S.ux * tq + nx * off, w.a[1] + S.uy * tq + ny * off];
       const t1 = Math.min(cast(Q[0], Q[1], S.ux, S.uy), S.len - tq), t0 = Math.min(cast(Q[0], Q[1], -S.ux, -S.uy), tq);
-      const A = [Q[0] - S.ux * t0, Q[1] - S.uy * t0], B = [Q[0] + S.ux * t1, Q[1] + S.uy * t1];
-      const fl = levelAt(Q[0] + nx * 4, Q[1] + ny * 4, 'open'), top = bb.max.y / IN2M, kh = kneeHeight(w.layer);
-      return { segs: [[V(A[0], A[1], hy), V(B[0], B[1], hy)], [V(A[0], A[1], hy - 3), V(A[0], A[1], hy + 3)], [V(B[0], B[1], hy - 3), V(B[0], B[1], hy + 3)], [V(Q[0], Q[1], fl), V(Q[0], Q[1], top)]],
-        text: `${kh ? 'knee wall' : 'wall'} ${ftIn(t0 + t1)} long (this side)\n${ftIn(w.thick)} thick · ${ftIn(top - fl)} high`, at: V(Q[0] + nx * 5, Q[1] + ny * 5, hy + 7) };
+      const o5 = 5, A = [Q[0] - S.ux * t0 + nx * o5, Q[1] - S.uy * t0 + ny * o5], B = [Q[0] + S.ux * t1 + nx * o5, Q[1] + S.uy * t1 + ny * o5];
+      const fl = levelAt(Q[0] + nx * 4, Q[1] + ny * 4, 'open'), top = bb.max.y / IN2M, kh = kneeHeight(w.layer), segs = [];
+      const a = dim(A, B, fl, segs), m = [(A[0] + B[0]) / 2 + nx * 9, (A[1] + B[1]) / 2 + ny * 9];
+      return { segs, labels: [{ text: `${kh ? 'knee wall' : 'wall'} ${ftIn(t0 + t1)}\n${ftIn(w.thick)} thick · ${ftIn(top - fl)} high`, x: m[0], y: m[1], lv: fl, ang: a }] };
     }
     const ob = rawObjs.find(o => o.ux != null && (fix ? o.key === fix.key : true) &&
       Math.abs((hp[0] - o.cx) * o.ux + (hp[1] - o.cy) * o.uy) <= o.len / 2 + 2 && Math.abs(-(hp[0] - o.cx) * o.uy + (hp[1] - o.cy) * o.ux) <= o.dep / 2 + 2);
-    if (ob && !floors.includes(hit.object)) {
+    if (ob && !floors.includes(hit.object)) {           // two sides of the footprint, 4in out, on the floor
       const gb = fix ? new THREE.Box3().setFromObject(fix.group) : bb, top = gb.max.y / IN2M, fl = slabAt(ob.cx, ob.cy);
-      const C = (u, v) => [ob.cx + ob.ux * u - ob.uy * v, ob.cy + ob.uy * u + ob.ux * v], L = ob.len / 2, D = ob.dep / 2;
-      const a = C(-L, -D), b = C(L, -D), c = C(L, D);
-      return { segs: [[V(a[0], a[1], top + 0.5), V(b[0], b[1], top + 0.5)], [V(b[0], b[1], top + 0.5), V(c[0], c[1], top + 0.5)], [V(b[0], b[1], fl), V(b[0], b[1], top)]],
-        text: `${ob.name.toLowerCase()}\n${ftIn(ob.len)} × ${ftIn(ob.dep)} · ${ftIn(top - fl)} high`, at: V(ob.cx, ob.cy, top + 9) };
+      const C = (u, v) => [ob.cx + ob.ux * u - ob.uy * v, ob.cy + ob.uy * u + ob.ux * v], L = ob.len / 2, D = ob.dep / 2, g = 4;
+      // the two sides that face you
+      const hu = (hp[0] - ob.cx) * ob.ux + (hp[1] - ob.cy) * ob.uy, hv = -(hp[0] - ob.cx) * ob.uy + (hp[1] - ob.cy) * ob.ux;
+      const cam = camera.getWorldPosition(new THREE.Vector3()), ch = [cam.x / IN2M, -cam.z / IN2M];
+      const su = Math.sign((ch[0] - ob.cx) * ob.ux + (ch[1] - ob.cy) * ob.uy) || 1, sv = Math.sign(-(ch[0] - ob.cx) * ob.uy + (ch[1] - ob.cy) * ob.ux) || 1;
+      const segs = [], aL = dim(C(-L, sv * (D + g)), C(L, sv * (D + g)), fl, segs), aD = dim(C(su * (L + g), -D), C(su * (L + g), D), fl, segs);
+      const mL = C(0, sv * (D + g + 9)), mD = C(su * (L + g + 9), 0);
+      return { segs, labels: [{ text: `${ob.name.toLowerCase()} ${ftIn(ob.len)}\n${ftIn(top - fl)} high`, x: mL[0], y: mL[1], lv: fl, ang: aL },
+        { text: ftIn(ob.dep), x: mD[0], y: mD[1], lv: fl, ang: aD }] };
     }
-    if (/^stair/.test(what)) return { segs: [], text: what, at: P.clone().add(new THREE.Vector3(0, 0.2, 0)) };
     if (floors.includes(hit.object) || /floor|winder|landing/i.test(what)) {       // the room through this spot
-      const segs = [], parts = [];
+      const segs = [], labels = [];
       for (const [dx, dy] of [[1, 0], [0, 1]]) {
         const t1 = cast(hp[0], hp[1], dx, dy), t0 = cast(hp[0], hp[1], -dx, -dy); if (!isFinite(t0 + t1) || t0 + t1 > 900) continue;
-        const A = [hp[0] - dx * t0, hp[1] - dy * t0], B = [hp[0] + dx * t1, hp[1] + dy * t1];
-        segs.push([V(A[0], A[1], hy + 0.5), V(B[0], B[1], hy + 0.5)]); parts.push(ftIn(t0 + t1));
+        const A = [hp[0] - dx * t0, hp[1] - dy * t0], B = [hp[0] + dx * t1, hp[1] + dy * t1], a = dim(A, B, hy, segs);
+        const f = t1 > 30 ? 0.5 : 0.35, mx = A[0] + (B[0] - A[0]) * f - dy * 7, my = A[1] + (B[1] - A[1]) * f + dx * 7;
+        labels.push({ text: ftIn(t0 + t1), x: mx, y: my, lv: hy, ang: a });
       }
-      if (parts.length) return { segs, text: 'room ' + parts.join(' × '), at: V(hp[0], hp[1], hy + 14) };
+      if (labels.length) return { segs, labels };
     }
-    const sz = bb.getSize(new THREE.Vector3());
-    return { segs: [], text: `${what || 'part'}\n${ftIn(sz.x / IN2M)} × ${ftIn(sz.z / IN2M)} × ${ftIn(sz.y / IN2M)}`, at: P.clone().add(new THREE.Vector3(0, 0.2, 0)) };
+    const sz = bb.getSize(new THREE.Vector3()), fl = /^stair/.test(what) ? hy : slabAt(hp[0], hp[1]);
+    return { segs: [], labels: [{ text: /^stair/.test(what) ? what : `${what || 'part'}\n${ftIn(sz.x / IN2M)} × ${ftIn(sz.z / IN2M)} × ${ftIn(sz.y / IN2M)}`, x: hp[0], y: hp[1], lv: fl, ang: 0 }] };
   };
   if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
@@ -2933,24 +2944,36 @@ function vrMeasure(ctrl) {
   const M = measureRay(_mo, _md);
   if (!M) vrToast(rawMode ? 'nothing to measure there — point at a wall, door, window, fixture or the floor' : 'measuring works on the raw plans');
 }
-function drawMeasure(M) {
+function drawMeasure(M) {                               // lines + labels lie on the floor, labels read upright from where you stand
   if (!measureGroup || measureGroup.parent !== root) { measureGroup = new THREE.Group(); measureGroup.name = 'measurements'; root.add(measureGroup); }
-  const g = new THREE.Group();
-  if (M.segs.length) {
-    const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(M.segs.flat()), new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, transparent: true }));
-    ls.renderOrder = 995; ls.userData.measure = true; g.add(ls);
+  const g = new THREE.Group(); g.userData.measure = true;
+  if (M.segs.length) {                                 // flat ¾in strips on the floor (hairlines vanish in a headset)
+    const pos = [], hw = 0.375 * IN2M;
+    for (const [A, B] of M.segs) {
+      const dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz) || 1, px = -dz / L * hw, pz = dx / L * hw;
+      const q = [[A.x + px, A.y, A.z + pz], [A.x - px, A.y, A.z - pz], [B.x - px, B.y, B.z - pz], [B.x + px, B.y, B.z + pz]];
+      for (const k of [0, 1, 2, 0, 2, 3]) pos.push(...q[k]);
+    }
+    const gm = new THREE.BufferGeometry(); gm.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const strips = new THREE.Mesh(gm, new THREE.MeshBasicMaterial({ color: 0xffb000, side: THREE.DoubleSide, toneMapped: false }));
+    strips.userData.measure = true; strips.userData.keepOpaque = true; g.add(strips);
   }
-  const lines = M.text.split('\n'), c = document.createElement('canvas'), x = c.getContext('2d'), F0 = 'bold 54px system-ui', F1 = '40px system-ui';
-  x.font = F0; let w = x.measureText(lines[0]).width; x.font = F1; for (const l of lines.slice(1)) w = Math.max(w, x.measureText(l).width);
-  c.width = Math.ceil(w) + 60; c.height = 40 + 64 + (lines.length - 1) * 52;
-  x.fillStyle = 'rgba(20,24,32,0.9)'; x.beginPath(); x.roundRect ? x.roundRect(3, 3, c.width - 6, c.height - 6, 28) : x.rect(3, 3, c.width - 6, c.height - 6); x.fill();
-  x.lineWidth = 5; x.strokeStyle = '#ffd24a'; x.stroke(); x.textBaseline = 'middle';
-  x.font = F0; x.fillStyle = '#ffe9a8'; x.fillText(lines[0], 30, 20 + 32);
-  x.font = F1; x.fillStyle = '#e8eefb'; lines.slice(1).forEach((l, i) => x.fillText(l, 30, 20 + 64 + 26 + i * 52));
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const H = 0.055 * c.height / 104, m = new THREE.Mesh(new THREE.PlaneGeometry(H * c.width / c.height, H), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthTest: false, toneMapped: false }));
-  m.position.copy(M.at); camera.getWorldPosition(_head); m.lookAt(_head); m.renderOrder = 996;
-  m.userData.measure = true; m.userData.keepOpaque = true; g.add(m); g.userData.measure = true;
+  camera.getWorldPosition(_head); const hx = _head.x / IN2M, hy = -_head.z / IN2M;
+  for (const L of M.labels) {
+    const lines = L.text.split('\n'), c = document.createElement('canvas'), x = c.getContext('2d'), F0 = 'bold 64px system-ui', F1 = '44px system-ui';
+    x.font = F0; let w = x.measureText(lines[0]).width; x.font = F1; for (const l of lines.slice(1)) w = Math.max(w, x.measureText(l).width);
+    c.width = Math.ceil(w) + 56; c.height = 30 + 72 + (lines.length - 1) * 56;
+    x.fillStyle = 'rgba(255,248,225,0.95)'; x.beginPath(); x.roundRect ? x.roundRect(3, 3, c.width - 6, c.height - 6, 26) : x.rect(3, 3, c.width - 6, c.height - 6); x.fill();
+    x.lineWidth = 6; x.strokeStyle = '#ffb000'; x.stroke(); x.textBaseline = 'middle';
+    x.font = F0; x.fillStyle = '#1b2330'; x.fillText(lines[0], 28, 15 + 36);
+    x.font = F1; x.fillStyle = '#3a4658'; lines.slice(1).forEach((l, i) => x.fillText(l, 28, 15 + 72 + 28 + i * 56));
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const H = (4.5 * c.height / 102) * IN2M, m = new THREE.Mesh(new THREE.PlaneGeometry(H * c.width / c.height, H), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false }));
+    let a = L.ang;                                     // text runs along the dimension; its top points away from you
+    if ((-Math.sin(a)) * (L.x - hx) + Math.cos(a) * (L.y - hy) < 0) a += Math.PI;
+    m.rotation.set(-Math.PI / 2, 0, a); m.position.set(wx(L.x), L.lv * IN2M + 0.012, wz(L.y));
+    m.userData.measure = true; m.userData.keepOpaque = true; g.add(m);
+  }
   measureGroup.add(g);
   while (measureGroup.children.length > 12) measureGroup.remove(measureGroup.children[0]);
 }
