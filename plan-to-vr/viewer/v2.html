@@ -82,7 +82,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const IN2M = 0.0254;
-const WALL_TH = 5, WALL_H = 96, HEAD = 84, SILL = 30, CEIL = 96;   // inches
+const WALL_TH = 5, WALL_H = 108, HEAD = 84, SILL = 30, CEIL = 108, COUNTER_SILL = 42;   // owner: 9 ft ceilings   // inches
 let DXF = './sample-house.dxf';   // active plan (swapped by the layout picker)
 let view2D = false, oCam = null, flatRoot = null;   // flat blueprint mode (referenced by resize())
 
@@ -1040,7 +1040,7 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
       if (o.kind === 'opening' && (kneeHeight(o.layer) || kneeHeight(o.layerB))) continue;
       const nx = -o.uy, ny = o.ux, th = o.thick, Wd = o.width, off6 = th / 2 + 6;
       const lvs = [1, -1].map(sd => levelAt(o.mid[0] + nx * sd * off6, o.mid[1] + ny * sd * off6, 'open')), B = Math.max(...lvs);
-      const win = o.kind === 'window', y0 = win ? B + SILL : B, y1 = B + HEAD;
+      const win = o.kind === 'window', y0 = win ? B + (o.sill || SILL) : B, y1 = B + HEAD;
       for (const sd of [1, -1]) {
         const ext = extAt(o.mid[0] + nx * sd * off6, o.mid[1] + ny * sd * off6), L = ext ? parts.white : parts.oak, off = sd * (th / 2 + 0.375);
         bx(L, o.a, o.ux, o.uy, -3.25, 0.25, off, 0.75, win ? y0 - (ext ? 0 : 0) : B, y1 + 3.25);          // legs
@@ -1824,9 +1824,16 @@ function buildRaw() {
     if (Math.abs(s.ux * o.ux + s.uy * o.uy) > 0.5) return false;            // only walls crossing the gap line
     const t = Math.max(0, Math.min(s.len, alongOf(s, p))), q = [s.a[0] + s.ux * t, s.a[1] + s.uy * t];
     return Math.hypot(p[0] - q[0], p[1] - q[1]) <= w.thick / 2 + 3; });
+  // a window with a counter run under it (kitchen sink window) sits above the counter + backsplash
+  const counterFps = objs.filter(x => /COUNTER|ISLAND/.test(x.name) && !/UPPER/.test(x.name)).map(x => x.pts);
+  const sillFor = o => { const nx = -o.uy, ny = o.ux;
+    for (const sd of [1, -1]) for (const f of [0.2, 0.5, 0.8]) { const px = o.a[0] + o.ux * o.width * f + nx * sd * (o.thick / 2 + 4), py = o.a[1] + o.uy * o.width * f + ny * sd * (o.thick / 2 + 4);
+      if (counterFps.some(p => pointIn(p, px, py))) return COUNTER_SILL; }
+    return SILL; };
   if (openOn) for (const o of detectOpenings(merged)) {
     const c = classifyOpening(o, ev); if (!c) continue;
     if (c.kind === 'opening' && isCorner(o.a, o) && isCorner(o.b, o)) continue;
+    if (c.kind === 'window') o.sill = sillFor(o);
     rawOps.push({ ...o, kind: c.kind, leaves: c.leaves, layer: c.layer });
     planOpenings.push({ key: `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`, planA: [wx(o.a[0]), wz(o.a[1])], planB: [wx(o.b[0]), wz(o.b[1])], kind: c.kind });   // VR room-alignment targets
     const ax = wx(o.a[0]), az = wz(o.a[1]), bx = wx(o.b[0]), bz = wz(o.b[1]);
@@ -1840,7 +1847,7 @@ function buildRaw() {
     const kneeJamb = c.kind === 'opening' && (kneeHeight(o.layer) || kneeHeight(o.layerB));   // open above a knee wall: no header to hang
     if (headY < top && !kneeJamb) root.add(tagSrc(boxBetween(ax, az, bx, bz, th, headY, top, srcMat(c.layer, wallMat)), c.layer, what + ' header'));
     if (c.kind === 'window') {
-      const sillY = B + SILL * IN2M;
+      const sillY = B + (o.sill || SILL) * IN2M;
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th, B, sillY, srcMat(c.layer, wallMat)), c.layer, 'window apron'));
       colliders.push({ ax, az, bx, bz, hw: th / 2 * IN2M });
       root.add(tagSrc(boxBetween(ax, az, bx, bz, th * 0.4, sillY, headY, srcMat(c.layer, glassMat)), c.layer, 'window glass'));
@@ -2195,7 +2202,7 @@ function buildRaw() {
         const segs = [], nx = -o.uy, ny = o.ux, sd = Math.sign((hp[0] - o.mid[0]) * nx + (hp[1] - o.mid[1]) * ny) || 1, off = o.thick / 2 + 8;
         const lv = levelAt(o.mid[0] + nx * sd * off, o.mid[1] + ny * sd * off, 'open');
         const a = dim([o.a[0] + nx * sd * (o.thick / 2 + 2), o.a[1] + ny * sd * (o.thick / 2 + 2)], [o.b[0] + nx * sd * (o.thick / 2 + 2), o.b[1] + ny * sd * (o.thick / 2 + 2)], lv, segs);
-        return { segs, labels: [{ text: `${name} ${ftIn(o.width)}\n${ftIn(HEAD - (isWin ? SILL : 0))} high` + (isWin ? ` · sill ${ftIn(SILL)}` : ''),
+        return { segs, labels: [{ text: `${name} ${ftIn(o.width)}\n${ftIn(HEAD - (isWin ? o.sill || SILL : 0))} high` + (isWin ? ` · sill ${ftIn(o.sill || SILL)}` : ''),
           x: o.mid[0] + nx * sd * off, y: o.mid[1] + ny * sd * off, lv, ang: a }] };
       }
     }
