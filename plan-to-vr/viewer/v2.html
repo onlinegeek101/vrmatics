@@ -1092,6 +1092,40 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
     }
     const m = new THREE.Mesh(BGU.mergeGeometries(parts), brass); m.castShadow = true; leaf.add(m);
   }
+  // ---- masonry laid in world space (a fireplace surround is one stretched box): ledgestone for the gas
+  // fireplace, brick for the open hearth
+  function masonryCanvas(kind) {
+    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d'), P = 512 / 32;   // 32in square
+    if (kind === 'brick') {
+      g.fillStyle = '#b7aa98'; g.fillRect(0, 0, 512, 512);
+      for (let r = 0; r < 32 / 2.67; r++) for (let k = -1; k < 5; k++) { const x = (k * 8 + (r % 2) * 4) * P, y = r * 2.67 * P;
+        const h = 18 + Math.random() * 10, l = 30 + Math.random() * 12; g.fillStyle = `hsl(${h}, 45%, ${l}%)`; g.fillRect(x + 0.2 * P, y + 0.2 * P, 7.6 * P, 2.27 * P);
+        for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.12})`; g.fillRect(x + Math.random() * 7.6 * P, y + Math.random() * 2.2 * P, 3, 3); } }
+    } else {
+      g.fillStyle = '#4e4a45'; g.fillRect(0, 0, 512, 512);
+      let y = 0; while (y < 32) { const h = 1.5 + Math.random() * 2.5; let x = -Math.random() * 10;
+        while (x < 32) { const l = 5 + Math.random() * 14, v = 45 + Math.random() * 25, hue = 30 + Math.random() * 20;
+          g.fillStyle = `hsl(${hue}, ${6 + Math.random() * 10}%, ${v}%)`; g.fillRect(x * P + 1, y * P + 1, l * P - 2, h * P - 2);
+          g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x * P + 1, y * P + 1, l * P - 2, 2); x += l; }
+        y += h; }
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; return t;
+  }
+  function worldTexMat(tex, sizeM, params, key) {
+    const m = new THREE.MeshStandardMaterial(Object.assign({ color: 0xffffff }, params)); m.customProgramCacheKey = () => key;
+    m.onBeforeCompile = sh => { sh.uniforms.tWorld = { value: tex }; sh.uniforms.uWSize = { value: sizeM };
+      sh.vertexShader = 'varying vec3 vRWPos; varying vec3 vRWN;\n' + sh.vertexShader.replace('#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\n  vRWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vRWN = normalize(mat3(modelMatrix) * objectNormal);');
+      sh.fragmentShader = 'uniform sampler2D tWorld; uniform float uWSize; varying vec3 vRWPos; varying vec3 vRWN;\n' + sh.fragmentShader.replace('#include <map_fragment>',
+        `#include <map_fragment>
+  vec3 an = abs(normalize(vRWN)); vec2 tuv = an.y > 0.6 ? vRWPos.xz : an.x > an.z ? vRWPos.zy : vRWPos.xy;
+  diffuseColor.rgb *= texture2D(tWorld, tuv / uWSize).rgb;`); };
+    return m;
+  }
+  mat.stone = worldTexMat(masonryCanvas('stone'), 0.8128, { roughness: 0.92 }, 'real-stone');
+  mat.brick = worldTexMat(masonryCanvas('brick'), 0.8128, { roughness: 0.95 }, 'real-brick');
+  mat.canTrim = new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.4 });
+  mat.canLens = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff1dc, emissiveIntensity: 1.6, roughness: 0.3 });
   let ceilGroup = null, rooms = [], extraRooms = [], topM = 0;
   const lamp = new THREE.PointLight(0xffe4c0, 0, 7, 1.6); scene.add(lamp);   // warm light that follows you indoors
   function build(ctx) {
@@ -1170,8 +1204,8 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
       if (i > 0) d = Math.min(d, D[k - 1] + a); if (j > 0) { d = Math.min(d, D[k - W] + a); if (i > 0) d = Math.min(d, D[k - W - 1] + b); if (i < W - 1) d = Math.min(d, D[k - W + 1] + b); } D[k] = d; }
     for (let j = H - 1; j >= 0; j--) for (let i = W - 1; i >= 0; i--) { const k = j * W + i; let d = D[k];
       if (i < W - 1) d = Math.min(d, D[k + 1] + a); if (j < H - 1) { d = Math.min(d, D[k + W] + a); if (i < W - 1) d = Math.min(d, D[k + W + 1] + b); if (i > 0) d = Math.min(d, D[k + W - 1] + b); } D[k] = d; }
-    const room = new Uint8Array(N * 4), ao = new Uint8Array(N * 4), col = new THREE.Color(), rgb = rooms.map(r => { col.set(r.wall); return [col.r, col.g, col.b].map(v => Math.round(v * 255)); });
-    const rgbX = (col.set(HOUSE.wall), [col.r, col.g, col.b].map(v => Math.round(v * 255)));
+    const room = new Uint8Array(N * 4), ao = new Uint8Array(N * 4), hex8 = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)), rgb = rooms.map(r => hex8(r.wall));   // sRGB bytes (the shader linearises)
+    const rgbX = hex8(HOUSE.wall);
     for (let k = 0; k < N; k++) {
       const v = lab[k], r = v >= 0 && v < OUT ? rooms[v] : v > OUT ? extra[v - OUT - 1] : null; if (r) r.cells++;
       const c = r ? (v < OUT ? rgb[v] : rgbX) : [223, 228, 232], fin = r ? FIN[r.floor] || 1 : 0, ext = !r || r.ext;
@@ -1194,6 +1228,14 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
     const cg = slabs.map(l => { const g = new THREE.ShapeGeometry(toShape(l.pts)); g.rotateX(-Math.PI / 2); return g; });   // plan → world like the floors; seen from below (BackSide)
     if (cg.length) { const m = new THREE.Mesh(BGU.mergeGeometries(cg), mat.ceiling); cg.forEach(g => g.dispose());
       m.position.y = topM - 0.002; m.receiveShadow = false; m.castShadow = true; m.userData.ceiling = true; ceilGroup.add(m); }
+    const trimG = [], lensG = [];
+    for (const r of rooms.concat(extraRooms)) { if (r.ext || r.cells < 60 || /GARAGE/.test(r.name)) continue;
+      const big = r.cells > 1800, spots = big ? [[-36, -36], [36, -36], [-36, 36], [36, 36]] : [[0, 0]];
+      for (const [dx, dy] of spots) { const x = r.at[0] + dx, y = r.at[1] + dy; if (wallAt(x, y) || extAt(x, y)) continue;
+        const a = new THREE.CylinderGeometry(3.6 * IN2M, 3.6 * IN2M, 0.3 * IN2M, 24); a.translate(wx(x), topM - 0.004, wz(y)); trimG.push(a);
+        const b = new THREE.CircleGeometry(2.6 * IN2M, 20); b.rotateX(Math.PI / 2); b.translate(wx(x), topM - 0.0082, wz(y)); lensG.push(b); } }
+    if (trimG.length) { const m1 = new THREE.Mesh(BGU.mergeGeometries(trimG), mat.canTrim), m2 = new THREE.Mesh(BGU.mergeGeometries(lensG), mat.canLens);
+      m1.userData.ceiling = m2.userData.ceiling = true; ceilGroup.add(m1, m2); }
     ctx.root.add(ceilGroup);
     ctx.root.traverse(o => { if (o.isMesh && o.material === mat.glass) o.castShadow = false; });   // sun comes in through the windows
   }
@@ -1208,8 +1250,8 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
     lamp.intensity = inside ? 2.0 : 0; lamp.position.set(_cp.x, _cp.y + 0.25, _cp.z);
     if (hemi && inside !== wasInside) {                   // indoors: warm bounce light off the floor + walls fills the rooms
       wasInside = inside;
-      if (inside) { hemi.color.set(0xfff3e4); hemi.groundColor.set(0xd9ccb8); hemi.intensity = 1.7; scene.environmentIntensity = 0.9; sun.intensity = 1.8; }
-      else { hemi.color.copy(OUTDOOR.sky); hemi.groundColor.copy(OUTDOOR.ground); hemi.intensity = OUTDOOR.i; scene.environmentIntensity = OUTDOOR.env; sun.intensity = OUTDOOR.sun; }
+      if (inside) { hemi.color.set(0xfff3e4); hemi.groundColor.set(0xd9ccb8); hemi.intensity = 1.8; scene.environmentIntensity = 0.9; sun.intensity = 1.8; renderer.toneMappingExposure = 1.1; }
+      else { hemi.color.copy(OUTDOOR.sky); hemi.groundColor.copy(OUTDOOR.ground); hemi.intensity = OUTDOOR.i; scene.environmentIntensity = OUTDOOR.env; sun.intensity = OUTDOOR.sun; renderer.toneMappingExposure = 1; }
     }
   }
   return { mat, T, U, build, tick, cabFor, dressLeaf, rooms: () => rooms.concat(extraRooms), HOUSE, OWNER_PALETTE, OWNER_THEMES };
@@ -1540,11 +1582,20 @@ function rawObjects() {                               // pair each name with the
   for (const L of rawLayers) {
     if (!/OBJNAMES$/.test(L.name)) continue;
     const ents = byLayer(ENTS, L.name), polys = ents.filter(e => e.type === 'LWPOLYLINE' && e.pts.length >= 3);
-    for (const t of ents.filter(e => e.type === 'TEXT' && e.pts.length)) {
-      const [px, py] = t.pts[t.pts.length > 1 ? 1 : 0];
-      const poly = polys.find(p => pointIn(p.pts, px, py)); if (!poly) continue;
-      out.push({ name: (t.text || '').toUpperCase(), pts: poly.pts, prefix: L.name.replace(/OBJNAMES$/, '') });
-    }
+    // footprints overlap (a sink inside its counter, uppers over the base run), so the first outline
+    // around a label isn't necessarily its own: each label sits at its outline's centre, so pair
+    // label ↔ outline one-to-one, nearest centre first
+    const cen = p => { let a = 0, x = 0, y = 0; const q = p.pts;
+      for (let i = 0; i < q.length; i++) { const [x0, y0] = q[i], [x1, y1] = q[(i + 1) % q.length], c = x0 * y1 - x1 * y0; a += c; x += (x0 + x1) * c; y += (y0 + y1) * c; }
+      return Math.abs(a) > 1e-9 ? [x / (3 * a), y / (3 * a)] : q[0]; };
+    const cens = polys.map(cen), texts = ents.filter(e => e.type === 'TEXT' && e.pts.length), pairs = [];
+    texts.forEach((t, ti) => { const [px, py] = t.pts[t.pts.length > 1 ? 1 : 0];
+      polys.forEach((p, pi) => { if (pointIn(p.pts, px, py)) pairs.push([Math.hypot(cens[pi][0] - px, cens[pi][1] - py), ti, pi]); }); });
+    pairs.sort((a, b) => a[0] - b[0]);
+    const tUsed = new Set(), pUsed = new Set(), got = [];
+    for (const [, ti, pi] of pairs) { if (tUsed.has(ti) || pUsed.has(pi)) continue; tUsed.add(ti); pUsed.add(pi); got.push([ti, pi]); }
+    got.sort((a, b) => a[0] - b[0]);
+    for (const [ti, pi] of got) out.push({ name: (texts[ti].text || '').toUpperCase(), pts: polys[pi].pts, prefix: L.name.replace(/OBJNAMES$/, '') });
   }
   return out;
 }
@@ -1611,8 +1662,8 @@ function buildRaw() {
   const cabMat = REAL.mat.cabinet;
   const topMat = REAL.mat.counter;
   const panMat = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.35 });
-  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xa8a197, roughness: 0.97 });
-  const brickMat = new THREE.MeshStandardMaterial({ color: 0x94543f, roughness: 0.95 });
+  const stoneMat = REAL.mat.stone;
+  const brickMat = REAL.mat.brick;
   const hearthMat = new THREE.MeshStandardMaterial({ color: 0x6f6b66, roughness: 0.8 });
   const sootMat = new THREE.MeshStandardMaterial({ color: 0x1d1b1a, roughness: 1 });
   const smokedGlassMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.55 });

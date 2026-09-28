@@ -10,10 +10,11 @@ List **every model that ships in the repo or is referenced by `assets.json`**
 here with its source + license so the set stays auditable — this repo is
 public, so everything must be redistributable.
 
-All current models are **procedural CC0 placeholders** authored in-repo with
-`trimesh` (the sandbox can't reach model CDNs). They're recognizable low-poly
-stand-ins; swap any for a real CC0/CC-BY model by replacing the file and
-updating its row — the catalog entry (`assets.json`) doesn't change.
+The first three rows are real CC0 photo-scanned models (Poly Haven, optimised
+for the headset); the rest are **procedural CC0 placeholders** authored
+in-repo with `trimesh`, kept for v1 and the fixture menu. Swap any for a real
+CC0/CC-BY model by replacing the file and updating its row — the catalog
+entry (`assets.json`) doesn't change.
 
 | File / URL | What | Source | License | Tris | Size |
 |------------|------|--------|---------|------|------|
@@ -78,7 +79,9 @@ unlicensed rips.
 ## Sandbox note
 
 The build sandbox's egress proxy blocks the asset CDNs (Poly Haven `000`,
-Kenney / GitHub raw `403`, unpkg `000`); only npm and pypi are allowlisted.
+ambientCG `000`, Kenney `000`, unpkg `000`); npm, pypi and GitHub (raw +
+LFS media) are reachable, which is where the CC0 sets above were taken from
+(public mirrors of the unmodified originals).
 So `three` + `GLTFLoader` are vendored from npm under `../vendor/`, and the
 seed `sofa.glb` is authored in-repo rather than downloaded. To vendor a real
 CC0 model, download it **outside** the sandbox, drop the `.glb` here, add the
