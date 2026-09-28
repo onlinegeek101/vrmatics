@@ -76,6 +76,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
@@ -852,6 +853,242 @@ function extendEnds(walls) {
   }
   return walls;
 }
+// ---- REALISM: the owner's materials (v1's palette + room themes, from their material photos) as PBR
+// surfaces, painted room by room. A ROOM MAP is flooded from the room names through the built walls
+// (doorways close a room); each cell carries that room's wall paint + floor finish, and walls / floors
+// look it up per pixel in their shader — so a wall shared by two rooms wears each room's paint on its
+// own face, the outside of the house wears clapboard siding, and floors switch finish at the doorway
+// with no extra meshes. The same map carries a distance-to-wall field that darkens the ambient light
+// in the floor/wall corners and around fixtures (cheap baked-looking contact shadows).
+// Textures: CC0 (ambientCG), assets/tex/ — see assets/CREDITS.md.
+const REAL = (() => {
+  const TL = new THREE.TextureLoader(), aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const tex = (f, srgb) => { const t = TL.load('./assets/tex/' + f); t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; return t; };
+  const T = { oak: tex('oak_albedo.jpg', 1), oakN: tex('oak_normal.jpg'), oakR: tex('oak_rough.jpg'), tile: tex('tile_albedo.jpg', 1),
+    tileN: tex('tile_normal.jpg'), con: tex('concrete_albedo.jpg', 1), grass: tex('grass_albedo.jpg', 1), siding: tex('siding_albedo.jpg', 1),
+    granite: tex('granite_albedo.jpg', 1) };
+  // ---- the owner's palette. House-wide (v1, "owners' palette"): sage-olive walls, oak plank floors,
+  // tile in the wet rooms, stained-oak trim, honey-oak doors, brass hardware, maple casework,
+  // green-black granite counters, stainless appliances, clapboard siding.
+  // Per room (GT sidecar dxf-l1.json `palette` + `room_themes`, from the owners' current house).
+  const HOUSE = { wall: '#9aa07a', floor: 'oak' };
+  const OWNER_PALETTE = { 'PLAY ROOM': '#b9c445', 'SUNROOM': '#3f5661', 'SUN ROOM': '#f4f2ec' };
+  const OWNER_THEMES = { 'SUN ROOM': { floor: 'laminate' } };
+  // rooms the owner described that a drawing leaves unnamed: v1's room centroid (plan inches) seeds them
+  const OWNER_NEAR = [{ name: 'SUN ROOM', at: [97, 284], with: 'DINING ROOM', note: 'v1 SUN ROOM north of the dining room (unlabelled in the 2026 drawings)' }];
+  const FIN = { none: 0, oak: 1, tile: 2, concrete: 3, laminate: 4 };
+  const ROOMWORD = /HALL|ROOM|KITCHEN|LAUNDRY|BATH|PANTRY|STAIR|GARAGE|PORCH|MUDROOM|CLOSET|CLOS\.|COAT|WALK-IN|LINEN|WASHROOM|OFFICE|DEN\b|FOYER|ENTRY|STUDY|LIBRARY|NOOK|POWDER|DECK/;
+  function themeFor(raw) {
+    const n = raw.replace(/\s+/g, ' ').trim().toUpperCase(), t = { name: n, wall: HOUSE.wall, floor: HOUSE.floor, ext: false, src: 'house palette' };
+    if (/BATH|WASHROOM|POWDER|LAUNDRY|MUDROOM/.test(n)) t.floor = 'tile';
+    if (/GARAGE/.test(n)) { t.floor = 'concrete'; t.wall = '#e2ded4'; t.src = 'garage (unpainted drywall)'; }
+    if (/PORCH|DECK/.test(n)) { t.floor = 'concrete'; t.ext = true; t.src = 'outdoors'; }
+    if (OWNER_PALETTE[n]) { t.wall = OWNER_PALETTE[n]; t.src = 'owner palette'; }
+    if (OWNER_THEMES[n]) Object.assign(t, OWNER_THEMES[n], { src: 'owner theme' });
+    return t;
+  }
+  // ---- the room map (plan inches → cells), shared by the wall + floor shaders
+  const U = { uRoom: { value: null }, uAO: { value: null }, uRoomXf: { value: new THREE.Vector4() }, uRoomSize: { value: new THREE.Vector2(1, 1) },
+    uOn: { value: 0 }, uTop: { value: 96 }, uCell: { value: 4 } };
+  const GLSL_COMMON = `
+uniform sampler2D uRoom; uniform sampler2D uAO; uniform vec4 uRoomXf; uniform vec2 uRoomSize; uniform float uOn; uniform float uTop; uniform float uCell;
+varying vec3 vRWPos; varying vec3 vRWN;
+vec3 rS2L(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec2 rUV(vec2 w) { return vec2((w.x - uRoomXf.x) * uRoomXf.z, (-w.y - uRoomXf.y) * uRoomXf.w); }
+float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uRoomSize).g * 510.0 - 256.0; }
+`;
+  function inject(mat, key, frag, extraUniforms) {
+    mat.customProgramCacheKey = () => key;
+    mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U, extraUniforms || {});
+      sh.vertexShader = 'varying vec3 vRWPos; varying vec3 vRWN;\n' + sh.vertexShader.replace('#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\n  vRWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vRWN = normalize(mat3(modelMatrix) * objectNormal);');
+      sh.fragmentShader = GLSL_COMMON + frag.pars + sh.fragmentShader
+        .replace('#include <map_fragment>', '#include <map_fragment>\n' + frag.map)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  if (rRough >= 0.0) roughnessFactor = rRough;')
+        .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + (frag.normal || ''))
+        .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= rAO; reflectedLight.indirectSpecular *= mix(1.0, rAO, 0.6);');
+    };
+    return mat;
+  }
+  const sidingCol = new THREE.Color('#dfe4e8');
+  // walls: room paint on each face (sampled 4in off the face), clapboard outside; darker at the floor + ceiling lines
+  const wall = inject(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86 }), 'real-wall', {
+    pars: 'uniform sampler2D tSiding; uniform vec3 uSidingCol;\n',
+    map: `
+  vec3 rN = normalize(vRWN); float rAO = 1.0; float rRough = -1.0;
+  if (uOn > 0.5) {
+    vec2 uv = rUV(vRWPos.xz + rN.xz * 0.1);
+    vec4 rm = texture2D(uRoom, uv); bool ext = rm.a > 0.498;
+    if (abs(rN.y) < 0.5 && ext) {
+      float u = dot(vRWPos.xz, vec2(-rN.z, rN.x));
+      diffuseColor.rgb *= uSidingCol * texture2D(tSiding, vec2(u / 1.78, vRWPos.y / 0.89)).rgb; rRough = 0.72;
+    } else {
+      diffuseColor.rgb *= ext ? uSidingCol : rS2L(rm.rgb);
+      if (abs(rN.y) < 0.5) {
+        float h = vRWPos.y / 0.0254 - rLevel(uv);
+        rAO = mix(0.5, 1.0, smoothstep(0.0, 16.0, h)) * mix(0.72, 1.0, smoothstep(0.0, 12.0, uTop - vRWPos.y / 0.0254));
+      }
+    }
+  }`}, { tSiding: { value: T.siding }, uSidingCol: { value: sidingCol } });
+  // floors, stairs: the room's finish; a finish is laid in world metres (planks run north-south)
+  const floor = inject(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 }), 'real-floor', {
+    pars: 'uniform sampler2D tOak; uniform sampler2D tOakN; uniform sampler2D tOakR; uniform sampler2D tTile; uniform sampler2D tTileN; uniform sampler2D tCon;\n',
+    map: `
+  vec3 rN = normalize(vRWN); float rAO = 1.0; float rRough = -1.0; vec3 rNT = vec3(0.0);
+  if (uOn > 0.5) {
+    vec2 uv = rUV(vRWPos.xz - rN.xz * 0.05);
+    vec4 rm = texture2D(uRoom, uv); float code = floor(rm.a * 255.0 + 0.5); float fin = mod(code, 128.0); bool ext = code > 127.5;
+    if (rN.y > 0.5) {
+      vec2 p = vRWPos.xz;
+      if (fin > 0.5 && fin < 1.5 || fin > 3.5) {                        // oak planks / laminate
+        vec2 q = p / 1.0; vec3 c = texture2D(tOak, q).rgb; if (fin > 3.5) c = mix(c, vec3(dot(c, vec3(0.33))), 0.35) * 1.25;
+        diffuseColor.rgb *= c; rNT = texture2D(tOakN, q).xyz * 2.0 - 1.0; rRough = 0.2 + 0.55 * texture2D(tOakR, q).g;
+      } else if (fin > 1.5 && fin < 2.5) {                               // 12in ceramic tile
+        vec2 q = p / 1.2192; vec3 c = texture2D(tTile, q).rgb; diffuseColor.rgb *= c; rNT = texture2D(tTileN, q).xyz * 2.0 - 1.0;
+        rRough = mix(0.22, 0.8, smoothstep(0.35, 0.2, c.g));
+      } else { diffuseColor.rgb *= texture2D(tCon, p / 2.4).rgb; rRough = 0.82; }   // concrete (garage, porch, stoops)
+      rAO = mix(0.45, 1.0, smoothstep(0.0, 18.0, texture2D(uAO, uv).r * 255.0));
+    } else diffuseColor.rgb *= ext ? vec3(0.55, 0.54, 0.51) : vec3(0.92, 0.9, 0.86);   // slab edges: foundation / painted risers
+  }`,
+    normal: `
+  if (rN.y > 0.5 && dot(rNT, rNT) > 0.01) { vec3 nw = normalize(vec3(rNT.x * 0.8, rNT.z, rNT.y * 0.8)); normal = normalize((viewMatrix * vec4(nw, 0.0)).xyz); }`,
+  }, { tOak: { value: T.oak }, tOakN: { value: T.oakN }, tOakR: { value: T.oakR }, tTile: { value: T.tile }, tTileN: { value: T.tileN }, tCon: { value: T.con } });
+  T.grass.repeat.set(0.45, 0.45);
+  T.granite.repeat.set(1.4, 1.4);
+  const mat = {
+    wall, floor,
+    grass: new THREE.MeshStandardMaterial({ map: T.grass, color: 0xd8e0c8, roughness: 1 }),
+    door: new THREE.MeshStandardMaterial({ color: 0x8a5c2c, roughness: 0.5 }),                 // honey-oak doors (owner reference)
+    glass: new THREE.MeshStandardMaterial({ color: 0x8fb6c6, roughness: 0.03, metalness: 0.35, transparent: true, opacity: 0.28, envMapIntensity: 2.2, side: THREE.DoubleSide }),
+    cabinet: new THREE.MeshStandardMaterial({ color: 0xb08a52, roughness: 0.55 }),              // maple casework
+    counter: new THREE.MeshStandardMaterial({ map: T.granite, color: 0xffffff, roughness: 0.26, envMapIntensity: 1.1 }),   // green-black granite
+  };
+  // ceiling: fine drywall stipple (v1), lit a little from below to stand in for bounce light
+  const stipple = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    g.fillStyle = '#f2efe8'; g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 2600; i++) { g.fillStyle = `hsla(45, 10%, ${86 + Math.random() * 10}%, 0.6)`; g.fillRect(Math.random() * 128, Math.random() * 128, 1.5, 1.5); }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  mat.ceiling = new THREE.MeshStandardMaterial({ map: stipple, color: 0xf6f3ec, roughness: 0.95, emissive: 0x1c1a17, side: THREE.BackSide });
+  let ceilGroup = null, rooms = [], extraRooms = [], topM = 0;
+  const lamp = new THREE.PointLight(0xffe4c0, 0, 7, 1.6); scene.add(lamp);   // warm light that follows you indoors
+  function build(ctx) {
+    const { merged, slabs, parentOf, levelAt, TOP, toShape } = ctx, ops = rawOps;
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const w of merged) for (const q of [w.a, w.b]) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+    if (!(x0 < x1)) { U.uOn.value = 0; return; }
+    x0 -= 72; y0 -= 72; x1 += 72; y1 += 72;
+    let C = 4; while ((x1 - x0) / C > 1024 || (y1 - y0) / C > 1024) C *= 2;
+    const W = Math.ceil((x1 - x0) / C), H = Math.ceil((y1 - y0) / C), N = W * H;
+    const bar = new Uint8Array(N), occ = new Uint8Array(N);
+    const stamp = (arr, a, b, th) => {                    // an oriented rectangle a→b, th wide
+      const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L < 0.5) return;
+      const ux = dx / L, uy = dy / L, h = th / 2;
+      const i0 = Math.max(0, Math.floor((Math.min(a[0], b[0]) - h - x0) / C)), i1 = Math.min(W - 1, Math.ceil((Math.max(a[0], b[0]) + h - x0) / C));
+      const j0 = Math.max(0, Math.floor((Math.min(a[1], b[1]) - h - y0) / C)), j1 = Math.min(H - 1, Math.ceil((Math.max(a[1], b[1]) + h - y0) / C));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const px = x0 + (i + 0.5) * C - a[0], py = y0 + (j + 0.5) * C - a[1], t = px * ux + py * uy, s = -px * uy + py * ux;
+        if (t >= -0.5 && t <= L + 0.5 && Math.abs(s) <= h) arr[j * W + i] = 1;
+      }
+    };
+    for (const w of merged) stamp(bar, w.a, w.b, w.thick + 1);
+    for (const o of ops) stamp(bar, o.a, o.b, (o.thick || 5) + 1);
+    occ.set(bar);
+    for (const o of rawObjs) if (o.ux != null && o.how !== 'shower') stamp(occ, [o.cx - o.ux * o.len / 2, o.cy - o.uy * o.len / 2], [o.cx + o.ux * o.len / 2, o.cy + o.uy * o.len / 2], o.dep);
+    // seeds: the room names; the outside floods in from the edge of the map
+    const lab = new Int16Array(N).fill(-1), q = new Int32Array(N); let qh = 0, qt = 0;
+    rooms = [];
+    for (const L of rawLayers) {
+      if (!/RMNAME|ROOM/i.test(L.name)) continue;
+      for (const e of byLayer(ENTS, L.name)) {
+        if (!(e.type === 'TEXT' || e.type === 'MTEXT') || !e.text || !e.pts.length) continue;
+        const t = e.text.replace(/\\P/g, ' ').replace(/\\[A-Za-z][^;]*;/g, '').replace(/[{}]/g, '').trim();
+        if (!ROOMWORD.test(t.toUpperCase()) || /\d/.test(t)) continue;
+        const P = e.pts[1] && e.type === 'TEXT' ? e.pts[1] : e.pts[0], i = Math.floor((P[0] - x0) / C), j = Math.floor((P[1] - y0) / C);
+        if (i < 0 || j < 0 || i >= W || j >= H || bar[j * W + i]) continue;
+        const k = j * W + i; if (lab[k] >= 0) continue;
+        rooms.push(Object.assign(themeFor(t), { at: [Math.round(P[0]), Math.round(P[1])], cells: 0 }));
+        lab[k] = rooms.length - 1; q[qt++] = k;
+      }
+    }
+    for (const o of OWNER_NEAR) {                         // owner-described rooms the drawing leaves unnamed
+      const i = Math.floor((o.at[0] - x0) / C), j = Math.floor((o.at[1] - y0) / C), k = j * W + i;
+      if (i < 0 || j < 0 || i >= W || j >= H || bar[k] || lab[k] >= 0) continue;
+      if (rooms.some(r => r.name === o.name)) continue;
+      if (o.with && !rooms.some(r => r.name === o.with)) continue;             // on the floor it was described on
+      rooms.push(Object.assign(themeFor(o.name), { at: o.at, cells: 0, note: o.note })); lab[k] = rooms.length - 1; q[qt++] = k;
+    }
+    const OUT = rooms.length;
+    for (let i = 0; i < W; i++) for (const j of [0, H - 1]) { const k = j * W + i; if (lab[k] < 0) { lab[k] = OUT; q[qt++] = k; } }
+    for (let j = 0; j < H; j++) for (const i of [0, W - 1]) { const k = j * W + i; if (lab[k] < 0) { lab[k] = OUT; q[qt++] = k; } }
+    while (qh < qt) { const k = q[qh++], i = k % W, j = (k - i) / W, v = lab[k];
+      if (i > 0 && lab[k - 1] < 0 && !bar[k - 1]) { lab[k - 1] = v; q[qt++] = k - 1; }
+      if (i < W - 1 && lab[k + 1] < 0 && !bar[k + 1]) { lab[k + 1] = v; q[qt++] = k + 1; }
+      if (j > 0 && lab[k - W] < 0 && !bar[k - W]) { lab[k - W] = v; q[qt++] = k - W; }
+      if (j < H - 1 && lab[k + W] < 0 && !bar[k + W]) { lab[k + W] = v; q[qt++] = k + W; } }
+    const flood = () => { while (qh < qt) { const k = q[qh++], i = k % W, j = (k - i) / W, v = lab[k];
+      if (i > 0 && lab[k - 1] < 0 && !bar[k - 1]) { lab[k - 1] = v; q[qt++] = k - 1; }
+      if (i < W - 1 && lab[k + 1] < 0 && !bar[k + 1]) { lab[k + 1] = v; q[qt++] = k + 1; }
+      if (j > 0 && lab[k - W] < 0 && !bar[k - W]) { lab[k - W] = v; q[qt++] = k - W; }
+      if (j < H - 1 && lab[k + W] < 0 && !bar[k + W]) { lab[k + W] = v; q[qt++] = k + W; } } };
+    const extra = extraRooms = [];                         // enclosed spaces with no name: house palette
+    for (let k = 0; k < N; k++) if (lab[k] < 0 && !bar[k]) { extra.push(Object.assign(themeFor('(unnamed)'), { at: [Math.round(x0 + (k % W + 0.5) * C), Math.round(y0 + (Math.floor(k / W) + 0.5) * C)], cells: 0 }));
+      lab[k] = OUT + extra.length; q[qt++] = k; flood(); }
+    for (let pass = 0; pass < 4; pass++) {                // walls + doorways take the nearest room (door thresholds)
+      const nl = lab.slice();
+      for (let k = 0; k < N; k++) if (lab[k] < 0) { const i = k % W;
+        const c = (i > 0 && lab[k - 1] >= 0 ? lab[k - 1] : -1), d = (i < W - 1 && lab[k + 1] >= 0 ? lab[k + 1] : -1), e = (k >= W && lab[k - W] >= 0 ? lab[k - W] : -1), f = (k + W < N && lab[k + W] >= 0 ? lab[k + W] : -1);
+        const pick = [c, d, e, f].filter(v => v >= 0 && v !== OUT)[0]; nl[k] = pick != null ? pick : Math.max(c, d, e, f); }
+      lab.set(nl);
+    }
+    // distance to the nearest wall / fixture (chamfer 3-4, in inches) → floor AO; the floor level per cell → wall AO
+    const D = new Float32Array(N); for (let k = 0; k < N; k++) D[k] = occ[k] ? 0 : 1e6;
+    const a = C, b = C * Math.SQRT2;
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const k = j * W + i; let d = D[k];
+      if (i > 0) d = Math.min(d, D[k - 1] + a); if (j > 0) { d = Math.min(d, D[k - W] + a); if (i > 0) d = Math.min(d, D[k - W - 1] + b); if (i < W - 1) d = Math.min(d, D[k - W + 1] + b); } D[k] = d; }
+    for (let j = H - 1; j >= 0; j--) for (let i = W - 1; i >= 0; i--) { const k = j * W + i; let d = D[k];
+      if (i < W - 1) d = Math.min(d, D[k + 1] + a); if (j < H - 1) { d = Math.min(d, D[k + W] + a); if (i < W - 1) d = Math.min(d, D[k + W + 1] + b); if (i > 0) d = Math.min(d, D[k + W - 1] + b); } D[k] = d; }
+    const room = new Uint8Array(N * 4), ao = new Uint8Array(N * 4), col = new THREE.Color(), rgb = rooms.map(r => { col.set(r.wall); return [col.r, col.g, col.b].map(v => Math.round(v * 255)); });
+    const rgbX = (col.set(HOUSE.wall), [col.r, col.g, col.b].map(v => Math.round(v * 255)));
+    for (let k = 0; k < N; k++) {
+      const v = lab[k], r = v >= 0 && v < OUT ? rooms[v] : v > OUT ? extra[v - OUT - 1] : null; if (r) r.cells++;
+      const c = r ? (v < OUT ? rgb[v] : rgbX) : [223, 228, 232], fin = r ? FIN[r.floor] || 1 : 0, ext = !r || r.ext;
+      room[k * 4] = c[0]; room[k * 4 + 1] = c[1]; room[k * 4 + 2] = c[2]; room[k * 4 + 3] = fin + (ext ? 128 : 0);
+      const i = k % W, j = (k - i) / W, lv = levelAt(x0 + (i + 0.5) * C, y0 + (j + 0.5) * C);
+      ao[k * 4] = Math.min(255, D[k] - (occ[k] ? 0 : C / 2) + 0.5 | 0); ao[k * 4 + 1] = Math.max(0, Math.min(255, Math.round((lv + 256) / 2))); ao[k * 4 + 3] = 255;
+    }
+    const mk = (data, filt) => { const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat); t.magFilter = t.minFilter = filt; t.generateMipmaps = false; t.needsUpdate = true; return t; };
+    if (U.uRoom.value) U.uRoom.value.dispose(); if (U.uAO.value) U.uAO.value.dispose();
+    U.uRoom.value = mk(room, THREE.NearestFilter); U.uAO.value = mk(ao, THREE.LinearFilter);
+    U.uRoomXf.value.set(x0 * IN2M, y0 * IN2M, 1 / (W * C * IN2M), 1 / (H * C * IN2M)); U.uRoomSize.value.set(W, H); U.uCell.value = C;
+    U.uTop.value = TOP; U.uOn.value = 1; topM = TOP * IN2M;
+    // ceilings over every top-level floor outline (shown only when your eye is below them)
+    ceilGroup = new THREE.Group(); ceilGroup.name = 'ceilings'; ceilGroup.userData.ceiling = true;
+    // every outline (they can overlap: the same world-space stipple makes the overlaps invisible), one mesh
+    const cg = slabs.map(l => { const g = new THREE.ShapeGeometry(toShape(l.pts)); g.rotateX(-Math.PI / 2); return g; });   // plan → world like the floors; seen from below (BackSide)
+    if (cg.length) { const m = new THREE.Mesh(BGU.mergeGeometries(cg), mat.ceiling); cg.forEach(g => g.dispose());
+      m.position.y = topM - 0.002; m.receiveShadow = false; m.castShadow = true; m.userData.ceiling = true; ceilGroup.add(m); }
+    ctx.root.add(ceilGroup);
+    ctx.root.traverse(o => { if (o.isMesh && o.material === mat.glass) o.castShadow = false; });   // sun comes in through the windows
+  }
+  const _cp = new THREE.Vector3(), hemi = scene.children.find(o => o.isHemisphereLight);
+  const OUTDOOR = hemi && { sky: hemi.color.clone(), ground: hemi.groundColor.clone(), i: hemi.intensity, env: scene.environmentIntensity, sun: sun.intensity };
+  let wasInside = null;
+  function tick() {
+    if (!ceilGroup) return;
+    camera.getWorldPosition(_cp);
+    const inside = !view2D && !window.__arMode && _cp.y < topM - 0.02 && U.uOn.value > 0;
+    ceilGroup.visible = inside && !srcColors;
+    lamp.intensity = inside ? 2.0 : 0; lamp.position.set(_cp.x, _cp.y + 0.25, _cp.z);
+    if (hemi && inside !== wasInside) {                   // indoors: warm bounce light off the floor + walls fills the rooms
+      wasInside = inside;
+      if (inside) { hemi.color.set(0xfff3e4); hemi.groundColor.set(0xd9ccb8); hemi.intensity = 1.7; scene.environmentIntensity = 0.9; sun.intensity = 1.8; }
+      else { hemi.color.copy(OUTDOOR.sky); hemi.groundColor.copy(OUTDOOR.ground); hemi.intensity = OUTDOOR.i; scene.environmentIntensity = OUTDOOR.env; sun.intensity = OUTDOOR.sun; }
+    }
+  }
+  return { mat, T, U, build, tick, rooms: () => rooms.concat(extraRooms), HOUSE, OWNER_PALETTE, OWNER_THEMES };
+})();
 // source-colour debug view: every 3D part tinted by the DXF layer that produced it (the
 // layer panel's swatch colours); magenta = a wall guessed from a single line
 let srcColors = false, rawOps = [], rawObjs = [];
@@ -1000,13 +1237,13 @@ function buildRaw() {
   if (root) scene.remove(root);
   root = new THREE.Group(); scene.add(root);
   floors.length = 0; colliders.length = 0; doors = []; fixtures = []; fixtureColliders = []; planOpenings = []; rawOps = []; rawObjs = [];
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.92 });
+  const wallMat = REAL.mat.wall;
   const structMat = new THREE.MeshStandardMaterial({ color: 0x9a86c8, roughness: 0.7 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x7a4f28, roughness: 0.6 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfe0e8, roughness: 0.1, transparent: true, opacity: 0.35 });
+  const leafMat = REAL.mat.door;
+  const glassMat = REAL.mat.glass;
   const garageMat = new THREE.MeshStandardMaterial({ color: 0xd9d6cc, roughness: 0.8 });
-  const cabMat = new THREE.MeshStandardMaterial({ color: 0xc9b89a, roughness: 0.75 });
-  const topMat = new THREE.MeshStandardMaterial({ color: 0x5b5752, roughness: 0.45 });
+  const cabMat = REAL.mat.cabinet;
+  const topMat = REAL.mat.counter;
   const panMat = new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.35 });
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0xa8a197, roughness: 0.97 });
   const brickMat = new THREE.MeshStandardMaterial({ color: 0x94543f, roughness: 0.95 });
@@ -1078,7 +1315,7 @@ function buildRaw() {
   const parentOf = l => slabs.find(p => p !== l && p.area > l.area && pointIn(p.pts, l.c[0], l.c[1]));
   const TOP = Math.max(0, ...slabs.filter(l => l.area >= 20000).map(l => l.elev)) + WALL_H;   // one ceiling plate over the floors (not landings / winders)
   // pushed back in depth: where a floor block's edge is flush with a wall face the wall wins (no flicker)
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
+  const floorMat = REAL.mat.floor;
   // ground under everything (grade 0; lawn-coloured once real floors are outlined)
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
   for (const w of merged) for (const q of [w.a, w.b]) { minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]); miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]); }
@@ -1091,7 +1328,7 @@ function buildRaw() {
     const P = 120, g = toShape([[minx - P, miny - P], [maxx + P, miny - P], [maxx + P, maxy + P], [minx - P, maxy + P]]);
     for (const c of stepSets) if (c.lo < -0.5) g.holes.push(toShape(c.pts, THREE.Path));
     for (const c of slabs) if (c.elev < -0.5 && !(parentOf(c) && parentOf(c).elev < -0.5)) g.holes.push(toShape(c.pts, THREE.Path));
-    const fm = new THREE.Mesh(new THREE.ShapeGeometry(g), new THREE.MeshStandardMaterial({ color: 0x9aa886, roughness: 0.95 }));
+    const fm = new THREE.Mesh(new THREE.ShapeGeometry(g), REAL.mat.grass);
     fm.rotation.x = -Math.PI / 2; fm.position.y = -0.03; fm.receiveShadow = true; fm.userData.ground = true;
     root.add(fm); floors.push(fm);
   }
@@ -1578,6 +1815,7 @@ function buildRaw() {
     const sz = bb.getSize(new THREE.Vector3()), fl = /^stair/.test(what) ? hy : slabAt(hp[0], hp[1]);
     return { segs: [], labels: [{ text: /^stair/.test(what) ? what : `${what || 'part'}\n${ftIn(sz.x / IN2M)} × ${ftIn(sz.z / IN2M)} × ${ftIn(sz.y / IN2M)}`, x: hp[0], y: hp[1], lv: fl, ang: 0 }] };
   };
+  if (!srcColors) REAL.build({ merged, slabs, stepSets, parentOf, levelAt, slabAt, TOP, toShape, root });
   if (window.__arMode && typeof arGhost === 'function') arGhost(true);   // rebuilt during passthrough: stay see-through
   window.__V2_READY = true;
 }
@@ -3337,6 +3575,7 @@ issueBtn.onclick = () => { const t = prompt('Describe the issue (optional):') ||
 
 let prevT = 0;
 renderer.setAnimationLoop((t) => {
+  REAL.tick();
   const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
   if (pendingRebuild) { pendingRebuild = false; build(); }   // deferred fixture swap from XR
   if (pendingRawRebuild) { pendingRawRebuild = false; buildRaw(); }   // deferred wall push/pull from XR
@@ -3354,7 +3593,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   toggle2D: () => twoDBtn.click(), view2D: () => view2D, build2D,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
-  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly,
+  rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly, REAL, renderer, scene,
   vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, scaleCalibEnter, scaleCalibExit, scal, CAL_ITEMS, calTexture, calFrame, setWorldScale,
   worldScale: () => worldScale, help, helpRefresh, roomPin, solveAlignment, floorPlan: () => floorPlanGroup, setSeeThrough, measureRay, measures: () => measureGroup,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,

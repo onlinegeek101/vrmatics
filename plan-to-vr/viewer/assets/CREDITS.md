@@ -31,6 +31,23 @@ updating its row — the catalog entry (`assets.json`) doesn't change.
 | `shower.glb`     | Shower stall                | Authored in-repo (`trimesh`) | CC0-1.0 |  60 | 2.3 KB |
 | `tub.glb`        | Bathtub                     | Authored in-repo (`trimesh`) | CC0-1.0 |  36 | 1.8 KB |
 
+## Surface textures (`tex/`) — v2 viewer
+
+PBR surface maps for the v2 viewer's per-room materials (the owner's palette:
+oak plank floors, tile in the wet rooms, concrete garage, clapboard siding,
+green-black granite counters). All from **ambientCG** (CC0-1.0), downsized to
+≤ 1K and re-tinted in-repo (`numpy`/`PIL`) to the owner's colours. The copies
+were taken from public mirrors of the unmodified 1K-JPG sets.
+
+| File | Made from | License | Size |
+|------|-----------|---------|------|
+| `tex/oak_albedo.jpg`, `oak_normal.jpg`, `oak_rough.jpg` | ambientCG **WoodFloor040** (Color, NormalGL, Roughness), warmed toward v1's honey oak | CC0-1.0 | 1K / 512 / 512 |
+| `tex/tile_albedo.jpg`, `tile_normal.jpg` | ambientCG **Tiles002** (Color), recoloured to v1's warm off-white 12in tile + grey grout; normal derived from the grout lines | CC0-1.0 | 512 |
+| `tex/concrete_albedo.jpg` | ambientCG **Concrete031** (Color), lightened | CC0-1.0 | 512 |
+| `tex/grass_albedo.jpg` | ambientCG **Grass004** (Color) | CC0-1.0 | 512 |
+| `tex/siding_albedo.jpg` | ambientCG **WoodSiding009** (Color), greyscale (tinted to v1's siding colour in the shader) | CC0-1.0 | 512x256 |
+| `tex/granite_albedo.jpg` | ambientCG **Granite002A** (Color), darkened + tinted green-black | CC0-1.0 | 512 |
+
 ## Adding a model
 
 Keep each GLB **< 2 MB / < 50k tris**, self-contained (geometry + materials +
