@@ -77,6 +77,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
@@ -379,6 +380,8 @@ function fixtureTags(name) {
   const n = (name || '').toUpperCase(), t = new Set(['any']), has = s => n.includes(s), add = (...xs) => xs.forEach(x => t.add(x));
   if (has('SOFA') || has('SECT') || has('COUCH') || has('LOVE')) add('sofa', 'seating');
   if (has('CHAIR') || has('RECLIN') || has('STOOL')) add('chair', 'seating');
+  if (has('STOOL')) add('stool');
+  if (has('NIGHTSTAND') || has('BEDSIDE')) add('nightstand');
   if (has('TABLE') || has('DESK') || has('COFFEE')) add('table', 'seating');
   if (has('BED')) add('bed');
   if (has('DRAWN')) add('seating', 'table');
@@ -971,6 +974,41 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
     for (let i = 0; i < 2600; i++) { g.fillStyle = `hsla(45, 10%, ${86 + Math.random() * 10}%, 0.6)`; g.fillRect(Math.random() * 128, Math.random() * 128, 1.5, 1.5); }
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); t.colorSpace = THREE.SRGBColorSpace; return t; })();
   mat.ceiling = new THREE.MeshStandardMaterial({ map: stipple, color: 0xf6f3ec, roughness: 0.95, emissive: 0x1c1a17, side: THREE.BackSide });
+  // shaker cabinet fronts (maple, owner's casework): one 18in door per repeat; base runs get a 6in drawer
+  // band + toe kick. Extruded runs map u = metres along the run, v = the run's height (flipped, see below)
+  const shakerCache = {};
+  function shakerCanvas(hIn, kind) {
+    const key = kind + ':' + Math.round(hIn); if (shakerCache[key]) return shakerCache[key];
+    const P = 14, cw = 18 * P, ch = Math.min(1400, Math.round(hIn * P)), c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const g = c.getContext('2d'), maple = '#b08a52', rail = 2.25 * P;
+    g.fillStyle = maple; g.fillRect(0, 0, cw, ch);
+    for (let i = 0; i < 90; i++) { g.strokeStyle = `rgba(90,58,24,${0.04 + Math.random() * 0.05})`; g.lineWidth = 1 + Math.random(); const x = Math.random() * cw; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (Math.random() - 0.5) * 12, ch); g.stroke(); }
+    const kick = kind === 'base' ? 4 * P : 0, drawer = kind === 'base' ? 6 * P : 0;
+    const panel = (x, y, w, h, slab) => {                  // gap + stile/rail frame + recessed panel
+      g.fillStyle = 'rgba(25,15,6,0.85)'; g.fillRect(x, y, w, 3); g.fillRect(x, y + h - 3, w, 3); g.fillRect(x, y, 3, h); g.fillRect(x + w - 3, y, 3, h);
+      if (slab) return;
+      g.fillStyle = 'rgba(60,36,12,0.16)'; g.fillRect(x + rail, y + rail, w - 2 * rail, h - 2 * rail);
+      g.fillStyle = 'rgba(40,24,8,0.45)'; g.fillRect(x + rail, y + rail, w - 2 * rail, 3); g.fillRect(x + rail, y + rail, 3, h - 2 * rail);
+      g.fillStyle = 'rgba(255,240,210,0.35)'; g.fillRect(x + rail, y + h - rail - 2, w - 2 * rail, 2); g.fillRect(x + w - rail - 2, y + rail, 2, h - 2 * rail);
+    };
+    const pull = (x, y, w, h) => { g.fillStyle = '#d9d6cf'; g.fillRect(x, y, w, h); g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x, y + h, w, 2); };
+    if (kind === 'base') {
+      g.fillStyle = '#1c140c'; g.fillRect(0, ch - kick, cw, kick);
+      panel(0, 0, cw, drawer, true); pull(cw / 2 - 2 * P, drawer / 2 - 3, 4 * P, 5);
+      panel(0, drawer, cw, ch - drawer - kick); pull(cw - rail / 2 - 4, drawer + rail, 5, 4 * P);
+    } else { panel(0, 0, cw, ch); pull(cw - rail / 2 - 4, kind === 'upper' ? ch - rail - 4 * P : ch * 0.45, 5, 4 * P); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
+    return (shakerCache[key] = t);
+  }
+  const cabMats = {};
+  // hIn: the front's height; kind 'base' | 'upper' | 'tall' | 'vanity'; doors: n across a BoxGeometry face (else an extruded run)
+  function cabFor(hIn, kind, doors) {
+    const key = kind + ':' + Math.round(hIn) + ':' + (doors || 'x'); if (cabMats[key]) return cabMats[key];
+    const t = shakerCanvas(hIn, kind === 'vanity' ? 'tall' : kind).clone(); t.needsUpdate = true;
+    if (doors) { t.repeat.set(doors, 1); }
+    else { const hm = hIn * IN2M; t.repeat.set(1 / (18 * IN2M), -1 / hm); t.offset.set(0, 1 / hm); }   // side-wall UV v = 1 - z(m)
+    return (cabMats[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.5 }));
+  }
   let ceilGroup = null, rooms = [], extraRooms = [], topM = 0;
   const lamp = new THREE.PointLight(0xffe4c0, 0, 7, 1.6); scene.add(lamp);   // warm light that follows you indoors
   function build(ctx) {
@@ -1087,7 +1125,241 @@ float rLevel(vec2 uv) { return texture2D(uAO, (floor(uv * uRoomSize) + 0.5) / uR
       else { hemi.color.copy(OUTDOOR.sky); hemi.groundColor.copy(OUTDOOR.ground); hemi.intensity = OUTDOOR.i; scene.environmentIntensity = OUTDOOR.env; sun.intensity = OUTDOOR.sun; }
     }
   }
-  return { mat, T, U, build, tick, rooms: () => rooms.concat(extraRooms), HOUSE, OWNER_PALETTE, OWNER_THEMES };
+  return { mat, T, U, build, tick, cabFor, rooms: () => rooms.concat(extraRooms), HOUSE, OWNER_PALETTE, OWNER_THEMES };
+})();
+// ---- REAL FIXTURES: the labelled objects built at their drawn size as real things — appliances in
+// stainless, front-load laundry, vanities with basins + faucets, a real tub, made beds, dressers,
+// closet shelving, sinks in the counters — plus CC0 photo-scanned models (Poly Haven: bar stools,
+// bedside tables, wooden table; assets/) where one fits. Units: inches; model +Z = front, back at -d/2.
+const REALM = (() => {
+  const I = IN2M;
+  const M = {
+    steel: new THREE.MeshStandardMaterial({ color: 0xc3c7cb, metalness: 0.85, roughness: 0.34 }),
+    steelDark: new THREE.MeshStandardMaterial({ color: 0x55595e, metalness: 0.8, roughness: 0.4 }),
+    handle: new THREE.MeshStandardMaterial({ color: 0xdfe2e5, metalness: 0.95, roughness: 0.18 }),
+    black: new THREE.MeshStandardMaterial({ color: 0x141516, metalness: 0.2, roughness: 0.35 }),
+    iron: new THREE.MeshStandardMaterial({ color: 0x1b1b1b, metalness: 0.4, roughness: 0.6 }),
+    gap: new THREE.MeshStandardMaterial({ color: 0x0c0c0c, roughness: 0.9 }),
+    darkGlass: new THREE.MeshStandardMaterial({ color: 0x0e1114, metalness: 0.3, roughness: 0.08 }),
+    enamel: new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.28 }),
+    porcelain: new THREE.MeshStandardMaterial({ color: 0xf6f6f3, roughness: 0.14 }),
+    quartz: new THREE.MeshStandardMaterial({ color: 0xeeebe4, roughness: 0.22 }),
+    chrome: new THREE.MeshStandardMaterial({ color: 0xd0d3d7, metalness: 0.95, roughness: 0.12 }),
+    brass: new THREE.MeshStandardMaterial({ color: 0xc9a63a, metalness: 0.85, roughness: 0.3 }),    // owner: brass hardware
+    maple: new THREE.MeshStandardMaterial({ color: 0xb08a52, roughness: 0.55 }),
+    walnut: new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.5 }),
+    oakFrame: new THREE.MeshStandardMaterial({ color: 0x8a5c2c, roughness: 0.5 }),
+    linen: new THREE.MeshStandardMaterial({ color: 0xf1eee7, roughness: 0.95 }),
+    duvet: new THREE.MeshStandardMaterial({ color: 0xd9d3c6, roughness: 0.98 }),
+    throwBlanket: new THREE.MeshStandardMaterial({ color: 0x5f6f73, roughness: 1 }),
+    upholstery: new THREE.MeshStandardMaterial({ color: 0x8d8272, roughness: 0.97 }),
+    water: new THREE.MeshStandardMaterial({ color: 0x7c93a3, roughness: 0.05, metalness: 0.2 }),
+    white: new THREE.MeshStandardMaterial({ color: 0xf2f1ee, roughness: 0.45 }),
+    shelf: new THREE.MeshStandardMaterial({ color: 0xf0ede6, roughness: 0.6 }),
+    screen: new THREE.MeshStandardMaterial({ color: 0x050607, metalness: 0.1, roughness: 0.12, emissive: 0x05070a }),
+    led: new THREE.MeshBasicMaterial({ color: 0x6fd3ff }),
+  };
+  let grp = null, W = 0, D = 0;
+  const z0 = () => -D / 2;
+  // a box by its inch extents, x centred, y from the floor, z from the back
+  const box = (m, w, h, d, x, y, z, round) => {
+    const g = round ? new RoundedBoxGeometry(w * I, h * I, d * I, 2, Math.min(round, w / 2 - 0.01, h / 2 - 0.01, d / 2 - 0.01) * I) : new THREE.BoxGeometry(w * I, h * I, d * I);
+    const o = new THREE.Mesh(g, m); o.position.set(x * I, (y + h / 2) * I, (z0() + z + d / 2) * I); o.castShadow = o.receiveShadow = true; grp.add(o); return o; };
+  const cyl = (m, r, len, x, y, z, axis, seg) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r * I, r * I, len * I, seg || 16), m);
+    if (axis === 'x') o.rotation.z = Math.PI / 2; else if (axis === 'z') o.rotation.x = Math.PI / 2;
+    o.position.set(x * I, y * I, (z0() + z) * I); o.castShadow = true; grp.add(o); return o; };
+  const barHandle = (x, y, z, len, vertical) => {            // a stand-off bar pull on the front face (z = front)
+    cyl(M.handle, 0.45, len, x, y, z + 1.4, vertical ? 'y' : 'x');
+    for (const s of [-1, 1]) { const o = cyl(M.handle, 0.3, 1.4, x + (vertical ? 0 : s * (len / 2 - 1)), y + (vertical ? s * (len / 2 - 1) : 0), z + 0.7, 'z'); }
+  };
+  const knob = (m, r, x, y, z) => { const o = new THREE.Mesh(new THREE.SphereGeometry(r * I, 14, 10), m); o.position.set(x * I, y * I, (z0() + z) * I); grp.add(o); return o; };
+  // ---- appliances
+  function fridge(h) {                                   // French-door, bottom freezer, stainless
+    const d = Math.min(D, 30), w = W - 0.5;
+    box(M.steelDark, w, h, d - 1.2, 0, 0, 0);
+    const fz = 0, doorsY = h * 0.36;
+    box(M.steel, w - 0.4, doorsY - 1, 1.2, 0, 0.5, d - 1.2, 0.3);                        // freezer drawer
+    box(M.steel, w / 2 - 0.4, h - doorsY - 0.8, 1.4, -w / 4, doorsY, d - 1.4, 0.3);       // two doors
+    box(M.steel, w / 2 - 0.4, h - doorsY - 0.8, 1.4, w / 4, doorsY, d - 1.4, 0.3);
+    barHandle(-1.6, doorsY + (h - doorsY) * 0.5, d, (h - doorsY) * 0.55, true);
+    barHandle(1.6, doorsY + (h - doorsY) * 0.5, d, (h - doorsY) * 0.55, true);
+    barHandle(0, doorsY - 3, d, w * 0.6, false);
+    box(M.black, 3.5, 5, 0.2, -w / 4 + 4, doorsY + (h - doorsY) * 0.62, d); box(M.led, 2.2, 0.5, 0.1, -w / 4 + 4, doorsY + (h - doorsY) * 0.62 + 3.6, d + 0.15);
+  }
+  function range(h) {                                    // 36in gas range: stainless, black grates, 6 burners, oven window
+    const d = Math.min(D, 27), w = W - 0.4, top = 36;
+    box(M.steel, w, top - 1.5, d, 0, 0, 0);
+    box(M.black, w, 0.6, d - 1, 0, top - 1.5, 0.5);                                         // cooktop
+    box(M.steel, w, 7, 1.5, 0, top - 1.5, 0);                                               // back guard
+    const cols = w > 32 ? 3 : 2;
+    for (let c = 0; c < cols; c++) for (let r = 0; r < 2; r++) {                           // burners + grates
+      const bx = -w / 2 + w * (c + 0.5) / cols, bz = 3 + (d - 5) * (r + 0.5) / 2;
+      cyl(M.iron, 1.6, 0.6, bx, top - 0.6, bz, 'y', 18); cyl(M.steelDark, 0.9, 0.7, bx, top - 0.4, bz, 'y', 12);
+      for (const a of [0, 1]) { const o = box(M.iron, a ? 0.5 : w / cols - 1, 0.5, a ? (d - 5) / 2 - 1 : 0.5, bx, top - 0.9, bz - (a ? (d - 5) / 4 - 0.5 : 0.25)); }
+    }
+    for (let k = 0; k < 6; k++) { const o = cyl(M.black, 1.0, 1.4, -w / 2 + w * (k + 0.5) / 6, top - 4.5, d + 0.6, 'z', 16); }   // knobs
+    box(M.steel, w - 1, top - 10.5, 1.2, 0, 3.5, d - 0.2, 0.3);                            // oven door
+    box(M.darkGlass, w * 0.62, (top - 10.5) * 0.45, 0.2, 0, 3.5 + (top - 10.5) * 0.3, d + 1.0);
+    barHandle(0, top - 9, d + 0.8, w * 0.8, false);
+    box(M.gap, w - 1, 3, 0.4, 0, 0, d - 0.3);                                               // kick
+  }
+  function dishwasher(h) {
+    const d = Math.min(D, 24), w = W - 0.4;
+    box(M.steelDark, w, h - 1, d - 1, 0, 0, 0);
+    box(M.steel, w, h - 4.5, 1, 0, 4, d - 1, 0.25); box(M.gap, w, 4, 0.5, 0, 0, d - 1.5);
+    barHandle(0, h - 4.5, d, w * 0.7, false); box(M.black, w * 0.5, 1, 0.2, 0, h - 2.2, d - 0.9);
+  }
+  function laundry(h, dryer) {                           // white front-loader: round door (chrome ring + smoked glass), top controls
+    const d = Math.min(D, 31), w = W - 0.6;
+    box(M.white, w, h - 0.5, d, 0, 0, 0, 0.8);
+    box(M.white, w - 1, 5.5, 1, 0, h - 7, d - 0.6, 0.3); box(M.darkGlass, 7, 2.2, 0.2, 2, h - 5.2, d + 0.35);
+    const kb = cyl(M.chrome, 1.3, 1, -w / 2 + 5, h - 4.3, d + 0.5, 'z', 20);
+    const cy = (h - 7) * 0.5 + 1, r = Math.min(w, h) * 0.3;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r * I, 1.3 * I, 10, 40), M.chrome); ring.position.set(0, cy * I, (z0() + d + 0.8) * I); grp.add(ring);
+    const glass = new THREE.Mesh(new THREE.CircleGeometry((r - 0.8) * I, 36), dryer ? M.black : M.darkGlass); glass.position.set(0, cy * I, (z0() + d + 0.9) * I); grp.add(glass);
+    box(M.gap, w - 2, 0.3, 0.2, 0, 3, d);                                                  // kick line
+  }
+  function iceMachine(h) {
+    const d = Math.min(D, 24), w = W - 0.4;
+    box(M.steelDark, w, h - 1, d - 1, 0, 0, 0); box(M.steel, w, h - 5, 1, 0, 4, d - 1, 0.25); box(M.gap, w, 4, 0.5, 0, 0, d - 1.5);
+    barHandle(0, h - 4, d, w * 0.7, false); box(M.darkGlass, w * 0.55, (h - 5) * 0.35, 0.2, 0, h * 0.45, d + 0.05);
+  }
+  // ---- bath
+  function roundedRect(w, d, r) { const s = new THREE.Shape(), x = w / 2, y = d / 2; r = Math.min(r, x - 0.1, y - 0.1);
+    s.moveTo(-x + r, -y); s.lineTo(x - r, -y); s.quadraticCurveTo(x, -y, x, -y + r); s.lineTo(x, y - r); s.quadraticCurveTo(x, y, x - r, y);
+    s.lineTo(-x + r, y); s.quadraticCurveTo(-x, y, -x, y - r); s.lineTo(-x, -y + r); s.quadraticCurveTo(-x, -y, -x + r, -y); return s; }
+  const flatAt = (shape, m, y, cx, cz, depth) => {       // a shape (inches, x/z) extruded down `depth` from height y
+    const sc = new THREE.Shape(shape.getPoints(12).map(p => new THREE.Vector2(p.x * I, p.y * I)));
+    for (const hh of shape.holes || []) sc.holes.push(new THREE.Path(hh.getPoints(12).map(p => new THREE.Vector2(p.x * I, p.y * I))));
+    const g = new THREE.ExtrudeGeometry(sc, { depth: depth * I, bevelEnabled: false, curveSegments: 12 }); g.rotateX(Math.PI / 2);
+    const o = new THREE.Mesh(g, m); o.position.set(cx * I, y * I, (z0() + cz) * I); o.castShadow = o.receiveShadow = true; grp.add(o); return o; };
+  function faucet(x, y, z, reach, m) {                   // gooseneck: riser, arc, spout, lever
+    m = m || M.chrome;
+    cyl(m, 0.7, 1.2, x, y + 0.6, z, 'y'); cyl(m, 0.45, 8, x, y + 5, z, 'y');
+    const arc = new THREE.Mesh(new THREE.TorusGeometry((reach / 2) * I, 0.45 * I, 8, 16, Math.PI), m);
+    arc.rotation.y = -Math.PI / 2; arc.position.set(x * I, (y + 9) * I, (z0() + z + reach / 2) * I); grp.add(arc);
+    cyl(m, 0.45, 2.5, x, y + 7.8, z + reach, 'y'); box(m, 0.5, 0.5, 3, x + 1.6, y + 2.2, z - 1.5);
+  }
+  function vanity(h, name) {                             // maple cabinet, quartz top with undermount basin(s), faucets, mirror
+    const d = Math.min(D, 22), w = W - 0.3, n = /2 SINKS|DOUBLE/.test(name) && w > 48 ? 2 : 1, top = h;
+    box(M.gap, w - 2, 4, d - 3, 0, 0, 0);
+    box(REAL.cabFor(top - 11, 'vanity', Math.max(1, Math.round(w / 20))), w, top - 11, d - 1, 0, 4, 0);   // doors (hollow above: the basins)
+    box(M.maple, w, 5.5, 0.8, 0, top - 7, d - 1.8); box(M.maple, 0.8, 5.5, d - 1, -w / 2 + 0.4, top - 7, 0); box(M.maple, 0.8, 5.5, d - 1, w / 2 - 0.4, top - 7, 0);
+    const topS = roundedRect(w + 0.5, d + 0.5, 0.3), bowls = [];
+    for (let k = 0; k < n; k++) { const x = n === 1 ? 0 : (k ? 1 : -1) * w / 4, bz = d * 0.55; bowls.push([x, bz]);
+      const e = new THREE.Path(); e.absellipse(x, bz - (d + 0.5) / 2 + 0.25, 8, 6.5, 0, Math.PI * 2, false); topS.holes.push(e); }
+    flatAt(topS, M.quartz, top, 0, (d + 0.5) / 2 - 0.25, 1.5);
+    const bowlM = new THREE.MeshStandardMaterial({ color: 0xf6f6f3, roughness: 0.14, side: THREE.DoubleSide });
+    for (const [x, bz] of bowls) {
+      const bowl = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), bowlM);
+      bowl.scale.set(8 * I, 6 * I, 6.5 * I); bowl.position.set(x * I, (top - 1.4) * I, (z0() + bz) * I); grp.add(bowl);
+      cyl(M.chrome, 0.8, 0.1, x, top - 7.35, bz, 'y');
+      faucet(x, top, bz - 8.5, 5.5);
+    }
+    box(new THREE.MeshStandardMaterial({ color: 0xc9d3d9, metalness: 0.35, roughness: 0.06, envMapIntensity: 2.5 }), Math.min(w - 4, 60), 30, 0.4, 0, top + 12, -0.4);   // mirror
+  }
+  function tub(h, name) {                                // enamel tub: rim ring + inner basin + spout
+    const w = W - 0.2, d = D - 0.2, wall = 3, inner = roundedRect(w - 2 * wall - 2, d - 2 * wall, 6), outer = roundedRect(w, d, 1.5);
+    outer.holes.push(inner);
+    flatAt(outer, M.enamel, h, 0, d / 2, h - 0.2);                                          // walls (hollow)
+    flatAt(roundedRect(w - 2 * wall - 2, d - 2 * wall, 6), M.enamel, 2.5, 0, d / 2, 2.3);   // basin floor
+    const wtr = flatAt(roundedRect(w - 2 * wall - 3, d - 2 * wall - 1, 6), M.water, 11, 0, d / 2, 0.1); wtr.material = new THREE.MeshStandardMaterial({ color: 0x9fb8c4, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.55 });
+    const endX = -w / 2 + wall + 1;                                                         // spout + drain at one end
+    const sp = cyl(M.chrome, 0.7, 5, endX + 2.5, h + 2.5, d / 2, 'x'); cyl(M.chrome, 1, 0.3, endX + 4, 2.8, d / 2, 'y');
+    /SOAK/.test(name) || cyl(M.chrome, 1.2, 1.2, endX - 1, h + 12, d / 2, 'x');
+  }
+  // ---- bedroom
+  function bed(h, name) {                                // wood frame, mattress, duvet + throw, pillows, upholstered headboard
+    const w = W, d = D, king = /KING/.test(name) || w > 70;
+    box(M.oakFrame, w, 11, d - 2, 0, 3, 2);                                                 // frame rails
+    for (const sx of [-1, 1]) for (const sz of [0, 1]) box(M.oakFrame, 3, 3, 3, sx * (w / 2 - 1.5), 0, 2 + sz * (d - 5));
+    box(M.linen, w - 2, 10, d - 5, 0, 14, 3, 2.5);                                          // mattress
+    box(M.duvet, w + 1, 3, d - 17, 0, 22.5, 15, 1.5);                                       // duvet over the foot 3/4
+    box(M.duvet, w + 1.4, 11, 2.5, 0, 14, d - 2.2, 1.2);                                    // duvet drop at the foot
+    box(M.throwBlanket, w + 1.8, 1.2, 14, 0, 25.2, d - 20, 0.6);                            // folded throw
+    const np = king ? 3 : 2;
+    for (let k = 0; k < np; k++) { const px = -w / 2 + (w / np) * (k + 0.5); box(M.linen, w / np - 3, 5, 14, px, 24, 5, 2.4); }
+    box(M.upholstery, w + 2, 50, 4, 0, 0, -2, 1.5);                                         // headboard
+  }
+  function dresser(h, name) {                            // walnut case, drawer fronts in rows, brass knobs, legs
+    const w = W - 0.2, d = Math.min(D, 22), rows = /CONSOLE|LOW/.test(name) ? 2 : 3, cols = w > 40 ? 2 : 1, body = h - 4;
+    for (const sx of [-1, 1]) for (const sz of [0, 1]) box(M.walnut, 1.6, 4, 1.6, sx * (w / 2 - 1.5), 0, 1 + sz * (d - 4));
+    box(M.walnut, w, body, d - 0.8, 0, 4, 0, 0.3); box(M.walnut, w + 0.8, 1, d + 0.2, 0, h - 1, -0.2, 0.3);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const fw = w / cols - 1.2, fh = (body - 1.5) / rows - 1, fx = -w / 2 + (w / cols) * (c + 0.5), fy = 4.8 + r * ((body - 1.5) / rows);
+      box(M.walnut, fw, fh, 0.9, fx, fy, d - 0.9, 0.2);
+      for (const kx of fw > 22 ? [-fw / 4, fw / 4] : [0]) knob(M.brass, 0.6, fx + kx, fy + fh / 2, d + 0.4);
+    }
+  }
+  function tv(h) {                                       // a 16:9 panel wall-hung at eye height over its footprint
+    const w = W - 1, th = 1.6, ph = w * 9 / 16, y = Math.max(34, 60 - ph / 2);
+    box(M.black, w, ph, th, 0, y, 0.5, 0.3); box(M.screen, w - 1.2, ph - 1.2, 0.1, 0, y + 0.6, 0.5 + th);
+  }
+  function bench(h) {                                    // upholstered end-of-bed bench on tapered legs
+    const w = W - 0.5, d = D - 0.5;
+    for (const sx of [-1, 1]) for (const sz of [0, 1]) box(M.oakFrame, 1.6, 12, 1.6, sx * (w / 2 - 2), 0, 1 + sz * (d - 3.6));
+    box(M.upholstery, w, 6, d, 0, 12, 0, 2);
+  }
+  function sink(h, name) {                             // stainless undermount basin in the counter's cut-out + faucet at its back
+    const w = Math.max(3, W - 3), d = Math.max(3, D - 3), top = 36, cz = D / 2;   // = the counter cut-out
+    const rim = roundedRect(w + 1.2, d + 1.2, 1.2); rim.holes.push(roundedRect(w, d, 1));
+    flatAt(rim, M.steel, top + 0.05, 0, cz, 0.05);
+    flatAt(roundedRect(w, d, 1), M.steelDark, top - 8.5, 0, cz, 0.3);                      // basin floor, 8in deep
+    const walls = roundedRect(w, d, 1); walls.holes.push(roundedRect(w - 0.3, d - 0.3, 0.9));
+    flatAt(walls, M.steel, top, 0, cz, 8.4);
+    cyl(M.chrome, 1.4, 0.1, 0, top - 8.15, cz, 'y');
+    faucet(w > 20 ? -w * 0.2 : 0, top, Math.max(0.8, cz - d / 2 - 1.6), Math.min(9, d * 0.5));
+  }
+  // cut-outs in a counter for the sinks drawn inside it (the drawn sink outline, 1.5in in)
+  function sinkHoles(shape, o, objs) {
+    for (const s of objs) { if (!/^SINK/.test(s.name)) continue;
+      const R = orientedRect(s.pts); if (!pointIn(o.pts, R.cx, R.cy)) continue;
+      const L = R.len / 2 - 1.5, Dp = R.dep / 2 - 1.5, c = [[-L, -Dp], [L, -Dp], [L, Dp], [-L, Dp]].map(([u, v]) => new THREE.Vector2((R.cx + R.ux * u - R.uy * v) * I, (R.cy + R.uy * u + R.ux * v) * I));
+      shape.holes.push(new THREE.Path(c)); }
+  }
+  function shelves(pts, lv, name, root, srcLayer) {      // closet shelving / rod: 3/4in shelves (+ rods) over the drawn footprint
+    const shape = new THREE.Shape(pts.map(p => new THREE.Vector2(p[0] * I, p[1] * I)));
+    const rodOnly = /ROD/.test(name), levels = rodOnly ? [66] : /WALK-IN/.test(name) ? [42, 84] : [18, 42, 66, 84];
+    for (const y of levels) { const g = new THREE.ExtrudeGeometry(shape, { depth: 0.75 * I, bevelEnabled: false }); const m = new THREE.Mesh(g, M.shelf);
+      m.rotation.x = -Math.PI / 2; m.position.y = (lv + y) * I; m.castShadow = m.receiveShadow = true; root.add(tagSrc(m, srcLayer, name.toLowerCase() + ' — shelf')); }
+    const R = orientedRect(pts);
+    if (Math.abs(R.len * R.dep - Math.abs(THREE.ShapeUtils.area(pts.map(p => new THREE.Vector2(p[0], p[1]))))) < R.len * R.dep * 0.1)   // a rectangle: hang a rod under each upper shelf
+      for (const y of rodOnly ? [64] : levels.filter(v => v > 40).map(v => v - 2)) {
+        const a = [R.cx - R.ux * R.len / 2, R.cy - R.uy * R.len / 2], b = [R.cx + R.ux * R.len / 2, R.cy + R.uy * R.len / 2];
+        const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.6 * I, 0.6 * I, R.len * I, 12), M.chrome);
+        rod.position.set(wx(R.cx), (lv + y) * I, wz(R.cy)); rod.rotation.set(0, -Math.atan2(-R.uy, R.ux), Math.PI / 2); root.add(rod);
+      }
+  }
+  // GLB fitted uniformly (keeps its proportions), centred on the footprint, standing on the floor
+  function loadUniform(g, url, w, d, h) {
+    gltf.load(url, gl => { const m = gl.scene, bb = new THREE.Box3().setFromObject(m), sz = bb.getSize(new THREE.Vector3());
+      const k = Math.min(w / sz.x, d / sz.z, h / sz.y); m.scale.setScalar(k);
+      const b2 = new THREE.Box3().setFromObject(m), c = b2.getCenter(new THREE.Vector3()); m.position.set(-c.x, -b2.min.y, -c.z);
+      m.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; }); g.add(m); });
+  }
+  const BUILDERS = [
+    [/REFRIG|FRIDGE/, fridge], [/RANGE|STOVE/, range], [/DISHWASH/, dishwasher], [/DRYER/, h => laundry(h, true)], [/WASHER/, h => laundry(h, false)],
+    [/ICE MACHINE|ICE MAKER/, iceMachine], [/VANITY/, vanity], [/TUB/, tub], [/\bBED\b/, bed], [/DRESSER|CHEST|CONSOLE/, dresser], [/^TV\b/, tv],
+    [/^BENCH$/, bench], [/^SINK\b/, sink],
+  ];
+  // one mesh per material per fixture (a range is ~40 parts): keeps the headset's draw calls down
+  function merge(g) {
+    const by = new Map();
+    for (const o of [...g.children]) { if (!o.isMesh || o.children.length) continue;
+      o.updateMatrix(); const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); geo.applyMatrix4(o.matrix);
+      for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(k)) geo.deleteAttribute(k);
+      if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+      geo.morphAttributes = {}; if (!by.has(o.material)) by.set(o.material, []); by.get(o.material).push(geo); g.remove(o); o.geometry.dispose(); }
+    for (const [m, list] of by) { const mg = BGU.mergeGeometries(list); list.forEach(x => x.dispose()); if (!mg) continue;
+      const mesh = new THREE.Mesh(mg, m); mesh.castShadow = mesh.receiveShadow = true; g.add(mesh); }
+  }
+  // → true when a real build (or a fitted photo-scan) went into the group
+  function build(name, g, w, d, h) {
+    if (/STOOL/.test(name)) { loadUniform(g, './assets/stool.glb', w, d, 31); return true; }
+    const b = BUILDERS.find(([re]) => re.test(name)); if (!b) return false;
+    grp = g; W = w; D = d; b[1](h, name); grp = null; merge(g); return true;
+  }
+  return { build, shelves, sinkHoles, merge, M };
 })();
 // source-colour debug view: every 3D part tinted by the DXF layer that produced it (the
 // layer panel's swatch colours); magenta = a wall guessed from a single line
@@ -1117,6 +1389,13 @@ function srcMat(layer, normal, colorOverride) {
 function tagSrc(m, layer, what) { m.userData.src = { layer, what }; return m; }
 // labelled objects (1.xOBJNAMES: a closed footprint + a name) → what to build
 const OBJ_RULES = [                                   // [name test, how, base", top" (model: height"), source-layer suffix]
+  [n => /^SINK\b/.test(n),                          'model', 0, 36, 'FIXTURES'],    // a basin in the counter's cut-out
+  [n => /\bBED\b/.test(n),                         'model', 0, 26, 'FURN'],
+  [n => /NIGHTSTAND|BEDSIDE/.test(n),                'model', 0, 24, 'FURN'],
+  [n => /DRESSER|CHEST|CONSOLE/.test(n),             'model', 0, 34, 'FURN'],
+  [n => /^TV\b/.test(n),                            'model', 0, 60, 'FURN'],
+  [n => /^BENCH$/.test(n),                           'model', 0, 18, 'FURN'],
+  [n => /SHELVING|CLOSET ROD/.test(n),               'shelves', 0, 84, 'CASEWORK'],
   [n => /LOW WALL|HALF WALL|PONY WALL/.test(n),       'halfwall', 0, 42, 'CASEWORK'],   // 42in above the higher floor beside it
   [n => /UPPER CAB/.test(n),                          'box', 54, 84, 'CASEWORK-UPPER'],
   [n => /TALL CAB|BROOM CAB/.test(n),                 'box', 0, 84, 'CASEWORK'],
@@ -1592,12 +1871,14 @@ function buildRaw() {
         fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
       continue;
     }
+    if (how === 'shelves') { REALM.shelves(o.pts, lv, o.name, root, srcLayer); continue; }
     if (how === 'box' || how === 'counter') {             // extrude the footprint (handles L-shaped runs)
       const shape = new THREE.Shape(o.pts.map(p => new THREE.Vector2(p[0] * IN2M, p[1] * IN2M)));
+      if (how === 'counter') REALM.sinkHoles(shape, o, objs);
       const body = (how === 'counter' ? 34.5 : y1) - y0;
       const mk = (h, mat) => { const g = new THREE.ExtrudeGeometry(shape, { depth: h * IN2M, bevelEnabled: false });
         const m = new THREE.Mesh(g, mat); m.rotation.x = -Math.PI / 2; m.castShadow = m.receiveShadow = true; return m; };
-      const m = mk(body, srcMat(srcLayer, cabMat)); m.position.y = (lv + y0) * IN2M; root.add(tagSrc(m, srcLayer, o.name.toLowerCase()));
+      const m = mk(body, srcMat(srcLayer, REAL.cabFor(body, how === 'counter' ? 'base' : y0 > 30 ? 'upper' : 'tall'))); m.position.y = (lv + y0) * IN2M; root.add(tagSrc(m, srcLayer, o.name.toLowerCase()));
       if (how === 'counter') { const t = mk(1.5, srcMat(srcLayer, topMat)); t.position.y = (lv + 34.5) * IN2M; root.add(tagSrc(t, srcLayer, o.name.toLowerCase() + ' (countertop)')); }
       if (y0 < 30) for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length];
         fixtureColliders.push({ ax: wx(a[0]), az: wz(a[1]), bx: wx(b[0]), bz: wz(b[1]), hw: 0.03 }); }
@@ -1625,7 +1906,8 @@ function buildRaw() {
     const ov = perFixtureAssets[key], id = ov === '__none__' ? null : ov ? ov : asset ? asset.id : null;
     if (srcColors) { const bx = new THREE.Mesh(new THREE.BoxGeometry(mw * IN2M, y1 * IN2M, md * IN2M), srcMat(srcLayer, cabMat));
       bx.position.y = y1 * IN2M / 2; grp.add(bx); }
-    else if (how === 'model' && /TOILET/.test(o.name) && !ov) buildToilet(grp, mw, md);   // built at real size, not a stretched mesh
+    else if (how === 'model' && !ov && REALM.build(o.name, grp, mw, md, y1)) { /* built as the real thing */ }
+    else if (how === 'model' && /TOILET/.test(o.name) && !ov) REALM.merge(buildToilet(grp, mw, md));   // built at real size, not a stretched mesh
     else loadModelFit(grp, id, mw * IN2M, md * IN2M, y1 * IN2M);
     const hx = R.len / 2, hz = R.dep / 2, cor = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([u, v]) =>
       [wx(R.cx + R.ux * u - R.uy * v), wz(R.cy + R.uy * u + R.ux * v)]);

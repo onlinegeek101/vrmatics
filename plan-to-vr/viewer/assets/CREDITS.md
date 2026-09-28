@@ -17,6 +17,9 @@ updating its row — the catalog entry (`assets.json`) doesn't change.
 
 | File / URL | What | Source | License | Tris | Size |
 |------------|------|--------|---------|------|------|
+| `stool.glb`      | Bar stool (kitchen island stools) | [Poly Haven — bar_chair_round_01](https://polyhaven.com/a/bar_chair_round_01), decimated 14.4k→2.6k tris, 512px WebP textures (`gltf-transform`) | CC0-1.0 | 2,586 | 164 KB |
+| `nightstand.glb` | Bedside table | [Poly Haven — side_table_01](https://polyhaven.com/a/side_table_01), 512px WebP textures | CC0-1.0 | 2,756 | 136 KB |
+| `table-wood.glb` | Wooden table (coffee bar) | [Poly Haven — painted_wooden_table](https://polyhaven.com/a/painted_wooden_table), 512px WebP textures | CC0-1.0 | 600 | 61 KB |
 | `sofa.glb`       | Leather sectional (seating) | Authored in-repo (`trimesh`) | CC0-1.0 | 192 | 5.3 KB |
 | `bed.glb`        | Bed (frame + headboard)     | Authored in-repo (`trimesh`) | CC0-1.0 | 108 | 3.4 KB |
 | `table.glb`      | Dining table                | Authored in-repo (`trimesh`) | CC0-1.0 |  72 | 2.6 KB |
@@ -30,6 +33,13 @@ updating its row — the catalog entry (`assets.json`) doesn't change.
 | `vanity.glb`     | Vanity / sink               | Authored in-repo (`trimesh`) | CC0-1.0 |  84 | 2.9 KB |
 | `shower.glb`     | Shower stall                | Authored in-repo (`trimesh`) | CC0-1.0 |  60 | 2.3 KB |
 | `tub.glb`        | Bathtub                     | Authored in-repo (`trimesh`) | CC0-1.0 |  36 | 1.8 KB |
+
+The v2 viewer builds most fixtures procedurally at their drawn size (code in
+`v2.html`, no asset): stainless French-door fridge, 36in gas range, dishwasher,
+ice machine, front-load washer/dryer, vanities with undermount basins,
+kitchen/laundry sinks cut into the counters, tubs, made beds, dressers,
+closet shelving, TV, bench — and uses the Poly Haven scans above for the bar
+stools, bedside tables and the coffee-bar table.
 
 ## Surface textures (`tex/`) — v2 viewer
 
