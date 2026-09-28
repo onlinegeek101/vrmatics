@@ -80,6 +80,8 @@ import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
 const IN2M = 0.0254;
 const WALL_TH = 5, WALL_H = 108, HEAD = 84, SILL = 30, CEIL = 108, COUNTER_SILL = 42;   // owner: 9 ft ceilings   // inches
@@ -1926,7 +1928,7 @@ function buildRaw() {
     const [, how, y0, y1, suffix] = rule, srcLayer = o.prefix + suffix, L = rawLayers.find(x => x.name === srcLayer);
     if (L && !L.on) continue;
     const R = orientedRect(o.pts), lv = levelAt(R.cx, R.cy);
-    rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep, ux: R.ux, uy: R.uy, key: `obj:${Math.round(R.cx)},${Math.round(R.cy)}` });
+    rawObjs.push({ name: o.name, how, layer: srcLayer, cx: R.cx, cy: R.cy, len: R.len, dep: R.dep, ux: R.ux, uy: R.uy, key: `obj:${Math.round(R.cx)},${Math.round(R.cy)}`, pts: o.pts, lv, y0, y1 });
     if (how === 'shower' || (/SHOWER/.test(o.name) && /TUB/.test(o.name))) {
       // glass on every footprint side that isn't against a wall; the head on the shortest walled side
       const pts = o.pts, n = pts.length, ccx = pts.reduce((a, p) => a + p[0], 0) / n, ccy = pts.reduce((a, p) => a + p[1], 0) / n;
@@ -3336,7 +3338,7 @@ const _head = new THREE.Vector3(), _fwd = new THREE.Vector3(), _side = new THREE
 function vrTick(dt) {
   const session = renderer.xr.getSession(); if (!session) return;
   if (window.__arStart && window.__arStart.pending) arPlaceStart();
-  roomPinTick();
+  roomPinTick(); fadeTick();
   if (window.__scaleCalibPending && xrs.kind === 'ar' && !(window.__arStart && window.__arStart.pending)) { window.__scaleCalibPending = false; scaleCalibEnter(); }
   if (vrMenu.planSwitch && window.__V2_READY) {        // switched plans from the menu: same spot, this plan's floor
     camera.getWorldPosition(_head);
@@ -3349,6 +3351,7 @@ function vrTick(dt) {
     const ax = gp.axes;
     const sx = ax.length >= 4 ? ax[2] : ax[0], sy = ax.length >= 4 ? ax[3] : ax[1];
     const ctrl = src.handedness === 'left' ? ctrlL : ctrlR;
+    contactTick(src, gp, ctrl, dt);                  // buzz on touching a virtual wall / counter
     if (src.handedness === 'right' && !scal.on) handleCalib(gp, ctrl);   // right B: room calibration
     if (src.handedness === 'left') {                   // left Y: show / hide every control (the 1:1 lock is in the menu)
       const yNow = !!(gp.buttons[5] && gp.buttons[5].pressed);
@@ -3460,7 +3463,7 @@ function xrButtons() {
 function setSeeThrough(on) { window.__arMode = !!on; arGhost(!!on); }
 async function xrStart(kind) {                         // 'vr' | 'ar' — needs a user gesture (a click, or the trigger in the headset)
   try {
-    const s = await navigator.xr.requestSession(kind === 'ar' ? 'immersive-ar' : 'immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'anchors'] });
+    const s = await navigator.xr.requestSession(kind === 'ar' ? 'immersive-ar' : 'immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'anchors', 'hand-tracking'] });
     xrs.session = s; xrs.kind = kind; xrs.retryAR = null; setSeeThrough(kind === 'ar');
     s.addEventListener('end', () => {
       if (xrs.session !== s) return;
@@ -3475,7 +3478,7 @@ async function xrStart(kind) {                         // 'vr' | 'ar' — needs 
   }
 }
 function xrToSeeThrough(on) {                          // from the headset menu
-  if (xrs.kind === 'ar') { setSeeThrough(on); vrToast(on ? 'see-through: your real room, the house drawn over it' : 'full VR: the whole house · the menu switches back'); return; }
+  if (xrs.kind === 'ar') { seeFade(!on); vrToast(on ? 'fading to see-through: your real room, the house drawn over it' : 'fading to full VR — the house replaces your room where it stands · the menu switches back'); return; }
   if (!on || !xrs.session) return;
   camera.getWorldPosition(_head);
   const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion())); f.y = 0;
@@ -3690,7 +3693,7 @@ function helpLines() {
     locked ? (ar ? ['left stick', 'slide the house onto the real walls'] : ['left stick', 'off while locked 1:1 (you walk for real)'])
            : ['left stick', 'walk · left grip: faster'],
     locked ? (ar ? ['right stick ← →', 'turn the house'] : ['right stick ← →', 'off while locked 1:1']) : ['right stick ← →', 'snap turn'],
-    ['left X', 'wall push / pull editor'], ['left Y', 'hide this']];
+    ['left X', 'wall push / pull editor'], ['touch', 'the controller buzzes when it meets a virtual wall, counter or cabinet'], ['left Y', 'hide this']];
 }
 function helpRefresh() {
   const mode = help.on ? (scal.on ? 'cal' : 'main') + (window.__arMode ? 'A' : 'V') + (calib.locked ? 'L' : '') : '';
@@ -3761,6 +3764,75 @@ function roomPinCreate(s, f, ref, why) {
     if (old && old.uuid && old.uuid !== uuid && typeof s.deletePersistentAnchor === 'function') s.deletePersistentAnchor(old.uuid).catch(() => {});
     vrToast('📌 pinned to your room — next time the house goes straight back here, whichever way you face');
   }).catch(e => { if (why !== 'auto') vrToast('couldn’t pin to the room: ' + ((e && e.message) || e)); });
+}
+// ---- honest size cues (no rescaling): what research finds helps people judge VR distances correctly
+// without distorting the model — your own hands/controllers drawn at true size (a self-avatar), touch
+// feedback when a hand meets a virtual surface, and entering VR through a replica of the real room
+// (see-through, then a slow fade to the full house).
+// 1. controllers + tracked hands, true size (models from the WebXR input-profiles set)
+const presence = { grips: [], hands: [], contact: {}, fade: null };
+{
+  const cmf = new XRControllerModelFactory(), hmf = new XRHandModelFactory();
+  for (let i = 0; i < 2; i++) {
+    const grip = renderer.xr.getControllerGrip(i); grip.add(cmf.createControllerModel(grip)); dolly.add(grip); presence.grips.push(grip);
+    const hand = renderer.xr.getHand(i); hand.add(hmf.createHandModel(hand, 'mesh')); dolly.add(hand); presence.hands.push(hand);
+  }
+}
+// 2. touch: the controller buzzes as it meets a wall, counter, cabinet or appliance (a firm tap on
+//    contact, a faint buzz while it's inside) — the same calibration your hand gets from real walls
+const _ct = new THREE.Vector3();
+function segDist(px, pz, c) {
+  const dx = c.bx - c.ax, dz = c.bz - c.az, L2 = dx * dx + dz * dz || 1e-9;
+  const t = Math.max(0, Math.min(1, ((px - c.ax) * dx + (pz - c.az) * dz) / L2));
+  return Math.hypot(px - (c.ax + dx * t), pz - (c.az + dz * t)) - c.hw;
+}
+function surfaceDist(p) {                              // metres from p to the nearest virtual surface (< 0: inside)
+  let d = Infinity; const ceil = (REAL && REAL.U && REAL.U.uTop ? REAL.U.uTop.value : 108) * IN2M;
+  if (p.y < ceil) for (const c of colliders) d = Math.min(d, segDist(p.x, p.z, c));
+  for (const c of fixtureColliders) d = Math.min(d, segDist(p.x, p.z, c));
+  if (rawMode) {
+    const X = p.x / IN2M, Y = -p.z / IN2M;
+    for (const o of rawObjs) {
+      if (!o.pts || !/counter|box|model|halfwall/.test(o.how)) continue;
+      const y0 = (o.lv + o.y0) * IN2M, y1 = (o.lv + (o.how === 'counter' ? 36 : o.y1)) * IN2M;
+      if (p.y < y0 - 0.02 || p.y > y1 + 0.02 || !pointIn(o.pts, X, Y)) continue;
+      d = Math.min(d, p.y > y1 ? p.y - y1 : p.y < y0 ? y0 - p.y : -Math.min(0.01, p.y - y0, y1 - p.y));   // over the top / under it / inside
+    }
+  }
+  return d;
+}
+function buzz(gp, v, ms) {
+  try {
+    const h = gp.hapticActuators && gp.hapticActuators[0];
+    if (h && h.pulse) h.pulse(v, ms);
+    else if (gp.vibrationActuator && gp.vibrationActuator.playEffect) gp.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: v, weakMagnitude: v });
+  } catch (e) {}
+}
+function contactTick(src, gp, ctrl, dt) {
+  const k = src.handedness || 'none', st = presence.contact[k] || (presence.contact[k] = { inside: false, t: 0 });
+  ctrl.getWorldPosition(_ct);
+  const d = surfaceDist(_ct);
+  if (d <= 0.004) {
+    if (!st.inside) { buzz(gp, 0.75, 35); st.inside = true; st.t = 0; }
+    else if ((st.t += dt) > 0.12) { buzz(gp, 0.18, 18); st.t = 0; }
+  } else if (d > 0.02) st.inside = false;
+}
+// 3. see-through ↔ full VR as a slow dissolve (the real room fades out as the house fades in)
+function ghostLevel(t) {                               // 0 = see-through ghost, 1 = opaque house
+  renderer.setClearAlpha(t);
+  for (const [m, [, op, dw]] of arSaved) { const g = Math.min(op, 0.38); m.opacity = g + (op - g) * t; m.depthWrite = t > 0.9 ? dw : false; }
+}
+function seeFade(toVR) {
+  if (!toVR && !window.__arMode) setSeeThrough(true);  // back to see-through: start opaque, fade the house out
+  renderer.setClearColor(0xc9dcea);
+  presence.fade = { toVR, t0: performance.now(), dur: 3500 };
+  ghostLevel(toVR ? 0 : 1);
+}
+function fadeTick() {
+  const f = presence.fade; if (!f) return;
+  const k = Math.min(1, (performance.now() - f.t0) / f.dur), e = k * k * (3 - 2 * k);
+  if (k >= 1) { presence.fade = null; if (f.toVR) setSeeThrough(false); else ghostLevel(0); return; }
+  ghostLevel(f.toVR ? e : 1 - e);
 }
 const vrMenu = { open: false, group: null, cards: [], items: [], sel: -1, stickSel: false, aPrev: false, planSwitch: null };
 function vrMenuItems() {
@@ -4022,7 +4094,7 @@ window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
   srcLayerCounts: () => srcLayerCounts, STAGE_LAYERS, subOn, SUBCATS,
   rawMode: () => rawMode, layerCat: () => layerCat, buildRaw, rawLayers: () => rawLayers,
   rawBuild: () => ({ walls: mergedWalls, openings: rawOps, objects: rawObjs }), setSrcColors: v => { srcColors = !!v; if (rawMode && !view2D) buildRaw(); }, root3: () => root, THREE, arPick, arPlaceStart, dolly3: () => dolly, REAL, renderer, scene,
-  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, scaleCalibEnter, scaleCalibExit, scal, CAL_ITEMS, calTexture, calFrame, setWorldScale,
+  vrMenuOpen, vrMenuHover, vrMenuSelect, vrMenu, xrs, presence, surfaceDist, seeFade, fadeTick, scaleCalibEnter, scaleCalibExit, scal, CAL_ITEMS, calTexture, calFrame, setWorldScale,
   worldScale: () => worldScale, help, helpRefresh, roomPin, solveAlignment, floorPlan: () => floorPlanGroup, setSeeThrough, measureRay, measures: () => measureGroup,
   edits: () => edits, mergedWalls: () => mergedWalls, buildExportText, pickWall, snapFace, pickWallRay, beginWallDragRay, updateWallDragRay, endWallDrag,
   setEdit: v => { editMode = v; wallDrag = null; hoverWall = null;
