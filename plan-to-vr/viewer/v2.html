@@ -84,7 +84,7 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
 const IN2M = 0.0254;
-const WALL_TH = 5, WALL_H = 108, HEAD = 84, SILL = 30, CEIL = 108, COUNTER_SILL = 42;   // owner: 9 ft ceilings   // inches
+const WALL_TH = 5, WALL_H = 108, HEAD = 84, SILL = 30, CEIL = 108, COUNTER_SILL = 42, TRANSOM_SILL = 60;   // owner: 9 ft ceilings   // inches
 let DXF = './sample-house.dxf';   // active plan (swapped by the layout picker)
 let view2D = false, oCam = null, flatRoot = null;   // flat blueprint mode (referenced by resize())
 
@@ -1828,7 +1828,10 @@ function buildRaw() {
     return Math.hypot(p[0] - q[0], p[1] - q[1]) <= w.thick / 2 + 3; });
   // a window with a counter run under it (kitchen sink window) sits above the counter + backsplash
   const counterFps = objs.filter(x => /COUNTER|ISLAND/.test(x.name) && !/UPPER/.test(x.name)).map(x => x.pts);
+  // a window the sheet calls a transom ("New transom windows") sits high: head at door height, 2ft of glass
+  const transomAt = ENTS.filter(e => e.type === 'TEXT' && /TRANSOM/i.test(e.text || '') && e.pts && e.pts.length).map(e => e.pts[e.pts.length > 1 ? 1 : 0]);
   const sillFor = o => { const nx = -o.uy, ny = o.ux;
+    if (transomAt.some(p => Math.hypot(p[0] - o.mid[0], p[1] - o.mid[1]) < 36)) return TRANSOM_SILL;
     for (const sd of [1, -1]) for (const f of [0.2, 0.5, 0.8]) { const px = o.a[0] + o.ux * o.width * f + nx * sd * (o.thick / 2 + 4), py = o.a[1] + o.uy * o.width * f + ny * sd * (o.thick / 2 + 4);
       if (counterFps.some(p => pointIn(p, px, py))) return COUNTER_SILL; }
     return SILL; };
