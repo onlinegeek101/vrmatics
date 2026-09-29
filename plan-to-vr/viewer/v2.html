@@ -1878,7 +1878,16 @@ function buildRaw() {
     } else if (c.kind === 'door') {
       const P = t => [o.a[0] + o.ux * t, o.a[1] + o.uy * t];
       let covered = 0;
-      c.leaves.forEach((lf, li) => {
+      // the sheet draws the leaf (32") in its rough opening (34"): stretch the leaves to fill the opening,
+      // 1/8" clear at each jamb and between a pair, so a closed door leaves no gap (not where sidelights fill it)
+      let leaves = c.leaves;
+      const R = leaves.reduce((t, l) => t + l.r, 0), spare = o.width - R;
+      if (!(c.sidelights && c.sidelights.length) && leaves.length && spare > 0.1 && spare <= 6) {
+        const k = (o.width - 0.125 * (leaves.length + 1)) / R, start = l => Math.min(l.t, l.t + l.dir * l.r);
+        let at = 0.125;                                   // lay the leaves end to end, in order, hinges where drawn
+        leaves = leaves.slice().sort((p, q) => start(p) - start(q)).map(l => { const r = l.r * k, t = l.dir > 0 ? at : at + r; at += r + 0.125; return { ...l, t, r }; });
+      }
+      leaves.forEach((lf, li) => {
         const h = P(lf.t), tip = P(lf.t + lf.dir * lf.r);        // hinge at the jamb, leaf = arc radius
         covered += lf.r;
         const hx = wx(h[0]), hz = wz(h[1]), tx = wx(tip[0]), tz = wz(tip[1]);
@@ -1887,7 +1896,7 @@ function buildRaw() {
         const dxp = lf.dir * o.ux, dyp = lf.dir * o.uy, right = [dyp, -dxp];
         const swingN = [-o.uy * lf.swingSide, o.ux * lf.swingSide];
         const openAngle = (right[0] * swingN[0] + right[1] * swingN[1]) > 0 ? DOOR_OPEN : -DOOR_OPEN;
-        const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}${c.leaves.length > 1 ? ':' + li : ''}`, isOpen = !!doorState[key];
+        const key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}${leaves.length > 1 ? ':' + li : ''}`, isOpen = !!doorState[key];
         const pivot = new THREE.Group(); pivot.position.set(hx, B, hz);
         pivot.rotation.y = closedRot + (isOpen ? openAngle : 0); pivot.userData.doorKey = key;
         const leaf = new THREE.Mesh(new THREE.BoxGeometry(dl, HEAD * IN2M, 1.75 * IN2M), srcMat(lf.layer, leafMat));
@@ -4470,7 +4479,7 @@ renderer.setAnimationLoop((t) => {
   renderer.render(scene, renderer.xr.isPresenting ? camera : (view2D ? oCam : camera));
 });
 window.__V2 = { rebuild: build, on, walker, LINK, applyLink, linkFor, findRoom, planSlug, roomSpot, roomAt, openDoorNow, linkRooms, openShare, groundAt, colliders, dolly,
-  doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
+  doors: () => doors.map(d => ({ key: d.key, open: d.open, len: d.seg ? Math.hypot(d.seg.bx - d.seg.ax, d.seg.bz - d.seg.az) / IN2M : null })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
   fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
   planOpenings: () => planOpenings, solveAlignment, feedbackCfg,
