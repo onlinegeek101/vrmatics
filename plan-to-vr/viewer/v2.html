@@ -2755,7 +2755,7 @@ function clearance(x, z) {                              // metres to the nearest
   }
   return d;
 }
-function blocksView(x, z) {                             // eye-height sightline stops at walls, doorways, windows, tall furniture
+function blocksView(x, z) {                             // a room's outline: walls, doorways, windows
   for (const c of colliders) {
     const dx = c.bx - c.ax, dz = c.bz - c.az, L2 = dx * dx + dz * dz || 1e-9, t = Math.max(0, Math.min(1, ((x - c.ax) * dx + (z - c.az) * dz) / L2));
     if (Math.hypot(x - (c.ax + dx * t), z - (c.az + dz * t)) < c.hw + 0.03) return true;
@@ -2765,13 +2765,26 @@ function blocksView(x, z) {                             // eye-height sightline 
     const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L2 = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((X - o.a[0]) * dx + (Y - o.a[1]) * dy) / L2));
     if (Math.hypot(X - (o.a[0] + dx * t), Y - (o.a[1] + dy * t)) < (o.thick || 5) / 2 + 1) return true;
   }
-  for (const o of rawObjs) if (o.pts && (o.y1 > 66 || o.how === 'shower') && pointIn(o.pts, X, Y)) return true;
+  return false;
+}
+function blocksEye(x, z) {                              // what really stops your eye at 5'4": walls, closed doors, glass, tall things
+  for (const c of colliders) {
+    const dx = c.bx - c.ax, dz = c.bz - c.az, L2 = dx * dx + dz * dz || 1e-9, t = Math.max(0, Math.min(1, ((x - c.ax) * dx + (z - c.az) * dz) / L2));
+    if (Math.hypot(x - (c.ax + dx * t), z - (c.az + dz * t)) < c.hw + 0.03) return true;
+  }
+  const X = x / IN2M, Y = -z / IN2M;
+  for (const o of rawOps) { if (o.kind === 'opening') continue;                  // doors (closed), windows
+    const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L2 = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((X - o.a[0]) * dx + (Y - o.a[1]) * dy) / L2));
+    if (Math.hypot(X - (o.a[0] + dx * t), Y - (o.a[1] + dy * t)) < (o.thick || 5) / 2 + 1) return true;
+  }
+  for (const o of rawObjs) if (o.pts && ((o.y0 < 66 && o.y1 > 58) || o.how === 'shower') && pointIn(o.pts, X, Y)) return true;   // uppers, shelving, fridge
   return false;
 }
 function sight(x, z, fx, fz) { let s = 0; while (s < 15 && !blocksView(x + fx * (s + 0.08), z + fz * (s + 0.08))) s += 0.08; return s; }
 function floorGrid(x0, z0) {                            // 14 m of 10 cm cells around a point: what blocks the view, + flood fill
-  const C = 0.1, R = 70, N = 2 * R + 1, blk = new Uint8Array(N * N);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) blk[j * N + i] = blocksView(x0 + (i - R) * C, z0 + (j - R) * C) ? 1 : 0;
+  const C = 0.1, R = 70, N = 2 * R + 1, blk = new Uint8Array(N * N), eye = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x = x0 + (i - R) * C, z = z0 + (j - R) * C;
+    blk[j * N + i] = blocksView(x, z) ? 1 : 0; eye[j * N + i] = blocksEye(x, z) ? 1 : 0; }
   let s0 = R * N + R;                                   // start at the point (or the nearest open cell)
   if (blk[s0]) { let bd = 1e9; for (let k = 0; k < N * N; k++) if (!blk[k]) { const d = Math.hypot(k % N - R, Math.floor(k / N) - R); if (d < bd) { bd = d; s0 = k; } } }
   const flood = mine => { const m = new Uint8Array(N * N), q = [s0]; m[s0] = 1;
@@ -2781,20 +2794,20 @@ function floorGrid(x0, z0) {                            // 14 m of 10 cm cells a
     return m; };
   const near = (m, i, j) => { for (let dj = -6; dj <= 6; dj++) for (let di = -6; di <= 6; di++) { const a = i + di, b = j + dj;   // on this floor (labels can sit on shelving)
     if (a >= 0 && b >= 0 && a < N && b < N && m[b * N + a]) return true; } return false; };
-  return { C, R, N, blk, flood, near };
+  return { C, R, N, blk, eye, flood, near };
 }
-function roomAt(x, z) {                                 // the room you're standing in: the nearest name on your stretch of floor
+function roomAt(x, z, not) {                                 // the room you're standing in: the nearest name on your stretch of floor
   const { C, R, N, flood, near } = floorGrid(x, z), open = flood(() => true);
   let best = null, bd = 1e9;
-  for (const r of linkRooms()) { const i = Math.round((wx(r.at[0]) - x) / C + R), j = Math.round((wz(r.at[1]) - z) / C + R);
+  for (const r of linkRooms()) { if (r === not) continue; const i = Math.round((wx(r.at[0]) - x) / C + R), j = Math.round((wz(r.at[1]) - z) / C + R);
     if (!near(open, i, j)) continue;
     const d = Math.hypot(i - R, j - R); if (d < bd) { bd = d; best = r; } }
   if (best) return best;
-  for (const r of linkRooms()) { const d = Math.hypot(wx(r.at[0]) - x, wz(r.at[1]) - z); if (d < bd) { bd = d; best = r; } }
+  for (const r of linkRooms()) { if (r === not) continue; const d = Math.hypot(wx(r.at[0]) - x, wz(r.at[1]) - z); if (d < bd) { bd = d; best = r; } }
   return best;
 }
 function roomSpot(r) {        // fixed spot + heading: of the room's clear floor, where you see the most of it (deterministic)
-  const x0 = wx(r.at[0]), z0 = wz(r.at[1]), { C, R, N, flood, near } = floorGrid(x0, z0);
+  const x0 = wx(r.at[0]), z0 = wz(r.at[1]), { C, R, N, blk, eye, flood, near } = floorGrid(x0, z0);
   // the room: open floor reachable without passing an opening, and nearer this room's name than any other's (open plans)
   const open = flood(() => true);
   const others = linkRooms().filter(o => o !== r).map(o => [Math.round((wx(o.at[0]) - x0) / C + R), Math.round((wz(o.at[1]) - z0) / C + R)])
@@ -2814,23 +2827,130 @@ function roomSpot(r) {        // fixed spot + heading: of the room's clear floor
       if (c[0] >= 0 && c[1] >= 0 && c[0] < N && c[1] < N && inRoom[c[1] * N + c[0]]) cands.push(c); } }
   const see = (i, j, fx, fz) => { let s = 0; for (; s < 80; s++) { const a = Math.round(i + fx * s), b = Math.round(j + fz * s);
     if (a < 0 || b < 0 || a >= N || b >= N || !inRoom[b * N + a]) break; } return s * C; };   // seeing this room, not the next
-  let best = null;
+  const clearTo = (i, j, yaw, skip, leaves) => { const fx = Math.sin(yaw), fz = Math.cos(yaw); let s = 1;   // metres until something stops the eye
+    for (; s < 150; s++) { const a = Math.round(i + fx * s), b = Math.round(j + fz * s);
+      if (a < 0 || b < 0 || a >= N || b >= N) return 15;
+      if (eye[b * N + a] && !(skip && skip(a, b))) break;
+      if (leaves) { const x = x0 + (i + fx * s - R) * C, z = z0 + (j + fz * s - R) * C;   // the door you opened, swung out
+        if (leaves.some(([ax, az, bx, bz]) => { const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-9, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+          return Math.hypot(x - (ax + dx * t), z - (az + dz * t)) < 0.06; })) break; } }
+    return s * C; };
+  const AHEAD = 2.0, SIDE = 1.2;                        // never spawn facing a wall: 2 m clear ahead, 1.2 m either side of centre
+  const openView = (i, j, yaw, skip) => { const c = clearTo(i, j, yaw, skip), l = clearTo(i, j, yaw - 0.22, skip), r2 = clearTo(i, j, yaw + 0.22, skip);
+    const wide = Math.min(clearTo(i, j, yaw - 0.45, skip), clearTo(i, j, yaw + 0.45, skip));   // nothing looming at the edges either
+    return { c, ok: c >= AHEAD && Math.min(l, r2) >= SIDE && wide >= 0.6, reach: Math.min(c, 4) + 0.5 * Math.min(l, r2, 3) }; };
+  // 1. the floor-plan model proposes spots (fast); 2. rays through the real 3D scene pick one (true to what you'll see)
+  const top = (list, n, key) => list.sort((p, q) => q[key] - p[key]).slice(0, n);
+  let inC = [], fbC = [];
   for (const need of [0.5, 0.35, 0.2]) {
     for (const [i, j] of cands) {
       const x = x0 + (i - R) * C, z = z0 + (j - R) * C, cl = clearance(x, z); if (!(cl > need)) continue;
       for (let k = 0; k < 16; k++) { const yaw = k / 16 * Math.PI * 2, fx = Math.sin(yaw), fz = Math.cos(yaw);
+        const ov = openView(i, j, yaw);
+        if (!ov.ok) { fbC.push({ x, z, yaw, reach: ov.reach }); continue; }
         let v = 0; for (const [da, w] of [[0, 2], [-0.4, 1.5], [0.4, 1.5], [-0.8, 1], [0.8, 1]]) v += w * Math.min(8, see(i, j, Math.sin(yaw + da), Math.cos(yaw + da)));
         v += 2 * Math.min(0.8, cl - 0.35);              // elbow room
         const mx = cx - i, mz = cz - j, md = Math.hypot(mx, mz);
         if (md > 3) v += 3 * (fx * mx + fz * mz) / md;  // facing into the room
         for (const [a, b] of things) { const dx = a - i, dz = b - j, dd = Math.hypot(dx, dz);   // the room's things in view
           if (dd > 6 && (fx * dx + fz * dz) / dd > 0.82) v += small ? 4 : 1; }
-        if (!best || v > best.v + 0.01) best = { x, z, yaw, v }; }
+        inC.push({ x, z, yaw, v }); }
     }
-    if (best) break;
+    if (inC.length) break;
   }
-  return best ? [best.x, best.z, best.yaw, small ? -0.3 : 0] : [x0, z0];   // small rooms: tilted down, fixtures sit low
+  inC = top(inC, 14, 'v'); fbC = top(fbC, 6, 'reach');
+  // too tight to stand in and see anything (closet, pantry, linen): stand outside its door, door open, looking in
+  let outC = [], near2C = [], host = null;              // host: the room this closet opens into
+  const lab = r.at;
+  const byNear = rawOps.filter(o => o.kind !== 'window' && o.kind !== 'overhead' && Math.hypot(o.mid[0] - lab[0], o.mid[1] - lab[1]) <= 160)
+    .sort((a, b) => Math.hypot(a.mid[0] - lab[0], a.mid[1] - lab[1]) - Math.hypot(b.mid[0] - lab[0], b.mid[1] - lab[1]));
+  for (const o of byNear) {                             // its own door first (a closet inside a bathroom looks into the closet)
+    if (outC.some(c => c.sc >= 100)) break;
+    const nx = -o.uy, ny = o.ux, th = (o.thick || 5) / 2;
+    for (const sd of [1, -1]) {
+      const inAt = k => { const [a, b] = cell(wx(o.mid[0] + nx * sd * (th + k)), wz(o.mid[1] + ny * sd * (th + k)));
+        return a >= 0 && b >= 0 && a < N && b < N && inRoom[b * N + a]; };
+      if (!(inAt(8) || inAt(12) || inAt(16))) continue;  // this side of the door is the room (a point just through it)
+      const [oi, oj] = cell(wx(o.mid[0] - nx * sd * (th + 8)), wz(o.mid[1] - ny * sd * (th + 8)));   // the floor just outside the door…
+      if (oi < 0 || oj < 0 || oi >= N || oj >= N || blk[oj * N + oi]) continue;
+      if (!host) host = { x: x0 + (oi - R) * C, z: z0 + (oj - R) * C, key: `${Math.round(o.mid[0])},${Math.round(o.mid[1])}` };
+      const outside = new Uint8Array(N * N), q = [oj * N + oi]; outside[q[0]] = 1;
+      while (q.length) { const k = q.pop(), a0 = k % N, b0 = (k - a0) / N;
+        for (const [da, db] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = a0 + da, b = b0 + db, kk = b * N + a;
+          if (a >= 0 && b >= 0 && a < N && b < N && !outside[kk] && !blk[kk] && Math.hypot(a - oi, b - oj) < 30) { outside[kk] = 1; q.push(kk); } } }
+      const skip = (a, b) => { const X = (x0 + (a - R) * C) / IN2M, Y = -(z0 + (b - R) * C) / IN2M;   // …with the door open
+        const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L2 = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((X - o.a[0]) * dx + (Y - o.a[1]) * dy) / L2));
+        return Math.hypot(X - (o.a[0] + dx * t), Y - (o.a[1] + dy * t)) < th + 2; };
+      const [mi, mj] = cell(wx(o.mid[0]), wz(o.mid[1])), key = `${Math.round(o.mid[0])},${Math.round(o.mid[1])}`;
+      const leaves = doors.filter(d => (d.key === key || d.key.startsWith(key + ':')) && !d.apply && d.seg).map(d => {   // each leaf, open
+        const L = Math.hypot(d.seg.bx - d.seg.ax, d.seg.bz - d.seg.az), a = d.closedRot + (d.openAngle ?? DOOR_OPEN);
+        return [d.seg.ax, d.seg.az, d.seg.ax + L * Math.cos(a), d.seg.az - L * Math.sin(a)]; });
+      const half = Math.max(2, (o.width || 30) / 2 - 3) * IN2M;                    // side rays stay inside the doorway
+      for (let dj = -26; dj <= 26; dj += 2) for (let di = -26; di <= 26; di += 2) {     // anywhere within 2.6 m, head-on or diagonal
+        const i = mi + di, j = mj + dj; if (i < 0 || j < 0 || i >= N || j >= N || !outside[j * N + i]) continue;   // …and standing on it
+        const x = x0 + (i - R) * C, z = z0 + (j - R) * C, X = x / IN2M, Y = -z / IN2M;
+        const along = ((X - o.mid[0]) * nx + (Y - o.mid[1]) * ny) * sd, dDoor = Math.hypot(di, dj) * C;
+        if (along > -(th + 12) || dDoor < 0.6 || dDoor > 2.6 || !(clearance(x, z) > 0.35)) continue;   // outside, a step back at least
+        const yaw = Math.atan2(mi - i, mj - j), sa = Math.min(0.22, Math.atan(half / dDoor)), c = clearTo(i, j, yaw, skip, leaves), l = clearTo(i, j, yaw - sa, skip, leaves), r2 = clearTo(i, j, yaw + sa, skip, leaves);
+        for (let k = 0; k < 16; k++) {                   // last resort for a closet you can't see into: beside it, turned toward it
+          const y2 = k / 16 * Math.PI * 2, ov = openView(i, j, y2, skip);
+          if (ov.ok) near2C.push({ x, z, yaw: y2, sc: 3 * Math.cos(y2 - yaw) - 0.3 * dDoor, key });
+        }
+        const wide = Math.min(clearTo(i, j, yaw - 0.45, skip, leaves), clearTo(i, j, yaw + 0.45, skip, leaves));
+        if (wide < 0.9) continue;                        // no door edge or knob in your face
+        const okFar = c >= AHEAD && Math.min(l, r2) >= SIDE;                           // a real view
+        const okIn = c >= Math.max(1.5, dDoor + 0.3) && Math.min(l, r2) >= Math.min(SIDE, dDoor + 0.05);   // …or through the door, into the closet
+        const headOn = -along * IN2M / dDoor;             // 1 = straight out from the door
+        outC.push({ x, z, yaw, key, sc: (okFar ? 200 : okIn ? 100 : 0) + Math.min(c, 4) - 0.4 * dDoor + 1.5 * headOn + (o.width || 0) / 100 });
+      }
+    }
+  }
+  outC = top(outC, 10, 'sc'); near2C = top(near2C, 6, 'sc');
+  // judge with the real scene: rays across the whole view from eye height; closed doors count as walls
+  const meshes = []; const vis = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  scene.traverse(o => { if (o.isMesh && o.material && !o.material.isShaderMaterial && !(o.material.transparent && o.material.opacity < 0.2) && vis(o)) meshes.push(o); });
+  const ray = new THREE.Raycaster(); ray.far = 8;
+  const _o = new THREE.Vector3(), _d = new THREE.Vector3(), g0 = groundAt(x0, z0);
+  const realView = (c, pitch) => {
+    for (const k of c.keys || []) for (const d of doors) if (d.key === k || d.key.startsWith(k + ':')) openDoorNow(d.key);
+    scene.updateMatrixWorld(true);
+    const g = groundAt(c.x, c.z); _o.set(c.x, g + 1.62, c.z);
+    let n = 0, nearN = 0, sum = 0, centre = 8;
+    for (const dp of [-0.15, 0.1]) for (const dy of [-0.6, -0.3, 0, 0.3, 0.6]) {   // the whole picture, edge to edge
+      const yw = c.yaw + dy, pt = pitch + dp; _d.set(Math.sin(yw) * Math.cos(pt), Math.sin(pt), Math.cos(yw) * Math.cos(pt));
+      ray.set(_o, _d); const h = ray.intersectObjects(meshes, false)[0], dist = h ? h.distance : 8;
+      n++; sum += Math.min(dist, 5); if (dist < 1.0) nearN++;
+    }
+    _d.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)); ray.set(_o, _d); { const h = ray.intersectObjects(meshes, false)[0]; centre = h ? h.distance : 8; }
+    for (const k of c.keys || []) for (const d of doors) if ((d.key === k || d.key.startsWith(k + ':')) && d.open) { toggleDoor(d.key); d.angle = 0; if (d.apply) d.apply(0); else d.pivot.rotation.y = d.closedRot; }
+    const near = nearN / n, level = Math.abs(g - g0) < 0.35 || !!(c.keys && c.keys.length);   // on this room's floor (not partway down a stair)
+    c.why = { centre: +centre.toFixed(2), near: +near.toFixed(2), mean: +(sum / n).toFixed(2), level };
+    const mean = sum / n, pass = level && (c.lookIn ? centre >= 1.5 && mean >= 1.5 && near <= 0.2 : centre >= 2.5 && mean >= 2.2 && near <= 0.15);
+    return { pass, score: sum / n - 4 * near + Math.min(centre, 4) + (level ? 0 : -5) };
+  };
+  const groups = [
+    inC.map(c => ({ ...c, pitch: small ? -0.3 : 0 })),
+    outC.map(c => ({ ...c, pitch: -0.15, keys: [c.key], lookIn: true })),
+    near2C.map(c => ({ ...c, pitch: 0, keys: [c.key] })),
+    fbC.map(c => ({ ...c, pitch: small ? -0.3 : 0 })) ];
+  let bestAny = null, gi = -1;
+  const tag = (sp, c, how) => { sp.why = { how, n: [inC.length, outC.length, near2C.length, fbC.length], ...(c ? c.why : {}) }; return sp; };
+  for (const G of groups) { gi++;
+    let win = null;
+    for (const c of G) { const rv = realView(c, c.pitch); c.rs = rv.score;
+      if (!bestAny || rv.score > bestAny.rs) bestAny = c;
+      if (rv.pass && (!win || rv.score > win.rs)) win = c; }
+    if (win) return remember(r, tag([win.x, win.z, win.yaw, win.pitch, win.keys], win, ['room', 'look-in', 'beside', 'fallback'][gi]));
+    if (G === groups[2] && host && !roomSpot.inner) {  // nowhere to see it from: the room it opens into, its door open
+      const h = roomAt(host.x, host.z, r);
+      if (h && h !== r) { roomSpot.inner = true; try { const sp = roomSpot(h); return remember(r, [sp[0], sp[1], sp[2], sp[3] || 0, [host.key].concat(sp[4] || [])]); } finally { roomSpot.inner = false; } }
+    }
+  }
+  if (bestAny) return remember(r, tag([bestAny.x, bestAny.z, bestAny.yaw, bestAny.pitch, bestAny.keys], bestAny, 'best-fail'));
+  return remember(r, [x0, z0, longestView(x0, z0), 0]);
 }
+const spotOf = new Map();                               // room → its link spot (so 🔗 share names it even from outside a closet)
+function remember(r, sp) { spotOf.delete(r); spotOf.set(r, sp); return sp; }   // latest last: two rooms can share a spot
 function longestView(x, z) {                            // the heading with the longest clear sightline (16 headings)
   let best = -1, bestYaw = 0;
   for (let k = 0; k < 16; k++) { const yaw = k / 16 * Math.PI * 2, v = sight(x, z, Math.sin(yaw), Math.cos(yaw)); if (v > best + 0.05) { best = v; bestYaw = yaw; } }
@@ -2847,6 +2967,11 @@ function setWalk(on) {                                  // like the 🚶 button,
   if (on === (mode === 'walk')) return;
   if (on) { mode = 'walk'; modeBtn.textContent = '🎥 orbit'; modeBtn.style.background = '#5a6474'; walker.y = groundAt(walker.x, walker.z) + 1.62; }
   else { mode = 'orbit'; modeBtn.textContent = '🚶 walk'; modeBtn.style.background = '#2b6cb0'; if (document.exitPointerLock) document.exitPointerLock(); place(); }
+}
+function openDoorNow(key) {                            // open, already swung (no animation to wait for)
+  const d = doors.find(x => x.key === key); if (!d) return;
+  if (!d.open) toggleDoor(key);
+  d.angle = d.target; if (d.apply) d.apply(d.angle); else d.pivot.rotation.y = d.closedRot + d.angle;
 }
 function applyLink() {
   if (linkApplied.done) return; linkApplied.done = true;
@@ -2870,6 +2995,7 @@ function applyLink() {
   if (spot) {
     walker.x = spot[0]; walker.z = spot[1]; walker.y = groundAt(walker.x, walker.z) + 1.62;
     walker.yaw = L.yaw != null && isFinite(+L.yaw) ? planYaw(+L.yaw) : spot[2] != null ? spot[2] : longestView(walker.x, walker.z);
+    if (spot[4]) for (const d of doors) if (spot[4].some(k => d.key === k || d.key.startsWith(k + ':'))) openDoorNow(d.key);   // look into the closet
     walker.pitch = L.pitch != null && isFinite(+L.pitch) ? Math.max(-1.3, Math.min(1.3, +L.pitch * Math.PI / 180)) : spot[3] != null ? spot[3] : 0;
   }
   if (spot && !L.cam) { target.set(spot[0], 1.2, spot[1]); dist = 9; place(); }   // orbit / 2D around the room too
@@ -2897,7 +3023,8 @@ function linkFor(exact) {
     if (exact) { q.set('at', `${Math.round(X)},${Math.round(Y)}`); q.set('yaw', String(Math.round(yawDeg(walker.yaw)))); if (Math.abs(walker.pitch) > 0.05) q.set('pitch', String(Math.round(walker.pitch * 180 / Math.PI))); }
     else {
       const rooms = linkRooms().slice().sort((a, b) => a.at[0] - b.at[0] || b.at[1] - a.at[1]);
-      const best = roomAt(walker.x, walker.z);
+      let best = null; for (const [r, sp] of spotOf) if (Math.hypot(sp[0] - walker.x, sp[1] - walker.z) < 0.3 && linkRooms().includes(r)) best = r;
+      best = best || roomAt(walker.x, walker.z);
       if (best) { const same = rooms.filter(r => r.name === best.name); const nm = best.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
         q.set('room', same.length > 1 ? `${nm}-${same.indexOf(best) + 1}` : nm); }
     }
@@ -4342,7 +4469,7 @@ renderer.setAnimationLoop((t) => {
   doorTick(dt);
   renderer.render(scene, renderer.xr.isPresenting ? camera : (view2D ? oCam : camera));
 });
-window.__V2 = { rebuild: build, on, walker, LINK, applyLink, linkFor, findRoom, planSlug, roomSpot, roomAt, linkRooms, openShare, groundAt, colliders, dolly,
+window.__V2 = { rebuild: build, on, walker, LINK, applyLink, linkFor, findRoom, planSlug, roomSpot, roomAt, openDoorNow, linkRooms, openShare, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
   fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
