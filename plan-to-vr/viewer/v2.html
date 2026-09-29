@@ -1835,7 +1835,17 @@ function buildRaw() {
     for (const sd of [1, -1]) for (const f of [0.2, 0.5, 0.8]) { const px = o.a[0] + o.ux * o.width * f + nx * sd * (o.thick / 2 + 4), py = o.a[1] + o.uy * o.width * f + ny * sd * (o.thick / 2 + 4);
       if (counterFps.some(p => pointIn(p, px, py))) return COUNTER_SILL; }
     return SILL; };
+  // a flush beam (hidden in the ceiling) spans a gap the sheet leaves open to the ceiling: no header, no trim
+  const flushSegs = [];
+  for (const e of ENTS) if (/BEAM/i.test(e.layer) && /FLUSH/i.test(e.layer) && e.pts && e.pts.length > 1)
+    for (let i = 0; i + 1 < e.pts.length; i++) flushSegs.push([e.pts[i], e.pts[i + 1]]);
+  const underFlush = o => flushSegs.some(([p, q]) => {
+    const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy); if (L < 1 || Math.abs((dx * o.uy - dy * o.ux) / L) > 0.1) return false;
+    const off = Math.abs((o.mid[0] - p[0]) * dy - (o.mid[1] - p[1]) * dx) / L; if (off > o.thick / 2 + 4) return false;
+    const t = r => (r[0] - o.a[0]) * o.ux + (r[1] - o.a[1]) * o.uy, s0 = Math.min(t(p), t(q)), s1 = Math.max(t(p), t(q));
+    return Math.min(o.width, s1) - Math.max(0, s0) >= o.width * 0.5; });
   if (openOn) for (const o of detectOpenings(merged)) {
+    if (underFlush(o)) continue;
     const c = classifyOpening(o, ev); if (!c) continue;
     if (c.kind === 'opening' && isCorner(o.a, o) && isCorner(o.b, o)) continue;
     if (c.kind === 'window') o.sill = sillFor(o);
