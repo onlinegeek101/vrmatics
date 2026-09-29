@@ -2677,7 +2677,7 @@ function loadPlan(src) {
       rawLayers = names.map(name => ({ name, on: true, color: RAW_COLORS[name] || RAW_CYCLE[ci++ % RAW_CYCLE.length] }));
       renderLayerPanel(); loadFA();
       if (!scene.getObjectById(editMarkers.id)) scene.add(editMarkers);
-      buildRaw(); apply2DVisibility(); framePlan(null);
+      buildRaw(); apply2DVisibility(); framePlan(null); applyLink();
       if (typeof twoDBtn !== 'undefined') { twoDBtn.style.display = ''; twoDBtn.textContent = '▦ 2D'; twoDBtn.classList.remove('on'); }
       if (typeof srcBtn !== 'undefined') srcBtn.style.display = '';
     } else {
@@ -2688,7 +2688,7 @@ function loadPlan(src) {
       renderLayerPanel();
       loadFA(); build();
       if (view2D) { build2D(); fit2DCam(); apply2DVisibility(); }
-      else { apply2DVisibility(); framePlan(planDef.spawn || null); }
+      else { apply2DVisibility(); framePlan(planDef.spawn || null); applyLink(); }
       if (typeof twoDBtn !== 'undefined') twoDBtn.style.display = '';
       if (typeof srcBtn !== 'undefined') { srcBtn.style.display = 'none'; srcColors = false; }
     }
@@ -2701,7 +2701,215 @@ function loadPlan(src) {
 const pick = document.getElementById('planpick');
 PLANS.forEach((p, i) => { const o = document.createElement('option'); o.value = p.src; o.textContent = p.name; pick.appendChild(o); });
 pick.onchange = () => loadPlan(pick.value);
-loadPlan(PLANS[0].src);
+// ---- links: ?plan=…&room=… opens a plan standing in a room (a fixed, repeatable spot), plus every other
+// setting. Anything left out keeps its normal default. The 🔗 share button writes these links.
+//   plan   f1 | f2 | f2r1 | f2r2 (or the plan list's number, or part of its name)       default f1
+//   room   a room name: kitchen, primary-bedroom, bedroom-2 (the 2nd BEDROOM, west to east)
+//   at     x,y in plan inches (an exact spot; overrides the room's point)
+//   yaw    heading in degrees, 0 = up the plan (north), 90 = east            default: the room's longest view
+//   pitch  look up / down in degrees                                          default 0
+//   view   walk | orbit | 2d                                  default: walk when room/at is given, else orbit
+//   cam    orbit camera: azimuth°,elevation°,distance ft[,x,y plan inches to look at]   default: the room, else the plan
+//   dims 1 · colors 1 (source layer colours) · doors open · hide=LAYER,LAYER (e.g. 1.2FURN, or FURN = every
+//   floor's FURN) · panel 0|1 (layer panel folded / open) · fp 0|1 (floor plan on the floor in the headset)
+const LINK = (() => { const q = new URLSearchParams(location.search), o = {}; for (const [k, v] of q) o[k.toLowerCase()] = v; return o; })();
+const linkApplied = { done: false };
+function planSlug(p) {
+  const m = /home-rev-l(\d)(r\d+)?-raw/.exec(p.src);
+  return m ? 'f' + m[1] + (m[2] || '') : p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+function planFromLink(v) {
+  if (!v) return null;
+  const s = String(v).toLowerCase().trim();
+  let p = PLANS.find(p => planSlug(p) === s);
+  if (!p && /^\d+$/.test(s)) p = PLANS[+s - 1];
+  if (!p) p = PLANS.find(p => p.name.toLowerCase().includes(s.replace(/[-_+]/g, ' ')) || p.src.toLowerCase().includes(s));
+  return p || null;
+}
+function startPlanSrc() { const p = planFromLink(LINK.plan); if (p) { pick.value = p.src; return p.src; } return PLANS[0].src; }
+const normRoom = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+function linkRooms() { return (REAL && REAL.rooms ? REAL.rooms() : []).filter(r => r.name && !/UNNAMED/.test(r.name)); }
+function findRoom(q) {                                  // 'bedroom-2' = the 2nd BEDROOM counted west → east
+  const rooms = linkRooms().slice().sort((a, b) => a.at[0] - b.at[0] || b.at[1] - a.at[1]);
+  const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const pick1 = (key, n, raw) => { const ex = raw != null ? rooms.filter(r => slug(r.name) === slug(raw)) : [];
+    const hits = ex.length ? ex : rooms.filter(r => normRoom(r.name) === key);
+    const any = hits.length ? hits : rooms.filter(r => normRoom(r.name).startsWith(key));
+    const all = any.length ? any : rooms.filter(r => normRoom(r.name).includes(key));
+    return all[Math.max(0, (n || 1) - 1)] || null; };
+  const m = /^(.*?)[-_.:#\s]?(\d+)$/.exec(String(q).trim());
+  return m ? pick1(normRoom(m[1]), +m[2], m[1]) || pick1(normRoom(q), 1, q) : pick1(normRoom(q), 1, q);
+}
+function clearance(x, z) {                              // metres to the nearest wall / fixture (and inside furniture = 0)
+  let d = Infinity;
+  for (const c of colliders.concat(fixtureColliders)) {
+    const dx = c.bx - c.ax, dz = c.bz - c.az, L2 = dx * dx + dz * dz || 1e-9, t = Math.max(0, Math.min(1, ((x - c.ax) * dx + (z - c.az) * dz) / L2));
+    d = Math.min(d, Math.hypot(x - (c.ax + dx * t), z - (c.az + dz * t)) - c.hw);
+  }
+  const X = x / IN2M, Y = -z / IN2M;
+  for (const o of rawObjs) {                            // furniture you'd bump (not rugs): inside = 0, else edge distance
+    if (!o.pts || !(o.y1 > 6)) continue;
+    if (pointIn(o.pts, X, Y)) return 0;
+    for (let i = 0; i < o.pts.length; i++) { const a = o.pts[i], b = o.pts[(i + 1) % o.pts.length], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1e-9,
+      t = Math.max(0, Math.min(1, ((X - a[0]) * dx + (Y - a[1]) * dy) / L2)); d = Math.min(d, Math.hypot(X - (a[0] + dx * t), Y - (a[1] + dy * t)) * IN2M); }
+  }
+  return d;
+}
+function blocksView(x, z) {                             // eye-height sightline stops at walls, doorways, windows, tall furniture
+  for (const c of colliders) {
+    const dx = c.bx - c.ax, dz = c.bz - c.az, L2 = dx * dx + dz * dz || 1e-9, t = Math.max(0, Math.min(1, ((x - c.ax) * dx + (z - c.az) * dz) / L2));
+    if (Math.hypot(x - (c.ax + dx * t), z - (c.az + dz * t)) < c.hw + 0.03) return true;
+  }
+  const X = x / IN2M, Y = -z / IN2M;
+  for (const o of rawOps) {                             // openings: the view stays inside the room
+    const dx = o.b[0] - o.a[0], dy = o.b[1] - o.a[1], L2 = dx * dx + dy * dy || 1e-9, t = Math.max(0, Math.min(1, ((X - o.a[0]) * dx + (Y - o.a[1]) * dy) / L2));
+    if (Math.hypot(X - (o.a[0] + dx * t), Y - (o.a[1] + dy * t)) < (o.thick || 5) / 2 + 1) return true;
+  }
+  for (const o of rawObjs) if (o.pts && (o.y1 > 66 || o.how === 'shower') && pointIn(o.pts, X, Y)) return true;
+  return false;
+}
+function sight(x, z, fx, fz) { let s = 0; while (s < 15 && !blocksView(x + fx * (s + 0.08), z + fz * (s + 0.08))) s += 0.08; return s; }
+function floorGrid(x0, z0) {                            // 14 m of 10 cm cells around a point: what blocks the view, + flood fill
+  const C = 0.1, R = 70, N = 2 * R + 1, blk = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) blk[j * N + i] = blocksView(x0 + (i - R) * C, z0 + (j - R) * C) ? 1 : 0;
+  let s0 = R * N + R;                                   // start at the point (or the nearest open cell)
+  if (blk[s0]) { let bd = 1e9; for (let k = 0; k < N * N; k++) if (!blk[k]) { const d = Math.hypot(k % N - R, Math.floor(k / N) - R); if (d < bd) { bd = d; s0 = k; } } }
+  const flood = mine => { const m = new Uint8Array(N * N), q = [s0]; m[s0] = 1;
+    while (q.length) { const k = q.pop(), i = k % N, j = (k - i) / N;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj, kk = b * N + a;
+        if (a >= 0 && b >= 0 && a < N && b < N && !m[kk] && !blk[kk] && mine(a, b)) { m[kk] = 1; q.push(kk); } } }
+    return m; };
+  const near = (m, i, j) => { for (let dj = -6; dj <= 6; dj++) for (let di = -6; di <= 6; di++) { const a = i + di, b = j + dj;   // on this floor (labels can sit on shelving)
+    if (a >= 0 && b >= 0 && a < N && b < N && m[b * N + a]) return true; } return false; };
+  return { C, R, N, blk, flood, near };
+}
+function roomAt(x, z) {                                 // the room you're standing in: the nearest name on your stretch of floor
+  const { C, R, N, flood, near } = floorGrid(x, z), open = flood(() => true);
+  let best = null, bd = 1e9;
+  for (const r of linkRooms()) { const i = Math.round((wx(r.at[0]) - x) / C + R), j = Math.round((wz(r.at[1]) - z) / C + R);
+    if (!near(open, i, j)) continue;
+    const d = Math.hypot(i - R, j - R); if (d < bd) { bd = d; best = r; } }
+  if (best) return best;
+  for (const r of linkRooms()) { const d = Math.hypot(wx(r.at[0]) - x, wz(r.at[1]) - z); if (d < bd) { bd = d; best = r; } }
+  return best;
+}
+function roomSpot(r) {        // fixed spot + heading: of the room's clear floor, where you see the most of it (deterministic)
+  const x0 = wx(r.at[0]), z0 = wz(r.at[1]), { C, R, N, flood, near } = floorGrid(x0, z0);
+  // the room: open floor reachable without passing an opening, and nearer this room's name than any other's (open plans)
+  const open = flood(() => true);
+  const others = linkRooms().filter(o => o !== r).map(o => [Math.round((wx(o.at[0]) - x0) / C + R), Math.round((wz(o.at[1]) - z0) / C + R)])
+    .filter(([a, b]) => a < -6 || b < -6 || a >= N + 6 || b >= N + 6 || near(open, a, b));   // far names count too
+  const inRoom = others.length ? flood((i, j) => { const d = Math.hypot(i - R, j - R); return others.every(([a, b]) => Math.hypot(i - a, j - b) >= d); }) : open;
+  let cx = 0, cz = 0, cn = 0; for (let k = 0; k < N * N; k++) if (inRoom[k]) { cx += k % N; cz += Math.floor(k / N); cn++; }
+  cx /= cn; cz /= cn;                                   // the room's middle: face into the room, not out of it
+  const small = cn < 700;                               // a bath or closet: every spot is close to a wall
+  const cell = (x, z) => [Math.round((x - x0) / C + R), Math.round((z - z0) / C + R)];
+  const nearRoom = (i, j) => { for (let dj = -4; dj <= 4; dj++) for (let di = -4; di <= 4; di++) { const a = i + di, b = j + dj;
+    if (a >= 0 && b >= 0 && a < N && b < N && inRoom[b * N + a]) return true; } return false; };
+  const things = rawObjs.filter(o => o.pts && o.y1 > 6).map(o => cell(wx(o.cx), wz(o.cy))).filter(([i, j]) => nearRoom(i, j));   // what's in the room
+  const cands = [];
+  for (let j = 2; j < N; j += 4) for (let i = 2; i < N; i += 4) if (inRoom[j * N + i]) cands.push([i, j]);
+  for (const o of rawOps) { if (o.kind === 'window') continue;                   // just inside each doorway
+    for (const sd of [1, -1]) { const d = ((o.thick || 5) / 2 + 14) * sd, c = cell(wx(o.mid[0] - o.uy * d), wz(o.mid[1] + o.ux * d));
+      if (c[0] >= 0 && c[1] >= 0 && c[0] < N && c[1] < N && inRoom[c[1] * N + c[0]]) cands.push(c); } }
+  const see = (i, j, fx, fz) => { let s = 0; for (; s < 80; s++) { const a = Math.round(i + fx * s), b = Math.round(j + fz * s);
+    if (a < 0 || b < 0 || a >= N || b >= N || !inRoom[b * N + a]) break; } return s * C; };   // seeing this room, not the next
+  let best = null;
+  for (const need of [0.5, 0.35, 0.2]) {
+    for (const [i, j] of cands) {
+      const x = x0 + (i - R) * C, z = z0 + (j - R) * C, cl = clearance(x, z); if (!(cl > need)) continue;
+      for (let k = 0; k < 16; k++) { const yaw = k / 16 * Math.PI * 2, fx = Math.sin(yaw), fz = Math.cos(yaw);
+        let v = 0; for (const [da, w] of [[0, 2], [-0.4, 1.5], [0.4, 1.5], [-0.8, 1], [0.8, 1]]) v += w * Math.min(8, see(i, j, Math.sin(yaw + da), Math.cos(yaw + da)));
+        v += 2 * Math.min(0.8, cl - 0.35);              // elbow room
+        const mx = cx - i, mz = cz - j, md = Math.hypot(mx, mz);
+        if (md > 3) v += 3 * (fx * mx + fz * mz) / md;  // facing into the room
+        for (const [a, b] of things) { const dx = a - i, dz = b - j, dd = Math.hypot(dx, dz);   // the room's things in view
+          if (dd > 6 && (fx * dx + fz * dz) / dd > 0.82) v += small ? 4 : 1; }
+        if (!best || v > best.v + 0.01) best = { x, z, yaw, v }; }
+    }
+    if (best) break;
+  }
+  return best ? [best.x, best.z, best.yaw, small ? -0.3 : 0] : [x0, z0];   // small rooms: tilted down, fixtures sit low
+}
+function longestView(x, z) {                            // the heading with the longest clear sightline (16 headings)
+  let best = -1, bestYaw = 0;
+  for (let k = 0; k < 16; k++) { const yaw = k / 16 * Math.PI * 2, v = sight(x, z, Math.sin(yaw), Math.cos(yaw)); if (v > best + 0.05) { best = v; bestYaw = yaw; } }
+  return bestYaw;
+}
+const planYaw = deg => Math.atan2(Math.sin(deg * Math.PI / 180), -Math.cos(deg * Math.PI / 180));   // compass° → walker yaw
+const yawDeg = yaw => ((Math.atan2(Math.sin(yaw), -Math.cos(yaw)) * 180 / Math.PI) + 360) % 360;
+function linkNote(text) {
+  const el = document.getElementById('hint'); if (!el) return;
+  el.dataset.orig = el.dataset.orig || el.innerHTML; el.innerHTML = text;
+  setTimeout(() => { if (el.dataset.orig) el.innerHTML = el.dataset.orig; }, 9000);
+}
+function setWalk(on) {                                  // like the 🚶 button, without grabbing the mouse (no click yet)
+  if (on === (mode === 'walk')) return;
+  if (on) { mode = 'walk'; modeBtn.textContent = '🎥 orbit'; modeBtn.style.background = '#5a6474'; walker.y = groundAt(walker.x, walker.z) + 1.62; }
+  else { mode = 'orbit'; modeBtn.textContent = '🚶 walk'; modeBtn.style.background = '#2b6cb0'; if (document.exitPointerLock) document.exitPointerLock(); place(); }
+}
+function applyLink() {
+  if (linkApplied.done) return; linkApplied.done = true;
+  const L = LINK, on = v => v != null && !/^(0|false|off|no)$/i.test(v);
+  const notes = [];
+  if (L.plan && !planFromLink(L.plan)) notes.push(`no plan “${L.plan}” — showing ${PLANS[0].name}`);
+  if (L.hide && rawMode) {
+    const want = L.hide.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    let n = 0; for (const Ly of rawLayers) if (want.some(w => Ly.name.toUpperCase() === w || Ly.name.toUpperCase().endsWith(w))) { Ly.on = false; n++; }
+    if (n) { renderLayerPanel(); buildRaw(); }
+  }
+  if (on(L.colors) && rawMode && typeof srcBtn !== 'undefined' && !srcColors) srcBtn.click();
+  if (on(L.dims) && typeof dimBtn !== 'undefined' && !window.__dimsDesk) dimBtn.click();
+  if (L.fp != null) { floorPlanOn = on(L.fp); if (floorPlanGroup) floorPlanGroup.visible = floorPlanShown(); }
+  if (L.doors && /open/i.test(L.doors)) for (const d of doors) if (!d.open) toggleDoor(d.key);
+  if (L.panel != null) { const p = document.getElementById('panel'); if (p && p.classList.contains('collapsed') === on(L.panel)) document.getElementById('panelHead').click(); }
+  // where to stand
+  let spot = null, room = null;
+  if (L.at) { const [x, y] = L.at.split(',').map(Number); if (isFinite(x) && isFinite(y)) spot = [wx(x), wz(y)]; else notes.push(`couldn’t read at=${L.at}`); }
+  if (L.room) { room = findRoom(L.room); if (!room) notes.push(`no room “${L.room}” on this plan (${[...new Set(linkRooms().map(r => r.name.toLowerCase()))].join(', ')})`); else if (!spot) spot = roomSpot(room); }
+  if (spot) {
+    walker.x = spot[0]; walker.z = spot[1]; walker.y = groundAt(walker.x, walker.z) + 1.62;
+    walker.yaw = L.yaw != null && isFinite(+L.yaw) ? planYaw(+L.yaw) : spot[2] != null ? spot[2] : longestView(walker.x, walker.z);
+    walker.pitch = L.pitch != null && isFinite(+L.pitch) ? Math.max(-1.3, Math.min(1.3, +L.pitch * Math.PI / 180)) : spot[3] != null ? spot[3] : 0;
+  }
+  if (spot && !L.cam) { target.set(spot[0], 1.2, spot[1]); dist = 9; place(); }   // orbit / 2D around the room too
+  if (L.cam) {
+    const c = L.cam.split(',').map(Number);
+    if (isFinite(c[0])) az = c[0] * Math.PI / 180;
+    if (isFinite(c[1])) pol = Math.max(0.15, Math.min(1.45, (90 - c[1]) * Math.PI / 180));
+    if (isFinite(c[2])) dist = Math.max(1, c[2] * 0.3048);
+    if (isFinite(c[3]) && isFinite(c[4])) target.set(wx(c[3]), target.y, wz(c[4]));
+    place();
+  }
+  const view = (L.view || (spot ? 'walk' : 'orbit')).toLowerCase();
+  if (view === '2d') { if (!view2D) twoDBtn.click(); }
+  else setWalk(view === 'walk');
+  if (view === 'walk' && !IS_TOUCH) notes.push((room ? `in the ${room.name.toLowerCase()} — ` : '') + 'click the view to look around · WASD to walk');
+  if (notes.length) linkNote(notes.join(' · '));
+}
+// the share link: current plan + view + settings; in walk mode, the room you're in (its fixed spot) or this exact spot
+function linkFor(exact) {
+  const p = PLANS.find(p => p.src === DXF), q = new URLSearchParams();
+  if (p) q.set('plan', planSlug(p));
+  const view = view2D ? '2d' : mode === 'walk' ? 'walk' : 'orbit';
+  if (mode === 'walk' && !view2D) {
+    const X = walker.x / IN2M, Y = -walker.z / IN2M;
+    if (exact) { q.set('at', `${Math.round(X)},${Math.round(Y)}`); q.set('yaw', String(Math.round(yawDeg(walker.yaw)))); if (Math.abs(walker.pitch) > 0.05) q.set('pitch', String(Math.round(walker.pitch * 180 / Math.PI))); }
+    else {
+      const rooms = linkRooms().slice().sort((a, b) => a.at[0] - b.at[0] || b.at[1] - a.at[1]);
+      const best = roomAt(walker.x, walker.z);
+      if (best) { const same = rooms.filter(r => r.name === best.name); const nm = best.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        q.set('room', same.length > 1 ? `${nm}-${same.indexOf(best) + 1}` : nm); }
+    }
+  } else if (view === 'orbit') q.set('cam', [Math.round(az * 180 / Math.PI), Math.round(90 - pol * 180 / Math.PI), Math.round(dist / 0.3048), Math.round(target.x / IN2M), Math.round(-target.z / IN2M)].join(','));
+  q.set('view', view);
+  if (window.__dimsDesk) q.set('dims', '1');
+  if (srcColors) q.set('colors', '1');
+  const off = rawLayers.filter(L => !L.on).map(L => L.name); if (off.length) q.set('hide', off.join(','));
+  if (doors.length && doors.every(d => d.open)) q.set('doors', 'open');
+  return location.origin + location.pathname + '?' + q.toString().replace(/%2C/g, ',');
+}
+loadPlan(startPlanSrc());
 
 // ---------------------------------------------------------------- walk mode
 let mode = 'orbit';
@@ -3002,6 +3210,51 @@ const dimBtn = document.createElement('button');
 dimBtn.textContent = '📏 dims'; dimBtn.className = 'hud-btn'; dimBtn.style.background = '#4a5568';
 dimBtn.title = 'room widths + depths (wall face to face) and doorway widths, drawn on the floor';
 hud.appendChild(dimBtn);
+// 🔗 share — a link that opens this plan, in this room (its fixed spot) or at this exact spot, with this view
+const shareBtn = document.createElement('button');
+shareBtn.textContent = '🔗 share'; shareBtn.className = 'hud-btn'; shareBtn.style.background = '#4a5568';
+shareBtn.title = 'copy a link that opens this plan, room and view';
+hud.appendChild(shareBtn);
+const sharePop = document.createElement('div');
+sharePop.id = 'sharepop';
+sharePop.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;background:#1d2330;color:#e8edf5;' +
+  'border:1px solid #3a4658;border-radius:10px;padding:14px 16px;width:min(560px,calc(100vw - 32px));box-sizing:border-box;' +
+  'font:13px system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5);display:none';
+document.body.appendChild(sharePop);
+function shareRow(label, url) {
+  const row = document.createElement('div'); row.style.cssText = 'margin:8px 0';
+  const t = document.createElement('div'); t.textContent = label; t.style.cssText = 'margin-bottom:4px;color:#a9b6c9';
+  const box = document.createElement('div'); box.style.cssText = 'display:flex;gap:6px';
+  const inp = document.createElement('input'); inp.readOnly = true; inp.value = url;
+  inp.style.cssText = 'flex:1;min-width:0;background:#0f141c;color:#e8edf5;border:1px solid #3a4658;border-radius:6px;padding:6px 8px;font:12px ui-monospace,monospace';
+  inp.onfocus = () => inp.select();
+  const b = document.createElement('button'); b.textContent = 'copy'; b.className = 'hud-btn'; b.style.background = '#2b6cb0';
+  b.onclick = () => {
+    const ok = () => { b.textContent = 'copied ✓'; setTimeout(() => { b.textContent = 'copy'; }, 1500); };
+    inp.focus(); inp.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(ok, () => { try { document.execCommand('copy'); ok(); } catch (e) {} });
+    else { try { document.execCommand('copy'); ok(); } catch (e) {} }
+  };
+  box.append(inp, b); row.append(t, box); return row;
+}
+function openShare() {
+  sharePop.innerHTML = '';
+  const h = document.createElement('div'); h.innerHTML = '<b>Share a link</b> — opens this plan and view for anyone with the link';
+  sharePop.appendChild(h);
+  const walking = mode === 'walk' && !view2D;
+  if (walking) {
+    sharePop.appendChild(shareRow('this room (its fixed starting spot)', linkFor(false)));
+    sharePop.appendChild(shareRow('this exact spot + direction', linkFor(true)));
+  } else sharePop.appendChild(shareRow(view2D ? 'this plan, 2D' : 'this plan + camera', linkFor(false)));
+  const tip = document.createElement('div'); tip.style.cssText = 'margin-top:6px;color:#8593a8;font-size:12px';
+  tip.textContent = walking ? 'Links include dims / colours / hidden layers / open doors as they are now.' : 'Tip: 🚶 walk into a room first to share a link that starts there.';
+  const close = document.createElement('button'); close.textContent = 'close'; close.className = 'hud-btn'; close.style.cssText = 'background:#4a5568;margin-top:8px;float:right';
+  close.onclick = () => { sharePop.style.display = 'none'; };
+  sharePop.append(tip, close);
+  sharePop.style.display = 'block';
+}
+shareBtn.onclick = () => { if (document.pointerLockElement) document.exitPointerLock(); if (sharePop.style.display === 'block') sharePop.style.display = 'none'; else openShare(); };
+addEventListener('keydown', e => { if (e.code === 'Escape') sharePop.style.display = 'none'; });
 dimBtn.onclick = () => { window.__dimsDesk = !window.__dimsDesk; dimBtn.classList.toggle('on', window.__dimsDesk);
   dimBtn.style.background = window.__dimsDesk ? '#2b6cb0' : '#4a5568'; if (dimGroup) dimGroup.visible = dimsShown(); };
 srcBtn.onclick = () => { srcColors = !srcColors; srcBtn.classList.toggle('on', srcColors);
@@ -4089,7 +4342,7 @@ renderer.setAnimationLoop((t) => {
   doorTick(dt);
   renderer.render(scene, renderer.xr.isPresenting ? camera : (view2D ? oCam : camera));
 });
-window.__V2 = { rebuild: build, on, walker, groundAt, colliders, dolly,
+window.__V2 = { rebuild: build, on, walker, LINK, applyLink, linkFor, findRoom, planSlug, roomSpot, roomAt, linkRooms, openShare, groundAt, colliders, dolly,
   doors: () => doors.map(d => ({ key: d.key, open: d.open })), toggleDoor,
   fixtures: () => fixtures.map(f => ({ key: f.key, name: f.name })),
   fixtureColliders: () => fixtureColliders, commitFixture, assetsForFixture, openFixtureMenu,
