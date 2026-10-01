@@ -2643,15 +2643,6 @@ const PLANS = [
   { name: 'Home Reno (2026 rev) — second floor', src: './plans/home-rev-l2-raw.dxf', raw: true },
   { name: 'Home Reno (2026 rev) — second floor rev 1', src: './plans/home-rev-l2r1-raw.dxf', raw: true },
   { name: 'Home Reno (2026 rev) — second floor rev 2', src: './plans/home-rev-l2r2-raw.dxf', raw: true },
-  { name: 'Sample House',            src: './sample-house.dxf' },
-  { name: 'Reno 1 — raw DXF',        src: './plans/home-l1-raw.dxf', raw: true },
-  { name: 'Big Laundry — raw DXF',   src: './plans/home-l1-biglaundry-raw.dxf', raw: true },
-  { name: 'Big Laundry — full walls', src: './plans/home-l1-biglaundry-full.dxf', raw: true },
-  { name: 'Reno 1 — processed 3D',   src: './plans/home-l1.dxf',
-    spawn: { px: -17.9, py: -258.3, yaw: 0.24 },
-    underlay: { file: 'home-l1.png', x0: -780.55, y1: 268.9, in_per_px: 0.48 } },
-  { name: 'Big Laundry — processed 3D', src: './plans/home-l1-biglaundry.dxf',
-    spawn: { px: 0.1, py: -254.8, yaw: 0.18 } },
 ];
 function framePlan(spawn) {                     // fit orbit to the plan + set walk spawn
   let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
